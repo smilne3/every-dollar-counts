@@ -1,4 +1,4 @@
-# Haus Milne Budget — Implementation Plan
+# Every Dollar Counts — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -41,7 +41,7 @@ Load-bearing code (Supabase clients, the auth proxy, RLS SQL, all Plaid calls, s
 ## File Structure
 
 ```
-haus-milne-budget/
+every-dollar-counts/
   app/
     layout.tsx  page.tsx  globals.css
     login/page.tsx                         # magic-link form (Client Component)
@@ -246,7 +246,7 @@ export default function Login() {
   if (sent) return <p className="p-8">Check your email for a login link.</p>
   return (
     <form onSubmit={send} className="mx-auto mt-24 flex max-w-sm flex-col gap-3 p-6">
-      <h1 className="text-xl font-semibold">Haus Milne Budget</h1>
+      <h1 className="text-xl font-semibold">Every Dollar Counts</h1>
       <input className="rounded border p-2" type="email" required placeholder="you@email.com"
         value={email} onChange={e => setEmail(e.target.value)} />
       <button className="rounded bg-black p-2 text-white">Email me a login link</button>
@@ -490,7 +490,7 @@ export async function POST() {
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   const r = await plaidClient.linkTokenCreate({
     user: { client_user_id: user.id },
-    client_name: 'Haus Milne Budget',
+    client_name: 'Every Dollar Counts',
     products: ['transactions'],
     language: 'en',
     country_codes: ['US'],
