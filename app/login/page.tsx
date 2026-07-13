@@ -22,8 +22,18 @@ export default function LoginPage() {
       },
     })
     setLoading(false)
-    if (error) setErr('That email is not invited to a household yet.')
-    else setSent(true)
+    if (error) {
+      const status = (error as { status?: number }).status
+      if (status === 429 || /rate limit/i.test(error.message)) {
+        setErr('Too many login emails in a short time. Please wait a few minutes and try again.')
+      } else if (/not allowed|signups? not allowed|not authorized/i.test(error.message)) {
+        setErr('That email is not invited to a household yet.')
+      } else {
+        setErr(error.message || 'Sorry, we could not send your login link. Please try again.')
+      }
+    } else {
+      setSent(true)
+    }
   }
 
   if (sent) {
