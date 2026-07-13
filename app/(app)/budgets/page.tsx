@@ -9,6 +9,8 @@ export default async function BudgetsPage() {
 
   const now = new Date()
   const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+  const next = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+  const nextMonthStart = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-01`
 
   const { data: cats } = await supabase
     .from('categories')
@@ -24,6 +26,7 @@ export default async function BudgetsPage() {
     .select('amount, date, user_category, pfc_primary')
     .eq('removed', false)
     .gte('date', monthStart)
+    .lt('date', nextMonthStart)
   const { data: budgets } = await supabase.from('budgets').select('category, monthly_limit')
 
   const spend = spendByCategory(txns ?? [], pfcMap, nonSpending)
