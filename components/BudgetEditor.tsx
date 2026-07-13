@@ -2,22 +2,22 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { CATEGORIES, label } from '@/lib/categories'
-import { NON_SPENDING, progress } from '@/lib/budget'
+import { progress } from '@/lib/budget'
 import { money } from '@/lib/format'
 
 export function BudgetEditor({
+  categoryNames,
   initialLimits,
   spend,
 }: {
+  categoryNames: string[]
   initialLimits: Record<string, number>
   spend: Record<string, number>
 }) {
   const router = useRouter()
-  const cats = CATEGORIES.filter((c) => !NON_SPENDING.has(c))
   const [limits, setLimits] = useState<Record<string, string>>(() => {
     const o: Record<string, string> = {}
-    for (const c of cats) o[c] = initialLimits[c] ? String(initialLimits[c]) : ''
+    for (const c of categoryNames) o[c] = initialLimits[c] ? String(initialLimits[c]) : ''
     return o
   })
   const [saving, setSaving] = useState(false)
@@ -26,7 +26,7 @@ export function BudgetEditor({
   async function save() {
     setSaving(true)
     setSaved(false)
-    const items = cats.map((c) => ({ category: c, monthly_limit: Number(limits[c] || 0) }))
+    const items = categoryNames.map((c) => ({ category: c, monthly_limit: Number(limits[c] || 0) }))
     await fetch('/api/budgets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -40,7 +40,7 @@ export function BudgetEditor({
   return (
     <div className="space-y-3">
       <div>
-        {cats.map((c) => {
+        {categoryNames.map((c) => {
           const s = spend[c] ?? 0
           const lim = Number(limits[c] || 0)
           const { ratio, over } = progress(s, lim)
@@ -52,7 +52,7 @@ export function BudgetEditor({
               className="grid grid-cols-[1fr_auto_110px] items-center gap-3 border-b py-2"
             >
               <div className="min-w-0">
-                <div className="text-sm font-medium">{label(c)}</div>
+                <div className="text-sm font-medium">{c}</div>
                 <div className="mt-1 h-1.5 w-full max-w-xs rounded bg-gray-200">
                   <div
                     className={`h-1.5 rounded ${barColor}`}

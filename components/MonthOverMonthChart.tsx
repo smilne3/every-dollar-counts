@@ -1,7 +1,6 @@
 'use client'
 
 import { BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts'
-import { label } from '@/lib/categories'
 
 export function MonthOverMonthChart({
   data,
@@ -9,7 +8,7 @@ export function MonthOverMonthChart({
   data: { category: string; thisMonth: number; lastMonth: number }[]
 }) {
   const rows = data.map((d) => ({
-    name: label(d.category),
+    name: d.category,
     This: Math.round(d.thisMonth * 100) / 100,
     Last: Math.round(d.lastMonth * 100) / 100,
   }))

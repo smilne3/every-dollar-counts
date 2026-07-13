@@ -1,10 +1,9 @@
 'use client'
 
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
-import { label } from '@/lib/categories'
 
 export function SpendByCategoryChart({ data }: { data: { category: string; amount: number }[] }) {
-  const rows = data.map((d) => ({ name: label(d.category), amount: Math.round(d.amount * 100) / 100 }))
+  const rows = data.map((d) => ({ name: d.category, amount: Math.round(d.amount * 100) / 100 }))
   return (
     <div style={{ width: '100%', height: Math.max(200, rows.length * 40) }}>
       <ResponsiveContainer>

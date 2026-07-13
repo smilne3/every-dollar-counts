@@ -1,21 +1,41 @@
 import { describe, it, expect } from 'vitest'
-import { CATEGORIES, CATEGORY_LABELS, label } from '@/lib/categories'
+import {
+  DEFAULT_CATEGORIES,
+  pfcToName,
+  spendingCategoryNames,
+  nonSpendingNames,
+  type Category,
+} from '@/lib/categories'
+
+const cats: Category[] = [
+  ...DEFAULT_CATEGORIES.map((d, i) => ({
+    id: String(i),
+    name: d.name,
+    pfc_primary: d.pfc_primary as string | null,
+    sort_order: i,
+  })),
+  { id: '99', name: 'Pets', pfc_primary: null, sort_order: 99 },
+]
 
 describe('categories', () => {
-  it('has all 16 PFC primary categories', () => {
-    expect(CATEGORIES).toHaveLength(16)
+  it('has 16 defaults', () => {
+    expect(DEFAULT_CATEGORIES).toHaveLength(16)
   })
 
-  it('maps a known primary to a friendly label', () => {
-    expect(label('FOOD_AND_DRINK')).toBe('Food & Drink')
+  it('maps a Plaid primary to the household name', () => {
+    expect(pfcToName(cats)['FOOD_AND_DRINK']).toBe('Food & Drink')
+    expect(pfcToName(cats)['GENERAL_MERCHANDISE']).toBe('Shopping')
   })
 
-  it('gives every category a non-empty label', () => {
-    for (const c of CATEGORIES) expect(CATEGORY_LABELS[c]).toBeTruthy()
+  it('spending names exclude income/transfers, include custom', () => {
+    const names = spendingCategoryNames(cats)
+    expect(names).not.toContain('Income')
+    expect(names).not.toContain('Transfer In')
+    expect(names).toContain('Food & Drink')
+    expect(names).toContain('Pets')
   })
 
-  it('handles null/unknown gracefully', () => {
-    expect(label(null)).toBe('Uncategorized')
-    expect(label('WEIRD_NEW_CAT')).toBe('WEIRD_NEW_CAT')
+  it('non-spending names are just income/transfers', () => {
+    expect(nonSpendingNames(cats)).toEqual(new Set(['Income', 'Transfer In', 'Transfer Out']))
   })
 })

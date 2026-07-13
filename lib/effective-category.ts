@@ -1,8 +1,10 @@
-// A transaction's effective category is the user's override if present,
-// otherwise Plaid's PFC primary. Budgets and Trends group on this.
-export function effectiveCategory(t: {
-  user_category: string | null
-  pfc_primary: string | null
-}): string {
-  return t.user_category ?? t.pfc_primary ?? 'GENERAL_MERCHANDISE'
+// A transaction's effective category NAME: the user's override if set, otherwise
+// the household category mapped from Plaid's PFC primary, else 'Uncategorized'.
+export function effectiveCategory(
+  t: { user_category: string | null; pfc_primary: string | null },
+  pfcToName: Record<string, string>
+): string {
+  if (t.user_category) return t.user_category
+  if (t.pfc_primary && pfcToName[t.pfc_primary]) return pfcToName[t.pfc_primary]
+  return 'Uncategorized'
 }

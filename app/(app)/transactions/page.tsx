@@ -1,5 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { TransactionRow } from '@/components/TransactionRow'
+import { effectiveCategory } from '@/lib/effective-category'
+import { pfcToName, type Category } from '@/lib/categories'
 
 export default async function TransactionsPage({
   searchParams,
@@ -7,13 +9,20 @@ export default async function TransactionsPage({
   searchParams: Promise<{ q?: string }>
 }) {
   const { q } = await searchParams
-  // Strip characters that could break the PostgREST filter (defense against injection).
   const safe = (q ?? '').replace(/[,()%*]/g, ' ').trim()
 
   const supabase = await createClient()
+  const { data: cats } = await supabase
+    .from('categories')
+    .select('id, name, pfc_primary, sort_order')
+    .order('sort_order')
+  const categories = (cats ?? []) as Category[]
+  const pfcMap = pfcToName(categories)
+  const categoryOptions = categories.map((c) => c.name)
+
   let query = supabase
     .from('transactions')
-    .select('*')
+    .select('id, name, merchant_name, amount, date, user_category, pfc_primary')
     .eq('removed', false)
     .order('date', { ascending: false })
     .limit(200)
@@ -50,7 +59,12 @@ export default async function TransactionsPage({
             </thead>
             <tbody>
               {list.map((t) => (
-                <TransactionRow key={t.id} t={t} />
+                <TransactionRow
+                  key={t.id}
+                  t={t}
+                  categoryName={effectiveCategory(t, pfcMap)}
+                  categoryOptions={categoryOptions}
+                />
               ))}
             </tbody>
           </table>

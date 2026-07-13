@@ -1,6 +1,15 @@
 import { describe, it, expect } from 'vitest'
 import { spendByCategory, progress, spendThisVsLast, monthKey } from '@/lib/budget'
 
+const pfcMap: Record<string, string> = {
+  FOOD_AND_DRINK: 'Food & Drink',
+  TRANSPORTATION: 'Transportation',
+  INCOME: 'Income',
+  TRANSFER_OUT: 'Transfer Out',
+  ENTERTAINMENT: 'Entertainment',
+}
+const nonSpending = new Set(['Income', 'Transfer In', 'Transfer Out'])
+
 const t = (amount: number, date: string, pfc: string, override: string | null = null) => ({
   amount,
   date,
@@ -9,31 +18,43 @@ const t = (amount: number, date: string, pfc: string, override: string | null = 
 })
 
 describe('spendByCategory', () => {
-  it('sums outflows per effective category', () => {
-    const r = spendByCategory([
-      t(12, '2026-07-10', 'FOOD_AND_DRINK'),
-      t(4.33, '2026-07-10', 'FOOD_AND_DRINK'),
-      t(5.4, '2026-07-13', 'TRANSPORTATION'),
-    ])
-    expect(r.FOOD_AND_DRINK).toBeCloseTo(16.33)
-    expect(r.TRANSPORTATION).toBeCloseTo(5.4)
+  it('sums outflows per effective category name', () => {
+    const r = spendByCategory(
+      [
+        t(12, '2026-07-10', 'FOOD_AND_DRINK'),
+        t(4.33, '2026-07-10', 'FOOD_AND_DRINK'),
+        t(5.4, '2026-07-13', 'TRANSPORTATION'),
+      ],
+      pfcMap,
+      nonSpending
+    )
+    expect(r['Food & Drink']).toBeCloseTo(16.33)
+    expect(r['Transportation']).toBeCloseTo(5.4)
   })
 
-  it('ignores inflows (amount <= 0) and income/transfers', () => {
-    const r = spendByCategory([
-      t(-500, '2026-07-11', 'INCOME'),
-      t(1000, '2026-07-12', 'TRANSFER_OUT'),
-      t(20, '2026-07-12', 'ENTERTAINMENT'),
-    ])
-    expect(r.INCOME).toBeUndefined()
-    expect(r.TRANSFER_OUT).toBeUndefined()
-    expect(r.ENTERTAINMENT).toBe(20)
+  it('ignores inflows and income/transfers', () => {
+    const r = spendByCategory(
+      [
+        t(-500, '2026-07-11', 'INCOME'),
+        t(1000, '2026-07-12', 'TRANSFER_OUT'),
+        t(20, '2026-07-12', 'ENTERTAINMENT'),
+      ],
+      pfcMap,
+      nonSpending
+    )
+    expect(r['Income']).toBeUndefined()
+    expect(r['Transfer Out']).toBeUndefined()
+    expect(r['Entertainment']).toBe(20)
   })
 
-  it('honors a user re-categorization', () => {
-    const r = spendByCategory([t(12, '2026-07-10', 'FOOD_AND_DRINK', 'ENTERTAINMENT')])
-    expect(r.ENTERTAINMENT).toBe(12)
-    expect(r.FOOD_AND_DRINK).toBeUndefined()
+  it('honors a user re-categorization (by name)', () => {
+    const r = spendByCategory(
+      [t(12, '2026-07-10', 'FOOD_AND_DRINK', 'Entertainment')],
+      pfcMap,
+      nonSpending
+    )
+    expect(r['Entertainment']).toBe(12)
+    expect(r['Food & Drink']).toBeUndefined()
   })
 })
 
@@ -50,10 +71,12 @@ describe('spendThisVsLast', () => {
     const r = spendThisVsLast(
       [t(10, '2026-07-05', 'FOOD_AND_DRINK'), t(30, '2026-06-20', 'FOOD_AND_DRINK')],
       '2026-07',
-      '2026-06'
+      '2026-06',
+      pfcMap,
+      nonSpending
     )
-    expect(r.thisMonth.FOOD_AND_DRINK).toBe(10)
-    expect(r.lastMonth.FOOD_AND_DRINK).toBe(30)
+    expect(r.thisMonth['Food & Drink']).toBe(10)
+    expect(r.lastMonth['Food & Drink']).toBe(30)
   })
 })
 

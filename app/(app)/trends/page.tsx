@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { spendByCategory, spendThisVsLast, monthKey } from '@/lib/budget'
+import { pfcToName, nonSpendingNames, type Category } from '@/lib/categories'
 import { SpendByCategoryChart } from '@/components/SpendByCategoryChart'
 import { MonthOverMonthChart } from '@/components/MonthOverMonthChart'
 
@@ -11,6 +12,14 @@ export default async function TrendsPage() {
   const lastDate = new Date(now.getFullYear(), now.getMonth() - 1, 1)
   const lastM = `${lastDate.getFullYear()}-${String(lastDate.getMonth() + 1).padStart(2, '0')}`
 
+  const { data: cats } = await supabase
+    .from('categories')
+    .select('id, name, pfc_primary, sort_order')
+    .order('sort_order')
+  const categories = (cats ?? []) as Category[]
+  const pfcMap = pfcToName(categories)
+  const nonSpending = nonSpendingNames(categories)
+
   const { data: txns } = await supabase
     .from('transactions')
     .select('amount, date, user_category, pfc_primary')
@@ -18,14 +27,18 @@ export default async function TrendsPage() {
     .gte('date', `${lastM}-01`)
   const list = txns ?? []
 
-  const byCat = spendByCategory(list.filter((t) => monthKey(t.date) === thisM))
+  const byCat = spendByCategory(
+    list.filter((t) => monthKey(t.date) === thisM),
+    pfcMap,
+    nonSpending
+  )
   const spendData = Object.entries(byCat)
     .map(([category, amount]) => ({ category, amount }))
     .sort((a, b) => b.amount - a.amount)
 
-  const { thisMonth, lastMonth } = spendThisVsLast(list, thisM, lastM)
-  const cats = Array.from(new Set([...Object.keys(thisMonth), ...Object.keys(lastMonth)]))
-  const momData = cats
+  const { thisMonth, lastMonth } = spendThisVsLast(list, thisM, lastM, pfcMap, nonSpending)
+  const names = Array.from(new Set([...Object.keys(thisMonth), ...Object.keys(lastMonth)]))
+  const momData = names
     .map((category) => ({
       category,
       thisMonth: thisMonth[category] ?? 0,

@@ -2,12 +2,22 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { CATEGORIES, label } from '@/lib/categories'
 
-export function CategoryPicker({ transactionId, value }: { transactionId: string; value: string }) {
+export function CategoryPicker({
+  transactionId,
+  value,
+  options,
+}: {
+  transactionId: string
+  value: string
+  options: string[]
+}) {
   const router = useRouter()
   const [val, setVal] = useState(value)
   const [saving, setSaving] = useState(false)
+
+  // Ensure the current value is selectable even if it's 'Uncategorized' or stale.
+  const opts = options.includes(val) ? options : [val, ...options]
 
   async function change(e: React.ChangeEvent<HTMLSelectElement>) {
     const category = e.target.value
@@ -29,9 +39,9 @@ export function CategoryPicker({ transactionId, value }: { transactionId: string
       disabled={saving}
       className="rounded border px-2 py-1 text-sm disabled:opacity-50"
     >
-      {CATEGORIES.map((c) => (
+      {opts.map((c) => (
         <option key={c} value={c}>
-          {label(c)}
+          {c}
         </option>
       ))}
     </select>
