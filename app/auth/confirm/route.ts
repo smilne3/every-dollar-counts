@@ -1,10 +1,11 @@
 import { type EmailOtpType } from '@supabase/supabase-js'
 import { type NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { ensureHouseholdAccess } from '@/lib/access'
 
-// Handles both auth email flows so it works with Supabase's default templates:
-//  - PKCE code flow (?code=...)        -> exchangeCodeForSession
-//  - token-hash flow (?token_hash&type) -> verifyOtp
+// Handles both auth email flows AND OAuth (Google), then enforces invite-only access:
+//  - PKCE code flow (?code=...)         -> exchangeCodeForSession   [magic link + OAuth]
+//  - token-hash flow (?token_hash&type) -> verifyOtp                [admin-generated links]
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const code = searchParams.get('code')
@@ -14,13 +15,21 @@ export async function GET(request: NextRequest) {
 
   const supabase = await createClient()
 
+  let ok = false
   if (code) {
     const { error } = await supabase.auth.exchangeCodeForSession(code)
-    if (!error) return NextResponse.redirect(new URL(next, request.url))
+    ok = !error
   } else if (token_hash && type) {
     const { error } = await supabase.auth.verifyOtp({ type, token_hash })
-    if (!error) return NextResponse.redirect(new URL(next, request.url))
+    ok = !error
   }
+  if (!ok) return NextResponse.redirect(new URL('/auth/auth-code-error', request.url))
 
-  return NextResponse.redirect(new URL('/auth/auth-code-error', request.url))
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (user && (await ensureHouseholdAccess(user.id, user.email))) {
+    return NextResponse.redirect(new URL(next, request.url))
+  }
+  return NextResponse.redirect(new URL('/auth/not-invited', request.url))
 }

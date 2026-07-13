@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { supabaseAdmin } from '@/lib/supabase/admin'
 
+// Add an email to the household's invite allowlist. They join on their first
+// sign-in (Google or email link) — no invite email is sent.
 export async function POST(req: Request) {
   const { email, household_id } = await req.json()
-  if (!email || !household_id) {
+  const clean = (email ?? '').trim().toLowerCase()
+  if (!clean || !household_id) {
     return NextResponse.json({ error: 'email and household_id required' }, { status: 400 })
   }
 
@@ -23,17 +25,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   }
 
-  const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
-    redirectTo: `${new URL(req.url).origin}/auth/confirm`,
-  })
-  if (error || !data?.user) {
-    return NextResponse.json({ error: error?.message ?? 'invite failed' }, { status: 400 })
-  }
-
-  const { error: mErr } = await supabaseAdmin
-    .from('memberships')
-    .insert({ user_id: data.user.id, household_id })
-  if (mErr) return NextResponse.json({ error: mErr.message }, { status: 400 })
+  const { error } = await supabase
+    .from('invites')
+    .upsert({ email: clean, household_id }, { onConflict: 'email' })
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 
   return NextResponse.json({ ok: true })
 }

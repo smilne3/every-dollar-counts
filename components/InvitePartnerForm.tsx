@@ -18,7 +18,7 @@ export function InvitePartnerForm({ householdId }: { householdId: string }) {
     })
     if (res.ok) {
       setStatus('sent')
-      setMsg(`Invite sent to ${email}.`)
+      setMsg(`${email} can now sign in (with Google or an email link) and will join your household.`)
       setEmail('')
     } else {
       const { error } = await res.json().catch(() => ({ error: 'Something went wrong' }))

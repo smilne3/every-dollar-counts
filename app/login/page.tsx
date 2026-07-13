@@ -9,6 +9,16 @@ export default function LoginPage() {
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(false)
 
+  async function google() {
+    setErr('')
+    const supabase = createClient()
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: `${location.origin}/auth/confirm` },
+    })
+    if (error) setErr(error.message)
+  }
+
   async function send(e: React.FormEvent) {
     e.preventDefault()
     setErr('')
@@ -16,10 +26,7 @@ export default function LoginPage() {
     const supabase = createClient()
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: {
-        emailRedirectTo: `${location.origin}/auth/confirm`,
-        shouldCreateUser: false, // invite-only
-      },
+      options: { emailRedirectTo: `${location.origin}/auth/confirm`, shouldCreateUser: false },
     })
     setLoading(false)
     if (error) {
@@ -46,24 +53,44 @@ export default function LoginPage() {
   }
 
   return (
-    <form onSubmit={send} className="mx-auto mt-24 flex max-w-sm flex-col gap-3 p-6">
-      <h1 className="text-xl font-semibold">Every Dollar Counts</h1>
-      <p className="text-sm text-gray-600">Sign in with a one-time email link.</p>
-      <input
-        className="rounded border p-2"
-        type="email"
-        required
-        placeholder="you@email.com"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-      />
+    <div className="mx-auto mt-24 flex max-w-sm flex-col gap-4 p-6">
+      <div>
+        <h1 className="text-xl font-semibold">Every Dollar Counts</h1>
+        <p className="text-sm text-gray-600">Sign in to your household budget.</p>
+      </div>
+
       <button
-        className="rounded bg-black p-2 text-white disabled:opacity-50"
-        disabled={loading}
+        onClick={google}
+        className="flex items-center justify-center gap-2 rounded border p-2 hover:bg-gray-50"
       >
-        {loading ? 'Sending…' : 'Email me a login link'}
+        <span className="text-lg font-bold text-[#4285F4]">G</span>
+        Continue with Google
       </button>
+
+      <div className="flex items-center gap-3 text-xs text-gray-400">
+        <div className="h-px flex-1 bg-gray-200" />
+        or
+        <div className="h-px flex-1 bg-gray-200" />
+      </div>
+
+      <form onSubmit={send} className="flex flex-col gap-3">
+        <input
+          className="rounded border p-2"
+          type="email"
+          required
+          placeholder="you@email.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+        <button
+          className="rounded bg-black p-2 text-white disabled:opacity-50"
+          disabled={loading}
+        >
+          {loading ? 'Sending…' : 'Email me a login link'}
+        </button>
+      </form>
+
       {err && <p className="text-sm text-red-600">{err}</p>}
-    </form>
+    </div>
   )
 }
