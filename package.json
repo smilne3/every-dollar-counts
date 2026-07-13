@@ -1,0 +1,39 @@
+{
+  "name": "every-dollar-counts",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "test": "vitest",
+    "check:secrets": "! grep -rElq 'NEXT_PUBLIC_(PLAID_SECRET|SUPABASE_SERVICE_ROLE_KEY|TOKEN_ENCRYPTION_KEY)' app lib proxy.ts 2>/dev/null && echo 'secrets ok'"
+  },
+  "dependencies": {
+    "@supabase/ssr": "^0.12.1",
+    "@supabase/supabase-js": "^2.110.3",
+    "next": "16.2.10",
+    "plaid": "^43.0.0",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "react-plaid-link": "^4.1.1",
+    "server-only": "^0.0.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6.0.3",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.10",
+    "jsdom": "^29.1.1",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vite-tsconfig-paths": "^6.1.1",
+    "vitest": "^4.1.10"
+  }
+}
