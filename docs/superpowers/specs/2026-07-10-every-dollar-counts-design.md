@@ -1,4 +1,4 @@
-# Haus Milne Budget — Design Spec
+# Every Dollar Counts — Design Spec
 
 - **Repo:** `smilne3/every-dollar-counts`
 - **Date:** 2026-07-10
