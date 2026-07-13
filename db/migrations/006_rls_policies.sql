@@ -36,3 +36,11 @@ create policy "update your txns" on transactions
   for update to authenticated
   using ( household_id in (select private.household_ids()) )
   with check ( household_id in (select private.household_ids()) );
+
+-- ---- Phase 3: budgets ----
+alter table budgets enable row level security;
+drop policy if exists "manage your budgets" on budgets;
+create policy "manage your budgets" on budgets
+  for all to authenticated
+  using ( household_id in (select private.household_ids()) )
+  with check ( household_id in (select private.household_ids()) );
