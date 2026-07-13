@@ -24,21 +24,22 @@ const { data: h, error: he } = await admin.from('households').insert({ name }).s
 if (he) { console.error('household insert failed:', he.message); process.exit(1) }
 
 let userId
-const { data: u, error: ue } = await admin.auth.admin.inviteUserByEmail(email, {
-  redirectTo: `${site}/auth/confirm`,
+const { data: created, error: ce } = await admin.auth.admin.createUser({
+  email,
+  email_confirm: true, // confirmed, so they can sign in with a magic link right away
 })
-if (ue) {
+if (ce) {
   const { data: list } = await admin.auth.admin.listUsers()
   const found = list?.users.find((x) => x.email?.toLowerCase() === email.toLowerCase())
-  if (!found) { console.error('invite failed:', ue.message); process.exit(1) }
+  if (!found) { console.error('createUser failed:', ce.message); process.exit(1) }
   userId = found.id
   console.log('(user already existed — linking to the new household)')
 } else {
-  userId = u.user.id
+  userId = created.user.id
 }
 
 const { error: me } = await admin.from('memberships').insert({ user_id: userId, household_id: h.id })
 if (me) { console.error('membership insert failed:', me.message); process.exit(1) }
 
 console.log(`✓ Household "${name}" created (${h.id})`)
-console.log(`✓ Invited ${email} — check that inbox for the login link.`)
+console.log(`✓ Account ready for ${email} — sign in at ${site} with a magic link.`)
