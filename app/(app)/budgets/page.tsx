@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { spendByCategory } from '@/lib/budget'
 import { pfcToName, spendingCategoryNames, nonSpendingNames, type Category } from '@/lib/categories'
@@ -31,10 +32,19 @@ export default async function BudgetsPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-semibold">Budgets</h1>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-2xl font-semibold">Budgets</h1>
+        <Link href="/settings" className="rounded border px-3 py-1.5 text-sm hover:bg-gray-50">
+          ✎ Add / rename categories
+        </Link>
+      </div>
       <p className="text-sm text-gray-600">
         Set a monthly limit per category. Bars show this month&apos;s spending against each limit.
-        Manage your categories in Settings.
+        To rename a category or add your own, use{' '}
+        <Link href="/settings" className="underline">
+          Settings → Categories
+        </Link>
+        .
       </p>
       <BudgetEditor categoryNames={categoryNames} initialLimits={initialLimits} spend={spend} />
     </div>

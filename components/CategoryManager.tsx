@@ -9,35 +9,50 @@ export function CategoryManager({ initialCategories }: { initialCategories: Cat[
   const router = useRouter()
   const [newName, setNewName] = useState('')
   const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [err, setErr] = useState('')
 
-  async function call(method: string, body: unknown) {
+  async function call(method: string, body: unknown, okMsg: string) {
     setBusy(true)
-    await fetch('/api/categories', {
+    setMsg('')
+    setErr('')
+    const res = await fetch('/api/categories', {
       method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
     setBusy(false)
-    router.refresh()
+    if (res.ok) {
+      setMsg(okMsg)
+      router.refresh()
+    } else {
+      const e = await res.json().catch(() => ({}))
+      setErr(e.error || 'Something went wrong. Please try again.')
+    }
   }
 
   return (
     <div className="space-y-2">
+      {msg && <p className="text-sm text-green-700">{msg}</p>}
+      {err && <p className="text-sm text-red-600">{err}</p>}
+
       {initialCategories.map((c) => (
         <CategoryRow
           key={c.id}
           cat={c}
           busy={busy}
-          onRename={(name) => call('PATCH', { id: c.id, name })}
-          onDelete={() => call('DELETE', { id: c.id })}
+          onSave={(name) => call('PATCH', { id: c.id, name }, `Renamed to “${name}”.`)}
+          onDelete={() => call('DELETE', { id: c.id }, `Deleted “${c.name}”.`)}
         />
       ))}
+
       <form
-        className="flex max-w-md gap-2 pt-2"
+        className="flex max-w-md gap-2 pt-3"
         onSubmit={(e) => {
           e.preventDefault()
-          if (newName.trim()) {
-            call('POST', { name: newName.trim() })
+          const n = newName.trim()
+          if (n) {
+            call('POST', { name: n }, `Added “${n}”.`)
             setNewName('')
           }
         }}
@@ -59,38 +74,62 @@ export function CategoryManager({ initialCategories }: { initialCategories: Cat[
 function CategoryRow({
   cat,
   busy,
-  onRename,
+  onSave,
   onDelete,
 }: {
   cat: Cat
   busy: boolean
-  onRename: (name: string) => void
+  onSave: (name: string) => void
   onDelete: () => void
 }) {
   const [name, setName] = useState(cat.name)
-  const changed = name.trim() !== cat.name && name.trim().length > 0
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const changed = name.trim().length > 0 && name.trim() !== cat.name
+
+  function save() {
+    if (changed) onSave(name.trim())
+  }
+
   return (
     <div className="flex max-w-md items-center gap-2">
       <input
         value={name}
         onChange={(e) => setName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            save()
+          }
+        }}
         className="flex-1 rounded border p-1.5 text-sm"
       />
       {!cat.pfc_primary && <span className="text-xs text-gray-400">custom</span>}
       <button
         disabled={busy || !changed}
-        onClick={() => onRename(name.trim())}
+        onClick={save}
         className="rounded border px-2 py-1 text-xs disabled:opacity-40"
+        title="Save the new name"
       >
-        Rename
+        Save
       </button>
-      <button
-        disabled={busy}
-        onClick={onDelete}
-        className="rounded border px-2 py-1 text-xs text-red-600 disabled:opacity-40"
-      >
-        Delete
-      </button>
+      {confirmDelete ? (
+        <button
+          disabled={busy}
+          onClick={onDelete}
+          className="rounded border border-red-600 bg-red-600 px-2 py-1 text-xs text-white disabled:opacity-40"
+        >
+          Confirm
+        </button>
+      ) : (
+        <button
+          disabled={busy}
+          onClick={() => setConfirmDelete(true)}
+          onBlur={() => setConfirmDelete(false)}
+          className="rounded border px-2 py-1 text-xs text-red-600 disabled:opacity-40"
+        >
+          Delete
+        </button>
+      )}
     </div>
   )
 }
