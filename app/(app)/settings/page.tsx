@@ -1,9 +1,11 @@
 import { createClient } from '@/lib/supabase/server'
 import { InvitePartnerForm } from '@/components/InvitePartnerForm'
 import { LinkButton } from '@/components/LinkButton'
-import { CategoryManager } from '@/components/CategoryManager'
+import { CategoryManager, type CategoryUsage } from '@/components/CategoryManager'
 import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { effectiveCategory } from '@/lib/effective-category'
+import { pfcToName, type Category } from '@/lib/categories'
 
 export default async function SettingsPage() {
   const supabase = await createClient()
@@ -14,6 +16,24 @@ export default async function SettingsPage() {
     .from('categories')
     .select('id, name, pfc_primary, sort_order')
     .order('sort_order')
+
+  // What deleting each category would actually cost you, so the confirmation can say so.
+  // Counts by EFFECTIVE category: auto-mapped transactions fall back to Uncategorized once
+  // the category row is gone, exactly like user-overridden ones.
+  const pfcMap = pfcToName((categories ?? []) as Category[])
+  const [{ data: catTxns }, { data: budgetRows }] = await Promise.all([
+    supabase.from('transactions').select('user_category, pfc_primary').eq('removed', false),
+    supabase.from('budgets').select('category'),
+  ])
+  const budgeted = new Set((budgetRows ?? []).map((b) => b.category as string))
+  const usage: CategoryUsage = {}
+  for (const c of categories ?? []) {
+    usage[c.name] = { txns: 0, hasBudget: budgeted.has(c.name) }
+  }
+  for (const t of catTxns ?? []) {
+    const name = effectiveCategory(t, pfcMap)
+    if (usage[name]) usage[name].txns++
+  }
 
   return (
     <div className="space-y-6">
@@ -47,7 +67,7 @@ export default async function SettingsPage() {
           Rename or delete any category, or add your own. Renames update everywhere; deleting a
           category leaves its transactions uncategorized.
         </p>
-        <CategoryManager initialCategories={categories ?? []} />
+        <CategoryManager initialCategories={categories ?? []} usage={usage} />
       </Card>
     </div>
   )

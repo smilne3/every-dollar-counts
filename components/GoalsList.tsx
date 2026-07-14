@@ -6,6 +6,7 @@ import { goalProgress } from '@/lib/goal'
 import { money } from '@/lib/format'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { inputClass, labelClass } from '@/components/ui/styles'
 
 type Goal = { id: string; name: string; target_amount: number; saved_amount: number }
@@ -100,6 +101,7 @@ function GoalCard({
   onDelete: () => void
 }) {
   const [saved, setSaved] = useState(String(goal.saved_amount))
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const ratio = goalProgress(Number(saved || 0), goal.target_amount)
   const pct = Math.round(ratio * 100)
   const done = ratio >= 1
@@ -145,11 +147,29 @@ function GoalCard({
           size="sm"
           className="ml-auto"
           disabled={busy}
-          onClick={onDelete}
+          onClick={() => setConfirmDelete(true)}
+          aria-label={`Delete ${goal.name}`}
         >
           Delete
         </Button>
       </div>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        title={`Delete “${goal.name}”?`}
+        busy={busy}
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={() => {
+          setConfirmDelete(false)
+          onDelete()
+        }}
+      >
+        <p>
+          You’ve saved{' '}
+          <strong className="font-semibold text-ink">{money(goal.saved_amount)}</strong> toward{' '}
+          {money(goal.target_amount)}. This can’t be undone.
+        </p>
+      </ConfirmDialog>
     </Card>
   )
 }
