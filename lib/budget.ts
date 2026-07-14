@@ -29,6 +29,18 @@ export function spendByCategory(
   return out
 }
 
+// Spend that actually counts against budgets: only categories that have a limit set.
+// Comparing TOTAL spend against a partial set of limits reports you over budget the
+// moment you budget some categories but not all.
+export function budgetedSpend(
+  spendByCat: Record<string, number>,
+  limits: Record<string, number>
+): number {
+  let total = 0
+  for (const cat of Object.keys(limits)) total += spendByCat[cat] ?? 0
+  return total
+}
+
 // Progress of spend against a limit: clamped ratio [0,1] plus an over-budget flag.
 export function progress(spend: number, limit: number): { ratio: number; over: boolean } {
   const ratio = limit > 0 ? spend / limit : 0

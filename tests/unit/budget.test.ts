@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { spendByCategory, progress, spendThisVsLast, monthKey } from '@/lib/budget'
+import { spendByCategory, budgetedSpend, progress, spendThisVsLast, monthKey } from '@/lib/budget'
 
 const pfcMap: Record<string, string> = {
   FOOD_AND_DRINK: 'Food & Drink',
@@ -82,4 +82,21 @@ describe('spendThisVsLast', () => {
 
 describe('monthKey', () => {
   it('extracts YYYY-MM', () => expect(monthKey('2026-07-13')).toBe('2026-07'))
+})
+
+describe('budgetedSpend', () => {
+  it('counts only categories that have a limit set', () => {
+    const spend = { 'Food & Drink': 16.33, Shopping: 89.4, 'Personal Care': 78.5 }
+    // Budgeting one category must not drag the other categories' spend into the total.
+    expect(budgetedSpend(spend, { 'Food & Drink': 200 })).toBe(16.33)
+    expect(budgetedSpend(spend, { 'Food & Drink': 200, Shopping: 100 })).toBeCloseTo(105.73)
+  })
+
+  it('treats a budgeted category with no spend as zero', () => {
+    expect(budgetedSpend({ Shopping: 50 }, { Travel: 300 })).toBe(0)
+  })
+
+  it('is zero when nothing is budgeted', () => {
+    expect(budgetedSpend({ Shopping: 50 }, {})).toBe(0)
+  })
 })
