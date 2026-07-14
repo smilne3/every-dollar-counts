@@ -12,6 +12,7 @@ import { money } from '@/lib/format'
 import { effectiveCategory } from '@/lib/effective-category'
 import { pfcToName, nonSpendingNames, transferNames, type Category } from '@/lib/categories'
 import { netWorth, cashOnHand, lastNMonths, monthlyFlows, type FlowTxn } from '@/lib/dashboard'
+import { budgetedSpend, spendByCategory, monthKey, type Txn } from '@/lib/budget'
 
 function greeting(hour: number): string {
   if (hour < 12) return 'Good morning'
@@ -74,8 +75,15 @@ export default async function DashboardPage() {
   const saved = income - spent
   const thisMonthLabel = new Intl.DateTimeFormat('en-US', { month: 'long' }).format(now)
 
-  const { data: budgetRows } = await supabase.from('budgets').select('monthly_limit')
-  const totalBudget = (budgetRows ?? []).reduce((s, b) => s + Number(b.monthly_limit || 0), 0)
+  const { data: budgetRows } = await supabase.from('budgets').select('category, monthly_limit')
+  const limits: Record<string, number> = {}
+  for (const b of budgetRows ?? []) limits[b.category as string] = Number(b.monthly_limit || 0)
+  const totalBudget = Object.values(limits).reduce((s, v) => s + v, 0)
+
+  // Only spend in budgeted categories counts against the budget total — see budgetedSpend.
+  const thisMonthKey = months[months.length - 1].key
+  const monthTxns = ((flowTxns ?? []) as Txn[]).filter((t) => monthKey(t.date) === thisMonthKey)
+  const trackedSpend = budgetedSpend(spendByCategory(monthTxns, pfcMap, nonSpending), limits)
 
   const { data: recentTxns } = await supabase
     .from('transactions')
@@ -95,11 +103,11 @@ export default async function DashboardPage() {
   const cash = cashOnHand(accounts)
   const depCount = accounts.filter((a) => a.type === 'depository').length
 
-  const budgetPct = totalBudget > 0 ? Math.round((spent / totalBudget) * 100) : null
+  const budgetPct = totalBudget > 0 ? Math.round((trackedSpend / totalBudget) * 100) : null
   const budgetFoot =
     budgetPct != null ? (
       <span className={budgetPct > 100 ? 'text-coral' : budgetPct > 80 ? 'text-amber' : 'text-muted'}>
-        {budgetPct}% of {money(totalBudget, currency)} budget
+        {money(trackedSpend, currency)} of {money(totalBudget, currency)} budgeted
       </span>
     ) : (
       <span className="text-muted">this month</span>
@@ -149,8 +157,11 @@ export default async function DashboardPage() {
         />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="p-5 lg:col-span-2">
+      {/* grid-cols-1 (= minmax(0,1fr)), not a bare `grid`: an implicit auto track sizes to
+          max-content, so the chart's intrinsic width scrolls the whole page sideways on a
+          phone. min-w-0 on the card alone does not help — the track is what grows. */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <Card className="min-w-0 p-5 lg:col-span-2">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-semibold text-ink">Spending vs income</h2>
             <span className="text-xs text-faint">Last 6 months</span>
@@ -178,7 +189,7 @@ export default async function DashboardPage() {
 
       <div className="space-y-3">
         <h2 className="text-base font-semibold text-ink">Accounts</h2>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {accounts.map((a) => (
             <AccountCard key={a.id} account={a} />
           ))}

@@ -10,6 +10,7 @@ import {
   CartesianGrid,
   ResponsiveContainer,
 } from 'recharts'
+import { axisTick } from '@/lib/format'
 
 type Row = { label: string; income: number; spending: number }
 
@@ -34,7 +35,7 @@ export function SpendIncomeChart({ data }: { data: Row[] }) {
             tick={{ fill: '#5f6b64', fontSize: 12 }}
           />
           <YAxis
-            tickFormatter={(v) => `$${v >= 1000 ? `${Math.round(v / 1000)}k` : v}`}
+            tickFormatter={axisTick}
             tickLine={false}
             axisLine={false}
             width={44}

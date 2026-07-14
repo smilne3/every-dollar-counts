@@ -14,7 +14,11 @@ export function StatCard({
   return (
     <Card className="p-5">
       <div className="text-xs font-semibold uppercase tracking-wide text-faint">{label}</div>
-      <div className="mt-2 text-3xl font-semibold tracking-tight tabular-nums text-ink">{value}</div>
+      {/* Scaled down on small screens: a figure like -$40,452.32 overflows the tile in
+          the 2-column mobile grid at anything above text-xl. */}
+      <div className="mt-2 text-xl font-semibold tracking-tight tabular-nums text-ink sm:text-2xl lg:text-3xl">
+        {value}
+      </div>
       {foot != null && <div className="mt-1.5 text-sm">{foot}</div>}
     </Card>
   )

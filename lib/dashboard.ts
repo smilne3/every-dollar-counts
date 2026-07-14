@@ -13,6 +13,12 @@ export type Acct = { type: string | null; current_balance: number | null }
 const ASSET_TYPES = new Set(['depository', 'investment', 'other'])
 const LIABILITY_TYPES = new Set(['credit', 'loan'])
 
+// Plaid reports credit/loan balances as POSITIVE amounts owed, so a mortgage looks
+// identical to a savings account unless callers ask.
+export function isLiability(type: string | null): boolean {
+  return LIABILITY_TYPES.has(type ?? '')
+}
+
 // Net worth = assets - liabilities across all connected accounts.
 export function netWorth(accounts: Acct[]): number {
   let assets = 0
