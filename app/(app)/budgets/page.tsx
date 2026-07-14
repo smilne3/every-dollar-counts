@@ -3,6 +3,8 @@ import { createClient } from '@/lib/supabase/server'
 import { spendByCategory } from '@/lib/budget'
 import { pfcToName, spendingCategoryNames, nonSpendingNames, type Category } from '@/lib/categories'
 import { BudgetEditor } from '@/components/BudgetEditor'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { buttonClass } from '@/components/ui/Button'
 
 export default async function BudgetsPage() {
   const supabase = await createClient()
@@ -34,17 +36,19 @@ export default async function BudgetsPage() {
   for (const b of budgets ?? []) initialLimits[b.category] = Number(b.monthly_limit)
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-2xl font-semibold">Budgets</h1>
-        <Link href="/settings" className="rounded border px-3 py-1.5 text-sm hover:bg-gray-50">
-          ✎ Add / rename categories
-        </Link>
-      </div>
-      <p className="text-sm text-gray-600">
-        Set a monthly limit per category. Bars show this month&apos;s spending against each limit.
+    <div className="space-y-6">
+      <PageHeader
+        title="Budgets"
+        subtitle="Set a monthly limit per category — bars show this month's spending against each."
+        actions={
+          <Link href="/settings" className={buttonClass('secondary', 'md')}>
+            Add / rename categories
+          </Link>
+        }
+      />
+      <p className="text-sm text-muted">
         To rename a category or add your own, use{' '}
-        <Link href="/settings" className="underline">
+        <Link href="/settings" className="text-emerald hover:text-emerald-600">
           Settings → Categories
         </Link>
         .

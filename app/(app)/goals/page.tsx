@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { GoalsList } from '@/components/GoalsList'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 export default async function GoalsPage() {
   const supabase = await createClient()
@@ -9,11 +10,8 @@ export default async function GoalsPage() {
     .order('created_at')
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-semibold">Savings goals</h1>
-      <p className="text-sm text-gray-600">
-        Set a target and track how close you are. Update the saved amount as you go.
-      </p>
+    <div className="space-y-6">
+      <PageHeader title="Savings goals" subtitle="Set a target and track how close you are." />
       <GoalsList initialGoals={goals ?? []} />
     </div>
   )

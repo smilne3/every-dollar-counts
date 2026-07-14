@@ -4,6 +4,9 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { progress } from '@/lib/budget'
 import { money } from '@/lib/format'
+import { Card } from '@/components/ui/Card'
+import { Button } from '@/components/ui/Button'
+import { inputClass } from '@/components/ui/styles'
 
 export function BudgetEditor({
   categoryNames,
@@ -38,30 +41,30 @@ export function BudgetEditor({
   }
 
   return (
-    <div className="space-y-3">
-      <div>
+    <div className="space-y-4">
+      <Card className="p-5">
         {categoryNames.map((c) => {
           const s = spend[c] ?? 0
           const lim = Number(limits[c] || 0)
           const { ratio, over } = progress(s, lim)
           const barColor =
-            lim <= 0 ? 'bg-gray-300' : over ? 'bg-red-500' : ratio > 0.8 ? 'bg-amber-500' : 'bg-green-500'
+            lim <= 0 ? 'bg-line' : over ? 'bg-coral' : ratio > 0.8 ? 'bg-amber' : 'bg-emerald'
           return (
             <div
               key={c}
-              className="grid grid-cols-[1fr_auto_110px] items-center gap-3 border-b py-2"
+              className="grid grid-cols-[1fr_auto_7rem] items-center gap-3 border-b border-line py-3 last:border-0"
             >
               <div className="min-w-0">
-                <div className="text-sm font-medium">{c}</div>
-                <div className="mt-1 h-1.5 w-full max-w-xs rounded bg-gray-200">
+                <div className="text-sm font-medium text-ink">{c}</div>
+                <div className="mt-1.5 h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-line">
                   <div
-                    className={`h-1.5 rounded ${barColor}`}
+                    className={`h-1.5 rounded-full ${barColor}`}
                     style={{ width: `${lim > 0 ? ratio * 100 : 0}%` }}
                   />
                 </div>
               </div>
               <div
-                className={`text-right text-sm tabular-nums ${lim > 0 && over ? 'text-red-600' : 'text-gray-500'}`}
+                className={`text-right text-sm tabular-nums ${lim > 0 && over ? 'text-coral' : 'text-muted'}`}
               >
                 {money(s)} spent
               </div>
@@ -72,21 +75,17 @@ export function BudgetEditor({
                 placeholder="No limit"
                 value={limits[c]}
                 onChange={(e) => setLimits({ ...limits, [c]: e.target.value })}
-                className="w-full rounded border p-1.5 text-right text-sm"
+                className={`${inputClass} w-28 text-right`}
               />
             </div>
           )
         })}
-      </div>
+      </Card>
       <div className="flex items-center gap-3">
-        <button
-          onClick={save}
-          disabled={saving}
-          className="rounded bg-black px-4 py-2 text-white disabled:opacity-50"
-        >
+        <Button onClick={save} disabled={saving}>
           {saving ? 'Saving…' : 'Save budgets'}
-        </button>
-        {saved && !saving && <span className="text-sm text-green-700">Saved.</span>}
+        </Button>
+        {saved && !saving && <span className="text-sm text-emerald">Saved.</span>}
       </div>
     </div>
   )

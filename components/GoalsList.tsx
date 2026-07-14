@@ -4,6 +4,9 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { goalProgress } from '@/lib/goal'
 import { money } from '@/lib/format'
+import { Card } from '@/components/ui/Card'
+import { Button } from '@/components/ui/Button'
+import { inputClass, labelClass } from '@/components/ui/styles'
 
 type Goal = { id: string; name: string; target_amount: number; saved_amount: number }
 
@@ -26,48 +29,50 @@ export function GoalsList({ initialGoals }: { initialGoals: Goal[] }) {
 
   return (
     <div className="space-y-6">
-      <form
-        className="flex max-w-xl flex-wrap items-end gap-2 rounded border p-4"
-        onSubmit={(e) => {
-          e.preventDefault()
-          const n = name.trim()
-          const t = Number(target)
-          if (n && t > 0) {
-            call('POST', { name: n, target_amount: t })
-            setName('')
-            setTarget('')
-          }
-        }}
-      >
-        <label className="flex flex-1 flex-col text-sm">
-          Goal
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Emergency fund"
-            className="mt-1 rounded border p-2"
-          />
-        </label>
-        <label className="flex flex-col text-sm">
-          Target
-          <input
-            type="number"
-            min="1"
-            value={target}
-            onChange={(e) => setTarget(e.target.value)}
-            placeholder="3000"
-            className="mt-1 w-28 rounded border p-2"
-          />
-        </label>
-        <button disabled={busy} className="rounded bg-black px-4 py-2 text-sm text-white disabled:opacity-50">
-          Add goal
-        </button>
-      </form>
+      <Card className="p-5">
+        <form
+          className="flex max-w-xl flex-wrap items-end gap-3"
+          onSubmit={(e) => {
+            e.preventDefault()
+            const n = name.trim()
+            const t = Number(target)
+            if (n && t > 0) {
+              call('POST', { name: n, target_amount: t })
+              setName('')
+              setTarget('')
+            }
+          }}
+        >
+          <label className="flex min-w-[12rem] flex-1 flex-col gap-1.5">
+            <span className={labelClass}>Goal</span>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Emergency fund"
+              className={inputClass}
+            />
+          </label>
+          <label className="flex w-32 flex-col gap-1.5">
+            <span className={labelClass}>Target</span>
+            <input
+              type="number"
+              min="1"
+              value={target}
+              onChange={(e) => setTarget(e.target.value)}
+              placeholder="3000"
+              className={inputClass}
+            />
+          </label>
+          <Button variant="primary" disabled={busy}>
+            Add goal
+          </Button>
+        </form>
+      </Card>
 
       {initialGoals.length === 0 ? (
-        <p className="text-gray-600">No savings goals yet. Add one above.</p>
+        <p className="text-sm text-muted">No savings goals yet. Add one above.</p>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-2">
           {initialGoals.map((g) => (
             <GoalCard
               key={g.id}
@@ -101,45 +106,50 @@ function GoalCard({
   const changed = Number(saved || 0) !== goal.saved_amount
 
   return (
-    <div className="rounded border p-4">
-      <div className="flex items-baseline justify-between">
-        <div className="font-medium">{goal.name}</div>
-        <div className="text-sm text-gray-500">{pct}%</div>
+    <Card className="p-5">
+      <div className="flex items-baseline justify-between gap-3">
+        <div className="min-w-0 truncate text-base font-semibold text-ink">{goal.name}</div>
+        <div className="shrink-0 text-sm tabular-nums text-muted">{pct}%</div>
       </div>
-      <div className="mt-2 h-2 w-full rounded bg-gray-200">
+      <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-line">
         <div
-          className={`h-2 rounded ${done ? 'bg-green-600' : 'bg-green-500'}`}
+          className={`h-full rounded-full ${done ? 'bg-emerald-600' : 'bg-emerald'}`}
           style={{ width: `${ratio * 100}%` }}
         />
       </div>
-      <div className="mt-1 text-sm text-gray-600">
+      <div className="mt-2 text-sm tabular-nums text-muted">
         {money(Number(saved || 0))} of {money(goal.target_amount)}
         {done ? ' 🎉' : ''}
       </div>
-      <div className="mt-3 flex items-center gap-2">
-        <label className="text-xs text-gray-500">Saved</label>
-        <input
-          type="number"
-          min="0"
-          value={saved}
-          onChange={(e) => setSaved(e.target.value)}
-          className="w-28 rounded border p-1.5 text-sm"
-        />
-        <button
+      <div className="mt-4 flex items-center gap-2">
+        <label className={labelClass}>Saved</label>
+        <div className="w-28">
+          <input
+            type="number"
+            min="0"
+            value={saved}
+            onChange={(e) => setSaved(e.target.value)}
+            className={inputClass}
+          />
+        </div>
+        <Button
+          variant="secondary"
+          size="sm"
           disabled={busy || !changed}
           onClick={() => onSave(Number(saved || 0))}
-          className="rounded border px-2 py-1 text-xs disabled:opacity-40"
         >
           Update
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="danger"
+          size="sm"
+          className="ml-auto"
           disabled={busy}
           onClick={onDelete}
-          className="ml-auto rounded border px-2 py-1 text-xs text-red-600 disabled:opacity-40"
         >
           Delete
-        </button>
+        </Button>
       </div>
-    </div>
+    </Card>
   )
 }

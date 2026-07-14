@@ -3,6 +3,8 @@ import { spendByCategory, spendThisVsLast, monthKey } from '@/lib/budget'
 import { pfcToName, nonSpendingNames, type Category } from '@/lib/categories'
 import { SpendByCategoryChart } from '@/components/SpendByCategoryChart'
 import { MonthOverMonthChart } from '@/components/MonthOverMonthChart'
+import { Card } from '@/components/ui/Card'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 export default async function TrendsPage() {
   const supabase = await createClient()
@@ -46,27 +48,42 @@ export default async function TrendsPage() {
     }))
     .sort((a, b) => b.thisMonth + b.lastMonth - (a.thisMonth + a.lastMonth))
 
+  const monthLabel = new Intl.DateTimeFormat('en-US', { month: 'long' }).format(now)
+  const lastMonthLabel = new Intl.DateTimeFormat('en-US', { month: 'long' }).format(lastDate)
+
   return (
-    <div className="space-y-8">
-      <h1 className="text-2xl font-semibold">Trends</h1>
+    <div className="space-y-6">
+      <PageHeader title="Trends" subtitle="Where your money goes, and how this month compares." />
 
-      <section>
-        <h2 className="mb-2 text-lg font-medium">Where the money went this month</h2>
-        {spendData.length ? (
-          <SpendByCategoryChart data={spendData} />
-        ) : (
-          <p className="text-gray-600">No spending recorded this month yet.</p>
-        )}
-      </section>
+      <Card className="p-5">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-semibold text-ink">Where the money went</h2>
+          <span className="text-xs text-faint">{monthLabel}</span>
+        </div>
+        <div className="mt-3">
+          {spendData.length ? (
+            <SpendByCategoryChart data={spendData} />
+          ) : (
+            <p className="text-sm text-muted">No spending recorded this month yet.</p>
+          )}
+        </div>
+      </Card>
 
-      <section>
-        <h2 className="mb-2 text-lg font-medium">This month vs last</h2>
-        {momData.length ? (
-          <MonthOverMonthChart data={momData} />
-        ) : (
-          <p className="text-gray-600">Not enough data yet to compare months.</p>
-        )}
-      </section>
+      <Card className="p-5">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-semibold text-ink">This month vs last</h2>
+          <span className="text-xs text-faint">
+            {monthLabel} vs {lastMonthLabel}
+          </span>
+        </div>
+        <div className="mt-3">
+          {momData.length ? (
+            <MonthOverMonthChart data={momData} />
+          ) : (
+            <p className="text-sm text-muted">Not enough data yet to compare months.</p>
+          )}
+        </div>
+      </Card>
     </div>
   )
 }
