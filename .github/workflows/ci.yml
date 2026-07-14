@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A newer push to the same branch makes the older run pointless.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: typecheck · lint · test · build
+    runs-on: ubuntu-latest
+
+    # Placeholders, NOT secrets. The Supabase and Plaid clients are constructed at module
+    # scope, so `next build` fails to collect page data if these are absent — but it never
+    # calls out to either service, so fake values are enough. Deliberately fake: this repo is
+    # public, and real credentials have no business in CI. Vercel builds with the real ones.
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: placeholder-publishable-key
+      SUPABASE_SERVICE_ROLE_KEY: placeholder-service-role-key
+      PLAID_CLIENT_ID: placeholder
+      PLAID_SECRET: placeholder
+      PLAID_ENV: sandbox
+      TOKEN_ENCRYPTION_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npx vitest run
+
+      - name: No secrets in client code
+        run: npm run check:secrets
+
+      - name: Build
+        run: npm run build
