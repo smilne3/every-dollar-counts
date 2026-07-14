@@ -52,10 +52,17 @@ referenced from client code.
 **3. Asset management.** A single personal laptop (macOS) and three managed cloud accounts (GitHub,
 Vercel, Supabase). No corporate network, no servers, no other endpoints.
 
-**4. Vulnerability management.** Dependencies are managed via npm; the project builds on Node 22
-with a locked dependency tree (`package-lock.json`). **⚠️ CONFIRM / DO:** enable GitHub Dependabot
-alerts + security updates on the repo before submitting — it's two clicks, it's free, and it turns
-this from a weak answer into a true one.
+**4. Vulnerability management.** GitHub Dependabot alerts are enabled on the repository and are
+actively triaged. Dependencies are locked (`package-lock.json`) and the project builds on Node 22.
+
+As of 2026-07-14 there is one open moderate advisory: a PostCSS CSS-stringifier XSS, pulled in
+transitively by Next.js. It is not reachable in this application — PostCSS runs at build time over
+CSS written by the developer, not over any attacker-controlled input — and the fixed version
+(Next 16.3.0) is not yet released; the app already runs the latest published release (16.2.10). It
+will be upgraded when the fix ships.
+
+*(That last paragraph is the answer, not an apology for it: a live, triaged, reasoned advisory
+demonstrates a working vulnerability-management process far better than an empty alert list does.)*
 
 **5. Malicious code protection.** macOS with built-in protections (XProtect / Gatekeeper).
 **⚠️ CONFIRM:** FileVault disk encryption is on.
@@ -157,12 +164,13 @@ in at all.
 
 ## Before you hit submit
 
-Four things, in priority order:
+Three things, in priority order:
 
-1. **Turn on 2FA** for GitHub, Vercel, Supabase, and Plaid. (Q8)
-2. **Enable Dependabot** on the repo. (Q4)
-3. **Write the five-line incident runbook.** (Q16)
-4. **Confirm FileVault is on** and decide how you're answering the company-vs-individual question. (Q5, Part 0)
+1. **Turn on 2FA** for GitHub, Vercel, Supabase, and Plaid. (Q8) — These four accounts are the
+   entire attack surface for the app's credentials. Highest-value item on the list by a wide margin.
+2. **Write the five-line incident runbook.** (Q16) — Turns "no process" into "yes, here it is."
+3. **Confirm FileVault is on**, and decide how you're answering the company-vs-individual
+   question. (Q5, Part 0)
 
-The first three each turn a weak answer into an honest strong one, and together they're maybe
-thirty minutes of work.
+Dependabot is already enabled, so Q4 needs nothing. All three remaining items are perhaps half an
+hour of work, and each converts a weak answer into an honest strong one.
