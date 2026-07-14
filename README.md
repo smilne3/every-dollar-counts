@@ -6,9 +6,9 @@ Mint shut down, and the replacements all wanted a subscription to show me my own
 
 **Live:** [every-dollar-counts.vercel.app](https://every-dollar-counts.vercel.app) — invite-only, since it's our household's money.
 
-![The dashboard: net worth, cash on hand, spending vs income, and every linked account](docs/dashboard.png)
+![The dashboard: net worth, cash on hand, spending vs income, recent activity, and every linked account](docs/dashboard.png)
 
-<sub>Running against Plaid's sandbox — every account above is a fake bank with fake transactions.</sub>
+<sub>Running against Plaid's sandbox — every account above is a fake bank with fake transactions, and the household is a placeholder.</sub>
 
 ## What it does
 
