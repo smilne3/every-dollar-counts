@@ -2,6 +2,8 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { Button } from '@/components/ui/Button'
+import { inputClass } from '@/components/ui/styles'
 
 type Cat = { id: string; name: string; pfc_primary: string | null }
 
@@ -33,8 +35,8 @@ export function CategoryManager({ initialCategories }: { initialCategories: Cat[
 
   return (
     <div className="space-y-2">
-      {msg && <p className="text-sm text-green-700">{msg}</p>}
-      {err && <p className="text-sm text-red-600">{err}</p>}
+      {msg && <p className="text-sm text-emerald">{msg}</p>}
+      {err && <p className="text-sm text-coral">{err}</p>}
 
       {initialCategories.map((c) => (
         <CategoryRow
@@ -61,11 +63,11 @@ export function CategoryManager({ initialCategories }: { initialCategories: Cat[
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
           placeholder="New category (e.g. Kids, Pets)…"
-          className="flex-1 rounded border p-2 text-sm"
+          className={`${inputClass} flex-1`}
         />
-        <button disabled={busy} className="rounded bg-black px-4 py-2 text-sm text-white disabled:opacity-50">
+        <Button type="submit" disabled={busy}>
           Add
-        </button>
+        </Button>
       </form>
     </div>
   )
@@ -101,34 +103,32 @@ function CategoryRow({
             save()
           }
         }}
-        className="flex-1 rounded border p-1.5 text-sm"
+        className={`${inputClass} flex-1`}
       />
-      {!cat.pfc_primary && <span className="text-xs text-gray-400">custom</span>}
-      <button
+      {!cat.pfc_primary && <span className="text-xs text-faint">custom</span>}
+      <Button
+        variant="secondary"
+        size="sm"
         disabled={busy || !changed}
         onClick={save}
-        className="rounded border px-2 py-1 text-xs disabled:opacity-40"
         title="Save the new name"
       >
         Save
-      </button>
+      </Button>
       {confirmDelete ? (
-        <button
-          disabled={busy}
-          onClick={onDelete}
-          className="rounded border border-red-600 bg-red-600 px-2 py-1 text-xs text-white disabled:opacity-40"
-        >
+        <Button variant="danger" size="sm" disabled={busy} onClick={onDelete}>
           Confirm
-        </button>
+        </Button>
       ) : (
-        <button
+        <Button
+          variant="danger"
+          size="sm"
           disabled={busy}
           onClick={() => setConfirmDelete(true)}
           onBlur={() => setConfirmDelete(false)}
-          className="rounded border px-2 py-1 text-xs text-red-600 disabled:opacity-40"
         >
           Delete
-        </button>
+        </Button>
       )}
     </div>
   )

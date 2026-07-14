@@ -2,6 +2,8 @@ import { createClient } from '@/lib/supabase/server'
 import { InvitePartnerForm } from '@/components/InvitePartnerForm'
 import { LinkButton } from '@/components/LinkButton'
 import { CategoryManager } from '@/components/CategoryManager'
+import { Card } from '@/components/ui/Card'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 export default async function SettingsPage() {
   const supabase = await createClient()
@@ -14,39 +16,39 @@ export default async function SettingsPage() {
     .order('sort_order')
 
   return (
-    <div className="space-y-8">
-      <h1 className="text-2xl font-semibold">Settings</h1>
+    <div className="space-y-6">
+      <PageHeader title="Settings" subtitle="Manage your household, banks, and categories" />
 
-      <section className="space-y-3">
-        <h2 className="text-lg font-medium">Household</h2>
+      <Card className="p-5 space-y-3">
+        <h2 className="text-base font-semibold text-ink">Household</h2>
         {household ? (
           <>
-            <p className="text-sm text-gray-600">
-              You&apos;re in <strong>{household.name}</strong>.
+            <p className="text-sm text-muted">
+              You&apos;re in <strong className="font-medium text-ink">{household.name}</strong>.
             </p>
             <InvitePartnerForm householdId={household.id} />
           </>
         ) : (
-          <p className="text-sm text-gray-600">No household found for your account.</p>
+          <p className="text-sm text-muted">No household found for your account.</p>
         )}
-      </section>
+      </Card>
 
-      <section className="space-y-3">
-        <h2 className="text-lg font-medium">Banks</h2>
-        <p className="text-sm text-gray-600">
+      <Card className="p-5 space-y-3">
+        <h2 className="text-base font-semibold text-ink">Banks</h2>
+        <p className="text-sm text-muted">
           {count ? `${count} account(s) connected.` : 'No banks connected yet.'}
         </p>
         <LinkButton />
-      </section>
+      </Card>
 
-      <section className="space-y-3">
-        <h2 className="text-lg font-medium">Categories</h2>
-        <p className="text-sm text-gray-600">
+      <Card className="p-5 space-y-3">
+        <h2 className="text-base font-semibold text-ink">Categories</h2>
+        <p className="text-sm text-muted">
           Rename or delete any category, or add your own. Renames update everywhere; deleting a
           category leaves its transactions uncategorized.
         </p>
         <CategoryManager initialCategories={categories ?? []} />
-      </section>
+      </Card>
     </div>
   )
 }

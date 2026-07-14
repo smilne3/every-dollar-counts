@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { selectClass } from './ui/styles'
 
 export function CategoryPicker({
   transactionId,
@@ -33,12 +34,7 @@ export function CategoryPicker({
   }
 
   return (
-    <select
-      value={val}
-      onChange={change}
-      disabled={saving}
-      className="rounded border px-2 py-1 text-sm disabled:opacity-50"
-    >
+    <select value={val} onChange={change} disabled={saving} className={selectClass}>
       {opts.map((c) => (
         <option key={c} value={c}>
           {c}

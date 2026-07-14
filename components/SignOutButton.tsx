@@ -3,8 +3,17 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { LogOutIcon } from '@/components/ui/icons'
 
-export function SignOutButton() {
+// Presentation is supplied by the caller via `className` so this works both
+// in the dark sidebar footer and the light mobile top bar.
+export function SignOutButton({
+  className = '',
+  showLabel = true,
+}: {
+  className?: string
+  showLabel?: boolean
+}) {
   const router = useRouter()
   const [busy, setBusy] = useState(false)
 
@@ -17,12 +26,9 @@ export function SignOutButton() {
   }
 
   return (
-    <button
-      onClick={signOut}
-      disabled={busy}
-      className="text-gray-500 hover:text-black disabled:opacity-50"
-    >
-      {busy ? 'Signing out…' : 'Sign out'}
+    <button onClick={signOut} disabled={busy} className={className} title="Sign out">
+      <LogOutIcon className="h-[18px] w-[18px] shrink-0" />
+      {showLabel && <span>{busy ? 'Signing out…' : 'Sign out'}</span>}
     </button>
   )
 }

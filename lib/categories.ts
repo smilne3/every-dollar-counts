@@ -32,6 +32,10 @@ export const DEFAULT_CATEGORIES: { name: string; pfc_primary: string }[] = [
 // Plaid PFC primaries that are income/transfers (excluded from spending totals).
 export const NON_SPENDING_PFC = new Set(['INCOME', 'TRANSFER_IN', 'TRANSFER_OUT'])
 
+// Plaid PFC primaries that are internal transfers (excluded from income totals,
+// so moving money between your own accounts doesn't look like new income).
+export const TRANSFER_PFC = new Set(['TRANSFER_IN', 'TRANSFER_OUT'])
+
 // Map: Plaid PFC primary -> the household's category name for it.
 export function pfcToName(categories: Category[]): Record<string, string> {
   const m: Record<string, string> = {}
@@ -52,5 +56,12 @@ export function nonSpendingNames(categories: Category[]): Set<string> {
     categories
       .filter((c) => c.pfc_primary && NON_SPENDING_PFC.has(c.pfc_primary))
       .map((c) => c.name)
+  )
+}
+
+// Set of category names that are internal transfers (excluded from income).
+export function transferNames(categories: Category[]): Set<string> {
+  return new Set(
+    categories.filter((c) => c.pfc_primary && TRANSFER_PFC.has(c.pfc_primary)).map((c) => c.name)
   )
 }

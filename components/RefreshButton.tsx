@@ -2,6 +2,8 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { buttonClass } from '@/components/ui/Button'
+import { RefreshIcon } from '@/components/ui/icons'
 
 export function RefreshButton() {
   const router = useRouter()
@@ -15,11 +17,8 @@ export function RefreshButton() {
   }
 
   return (
-    <button
-      onClick={refresh}
-      disabled={busy}
-      className="rounded border px-3 py-1.5 text-sm hover:bg-gray-50 disabled:opacity-50"
-    >
+    <button onClick={refresh} disabled={busy} className={buttonClass('secondary', 'md')}>
+      <RefreshIcon className={`h-4 w-4 ${busy ? 'animate-spin' : ''}`} />
       {busy ? 'Refreshing…' : 'Refresh'}
     </button>
   )

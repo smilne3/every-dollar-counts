@@ -1,6 +1,8 @@
 'use client'
 
 import { useState } from 'react'
+import { Button } from '@/components/ui/Button'
+import { inputClass, labelClass } from '@/components/ui/styles'
 
 export function InvitePartnerForm({ householdId }: { householdId: string }) {
   const [email, setEmail] = useState('')
@@ -29,25 +31,22 @@ export function InvitePartnerForm({ householdId }: { householdId: string }) {
 
   return (
     <form onSubmit={invite} className="flex max-w-sm flex-col gap-2">
-      <label className="text-sm font-medium">Invite your partner</label>
+      <label className={labelClass}>Invite your partner</label>
       <div className="flex gap-2">
         <input
-          className="flex-1 rounded border p-2"
+          className={`${inputClass} flex-1`}
           type="email"
           required
           placeholder="partner@email.com"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
-        <button
-          className="rounded bg-black px-4 py-2 text-white disabled:opacity-50"
-          disabled={status === 'sending'}
-        >
+        <Button type="submit" disabled={status === 'sending'}>
           {status === 'sending' ? 'Sending…' : 'Invite'}
-        </button>
+        </Button>
       </div>
       {msg && (
-        <p className={`text-sm ${status === 'error' ? 'text-red-600' : 'text-green-700'}`}>{msg}</p>
+        <p className={`text-sm ${status === 'error' ? 'text-coral' : 'text-emerald'}`}>{msg}</p>
       )}
     </form>
   )

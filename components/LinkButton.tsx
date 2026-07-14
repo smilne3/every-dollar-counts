@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { usePlaidLink } from 'react-plaid-link'
+import { buttonClass } from '@/components/ui/Button'
+import { BankIcon } from '@/components/ui/icons'
 
 export function LinkButton() {
   const router = useRouter()
@@ -39,8 +41,9 @@ export function LinkButton() {
     <button
       onClick={() => open()}
       disabled={!ready || !linkToken || busy}
-      className="rounded bg-black px-4 py-2 text-white disabled:opacity-50"
+      className={buttonClass('primary', 'md')}
     >
+      <BankIcon className="h-[18px] w-[18px]" />
       {busy ? 'Connecting…' : 'Connect a bank'}
     </button>
   )

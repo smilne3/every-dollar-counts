@@ -1,4 +1,5 @@
 import { money } from '@/lib/format'
+import { Card } from './ui/Card'
 
 type Account = {
   id: string
@@ -11,13 +12,13 @@ type Account = {
 
 export function AccountCard({ account }: { account: Account }) {
   return (
-    <div className="rounded border p-4">
-      <div className="text-sm text-gray-500">
-        {account.name} · {account.subtype ?? account.type}
+    <Card className="p-4">
+      <div className="truncate text-sm text-muted">
+        {account.name} · <span className="capitalize">{account.subtype ?? account.type}</span>
       </div>
-      <div className="text-xl font-semibold">
+      <div className="mt-1 text-xl font-semibold tabular-nums text-ink">
         {money(account.current_balance, account.iso_currency_code ?? 'USD')}
       </div>
-    </div>
+    </Card>
   )
 }

@@ -1,26 +1,57 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/*
+  Every Dollar Counts — design system ("Classic control room" / 1a)
+  Palette: deep pine-ink surfaces, emerald brand accent, coral/amber/sky/teal for data.
+  Light theme only (the pine sidebar supplies the dark contrast).
+*/
+@theme {
+  /* Brand + dark surfaces */
+  --color-pine: #12261e; /* sidebar, dark surfaces */
+  --color-pine-700: #183024;
+  --color-pine-600: #1f3c2d; /* hover on pine */
+  --color-pine-500: #2b4c3a; /* active nav item on pine */
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-emerald: #0e9f6e; /* brand accent, buttons, positive */
+  --color-emerald-600: #0b8760; /* hover */
+  --color-emerald-050: #e6f5ef; /* light tint fill */
+
+  /* Data / status */
+  --color-coral: #df6742; /* spending / expense / over */
+  --color-coral-050: #fbe9e2;
+  --color-amber: #d4952a; /* warning / near-limit */
+  --color-amber-050: #f8efdb;
+  --color-sky: #3d7fb8;
+  --color-teal: #109b8e;
+
+  /* Neutrals / surfaces */
+  --color-canvas: #f4f6f3; /* app background */
+  --color-surface: #ffffff; /* cards */
+  --color-surface-2: #fafbf9; /* subtle raised / hover rows */
+  --color-line: #e6e9e3; /* hairline borders */
+  --color-ink: #14231c; /* primary text */
+  --color-muted: #5f6b64; /* secondary text */
+  --color-faint: #8b948c; /* tertiary / labels */
+
+  /* Radii */
+  --radius-card: 1rem; /* 16px cards */
+
+  /* Font — Geist is loaded in the root layout */
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  background: var(--color-canvas);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-emerald) 22%, transparent);
 }
