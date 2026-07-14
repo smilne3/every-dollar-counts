@@ -35,28 +35,44 @@ None of that changes. This spec is about the gaps sandbox let us ignore.
 
 ## 3. The Plaid account (dashboard work, not code)
 
-Plaid retired the old middle tier: Limited Production closed to new signups in April 2026. The
-on-ramp now is the **Trial plan** — free, real production data, auto-approved for most developers,
-and it includes OAuth access to the major banks (Chase, Bank of America, Wells Fargo, Capital One,
-Citi). No security questionnaire, no MSA addendum, no company review. For a two-person household
-that is the entire approval story; a full Production application is not needed.
+Plaid retired the old middle tier: Limited Production closed to new signups in April 2026. That
+leaves two ways in, and we've chosen the second.
 
-Three things to set up:
+**Decision: full Production on the Pay-as-you-go plan.**
 
-1. Enable the Trial plan; copy the **production** `client_id` and `secret` (different values from
-   the sandbox ones).
-2. Register the OAuth redirect URI: `https://every-dollar-counts.vercel.app/plaid/oauth`.
-3. Set the app display name so the bank's consent screen says "Every Dollar Counts."
+The alternative was Plaid's **Trial plan** — free, real bank data, OAuth banks included, no
+paperwork at all, but capped at **10 Items** (one Item = one bank login), and `/item/remove` does
+not give a slot back. Expected usage is only 4–6 logins, so the cap probably would never have bitten.
 
-### The constraint that shapes everything
+We're going to Production anyway, deliberately: this is the household's real money, not a toy tier,
+and the cost is genuinely small — Pay-as-you-go carries **no minimum and no commitment** (Plaid
+positions it for hobbyists) and bills Transactions as a per-bank monthly subscription, on the order
+of a few dollars a month for our handful of accounts. Exact rates are shown during the application.
 
-**Trial allows 10 Items. One Item = one bank login. Calling `/item/remove` does *not* free the
-slot.** Expected usage is 4–6 logins (national bank, brokerage, separately-issued credit cards),
-so there's room — but we never link a real bank just to see whether the code works. We prove every
-flow in sandbox first (see §8).
+**What it costs instead is paperwork and a queue**, and this is the part to take seriously:
+Production requires application display info, company information, agreeing to the MSA, and
+**Plaid's security questionnaire** — which is specifically what gates access to OAuth banks like
+Chase. Plaid says to submit it early because review takes time.
 
-Also worth knowing before it's a surprise: **once you apply for full Production, you cannot go back
-to the Trial plan.** Don't apply until the 10-Item cap is actually in the way.
+**This is a one-way door: once the Production application is submitted, the free Trial plan is no
+longer available as a fallback.** Accepted knowingly.
+
+**Therefore the application is submitted immediately, in parallel with the build** (§11 verifies
+everything in sandbox regardless, so Plaid's review clock runs alongside the work instead of after
+it). Draft answers, grounded in this app's actual architecture, live in
+`docs/plaid-production-application.md`.
+
+To set up, in order:
+
+1. Submit the Production access application (display info, company info, MSA, security
+   questionnaire). **Do this first — it's the long pole.**
+2. On approval: copy the **production** `client_id` and `secret` (different values from the sandbox
+   ones).
+3. Register the OAuth redirect URI: `https://every-dollar-counts.vercel.app/plaid/oauth`.
+4. Set the app display name so the bank's consent screen says "Every Dollar Counts."
+
+Item slots are no longer scarce on this plan — but every linked bank is a real monthly charge and a
+real credential, so §11 still proves each flow in sandbox before spending one.
 
 ## 4. Code change 1 — OAuth redirect
 
@@ -160,16 +176,21 @@ real bank linking happens on the live site, not on localhost.
 
 ## 11. How we verify
 
-In this order, because Item slots are finite and unrefundable:
+Everything is proven in sandbox before a real credential or a real charge is involved. This also
+means the build is **not blocked** on Plaid's review of the Production application (§3) — steps 1
+and 2 need nothing from Plaid but the sandbox keys we already have.
 
 1. **Sandbox, OAuth test bank.** Plaid's sandbox includes an OAuth institution. Exercise the full
-   redirect round-trip there and confirm a bank links end to end. **Zero real Items spent.**
+   redirect round-trip there and confirm a bank links end to end.
 2. **Sandbox, the rest.** Reconnect (Plaid can force an item into `ITEM_LOGIN_REQUIRED` on demand)
    and disconnect, including confirming the transactions actually leave the table.
 3. **Production, one real bank.** Link it. Confirm the transactions are ours, the balance matches
    what the bank's own website says, and Refresh pulls new activity.
 4. **Production, the rest.** Brokerage and credit cards. Confirm net worth against a number we
    already know to be true.
+
+Steps 3–4 wait on Production approval. If approval lands before the code is ready, nothing changes;
+we still don't skip 1 and 2.
 
 ## 12. Explicitly out of scope
 
