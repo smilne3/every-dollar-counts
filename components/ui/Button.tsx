@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes } from 'react'
+import type { ButtonHTMLAttributes, Ref } from 'react'
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger'
 type Size = 'sm' | 'md'
@@ -28,6 +28,10 @@ export function Button({
   size = 'md',
   className = '',
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; size?: Size }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: Variant
+  size?: Size
+  ref?: Ref<HTMLButtonElement> // React 19 passes ref as a plain prop to function components
+}) {
   return <button className={buttonClass(variant, size, className)} {...props} />
 }

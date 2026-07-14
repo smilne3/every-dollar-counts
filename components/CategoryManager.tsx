@@ -3,11 +3,19 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/Button'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { inputClass } from '@/components/ui/styles'
 
 type Cat = { id: string; name: string; pfc_primary: string | null }
+export type CategoryUsage = Record<string, { txns: number; hasBudget: boolean }>
 
-export function CategoryManager({ initialCategories }: { initialCategories: Cat[] }) {
+export function CategoryManager({
+  initialCategories,
+  usage = {},
+}: {
+  initialCategories: Cat[]
+  usage?: CategoryUsage
+}) {
   const router = useRouter()
   const [newName, setNewName] = useState('')
   const [busy, setBusy] = useState(false)
@@ -43,6 +51,7 @@ export function CategoryManager({ initialCategories }: { initialCategories: Cat[
           key={c.id}
           cat={c}
           busy={busy}
+          usage={usage[c.name] ?? { txns: 0, hasBudget: false }}
           onSave={(name) => call('PATCH', { id: c.id, name }, `Renamed to “${name}”.`)}
           onDelete={() => call('DELETE', { id: c.id }, `Deleted “${c.name}”.`)}
         />
@@ -76,11 +85,13 @@ export function CategoryManager({ initialCategories }: { initialCategories: Cat[
 function CategoryRow({
   cat,
   busy,
+  usage,
   onSave,
   onDelete,
 }: {
   cat: Cat
   busy: boolean
+  usage: { txns: number; hasBudget: boolean }
   onSave: (name: string) => void
   onDelete: () => void
 }) {
@@ -115,21 +126,39 @@ function CategoryRow({
       >
         Save
       </Button>
-      {confirmDelete ? (
-        <Button variant="danger" size="sm" disabled={busy} onClick={onDelete}>
-          Confirm
-        </Button>
-      ) : (
-        <Button
-          variant="danger"
-          size="sm"
-          disabled={busy}
-          onClick={() => setConfirmDelete(true)}
-          onBlur={() => setConfirmDelete(false)}
-        >
-          Delete
-        </Button>
-      )}
+      <Button
+        variant="danger"
+        size="sm"
+        disabled={busy}
+        onClick={() => setConfirmDelete(true)}
+        aria-label={`Delete ${cat.name}`}
+      >
+        Delete
+      </Button>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        title={`Delete “${cat.name}”?`}
+        busy={busy}
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={() => {
+          setConfirmDelete(false)
+          onDelete()
+        }}
+      >
+        {usage.txns > 0 ? (
+          <p>
+            <strong className="font-semibold text-ink">
+              {usage.txns} transaction{usage.txns === 1 ? '' : 's'}
+            </strong>{' '}
+            will become Uncategorized.
+          </p>
+        ) : (
+          <p>No transactions currently use this category.</p>
+        )}
+        {usage.hasBudget && <p>Its monthly budget will be deleted.</p>}
+        <p>This can’t be undone.</p>
+      </ConfirmDialog>
     </div>
   )
 }
