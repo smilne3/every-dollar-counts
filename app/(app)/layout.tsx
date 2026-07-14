@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
+import { SignOutButton } from '@/components/SignOutButton'
 
 const NAV: [string, string][] = [
   ['/dashboard', 'Dashboard'],
@@ -32,6 +33,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             </Link>
           ))}
           <span className="ml-auto text-gray-400">{household?.name ?? 'No household yet'}</span>
+          <SignOutButton />
         </nav>
       </header>
       <main className="mx-auto max-w-5xl p-4">{children}</main>
