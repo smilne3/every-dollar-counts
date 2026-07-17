@@ -1,16 +1,26 @@
-# Plaid Production application — draft answers
+# Plaid Production application — draft answers (DEFERRED)
 
-**Purpose:** get Every Dollar Counts approved for full Production on the Pay-as-you-go plan, which
-is what unlocks OAuth banks (Chase, Bank of America, Wells Fargo, Capital One, Citi).
+> **STATUS (2026-07-16): We went with the Trial plan, not full Production.** The Trial requires
+> none of the security questionnaire below — no MSA addendum, no SSN, just a few project details.
+> This document is **kept, not discarded**: it's the ready-made application for the day we ever hit
+> the Trial's 10-Item cap and need to upgrade to Production. The reasoning for the Trial decision is
+> in §3 of `docs/superpowers/specs/2026-07-14-plaid-production-design.md`.
+>
+> **The prerequisites below got done anyway, and they were worth doing:**
+> - 2FA — ✅ GitHub, ✅ Vercel, ✅ Supabase (all already on). ⏳ Plaid (once the account is fully live).
+> - Incident runbook — ✅ written: `docs/incident-runbook.md`.
+> - FileVault — ✅ confirmed on.
+> - (Recommended, not blocking) add a Supabase MFA backup method — it warns of lockout risk, and
+>   that account holds the production database.
 
-**Submit this early.** Plaid's review is the long pole; the code is being built against sandbox in
-parallel and doesn't depend on approval. See §3 of
-`docs/superpowers/specs/2026-07-14-plaid-production-design.md`.
+**Purpose (if/when we upgrade):** get Every Dollar Counts approved for full Production on the
+Pay-as-you-go plan, which is what unlocks OAuth banks (Chase, Bank of America, Wells Fargo, Capital
+One, Citi) at scale beyond the Trial cap.
 
 > **How to use this document:** the answers below are drafted from what this app actually does — I
-> read the code to write them. Anything marked **⚠️ CONFIRM** is something I can't verify from the
-> repo and you must check before submitting. Do not submit a claim you haven't confirmed; an
-> inaccurate security questionnaire is worse than a modest one.
+> read the code to write them. Anything marked **⚠️ CONFIRM** is something to re-check before
+> submitting. Do not submit a claim you haven't confirmed; an inaccurate security questionnaire is
+> worse than a modest one.
 
 ---
 

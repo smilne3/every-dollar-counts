@@ -1256,8 +1256,10 @@ Do these in order. Everything before step 4 is reversible; step 4 onward touches
 7. **Link the rest** — brokerage (balances only) and credit cards. Confirm net worth against a
    number you already know to be true.
 
-Prerequisite running in parallel: the Plaid Production application (see
-`docs/plaid-production-application.md`). Steps 6–7 need it approved; steps 1–3 do not.
+Prerequisite: Plaid **Trial plan** approval (submitted 2026-07-16, pending review). Steps 6–7 need
+it approved; steps 1–3 do not. Trial caps you at 10 linked banks (unrefundable), so treat steps 6–7
+as spending real slots. Upgrading to full Production later is documented in
+`docs/plaid-production-application.md`.
 ```
 
 - [ ] **Step 3: Verify the guard and dry-run the script (sandbox DB)**
@@ -1281,5 +1283,5 @@ git commit -m "feat: guarded sandbox reset script and production cutover runbook
 - [ ] `npx vitest run` — all unit tests pass (including the two new helper suites).
 - [ ] `npx tsc --noEmit && npm run lint && npm run build && npm run check:secrets` — all clean.
 - [ ] The manual sandbox exercises in Tasks 5, 6, 7, 8 have all been performed successfully.
-- [ ] Open a PR from `feature/plaid-production` (PR #16 already tracks the docs; this adds the code). Do **not** merge or run the cutover runbook until the Plaid Production application is approved.
+- [ ] Open a PR from `feature/plaid-production` (PR #16 already tracks the docs; this adds the code). Do **not** merge or run the cutover runbook until the Plaid Trial plan is approved.
 ```

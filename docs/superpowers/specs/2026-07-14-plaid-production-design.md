@@ -36,43 +36,50 @@ None of that changes. This spec is about the gaps sandbox let us ignore.
 ## 3. The Plaid account (dashboard work, not code)
 
 Plaid retired the old middle tier: Limited Production closed to new signups in April 2026. That
-leaves two ways in, and we've chosen the second.
+leaves two ways in, and we've chosen the first.
 
-**Decision: full Production on the Pay-as-you-go plan.**
+**Decision: the Trial plan.** *(Submitted 2026-07-16; "Pending — under review" as of writing.)*
 
-The alternative was Plaid's **Trial plan** — free, real bank data, OAuth banks included, no
-paperwork at all, but capped at **10 Items** (one Item = one bank login), and `/item/remove` does
-not give a slot back. Expected usage is only 4–6 logins, so the cap probably would never have bitten.
+The Trial plan is free, gives real production bank data, includes the OAuth banks we need (Chase,
+Bank of America, Wells Fargo, Capital One, Citi), and requires no security questionnaire, no MSA
+addendum, and no SSN — Plaid collects only a few project details and most accounts go live
+instantly. Its one constraint: **10 Items** (one Item = one bank login), and `/item/remove` does not
+give a slot back.
 
-We're going to Production anyway, deliberately: this is the household's real money, not a toy tier,
-and the cost is genuinely small — Pay-as-you-go carries **no minimum and no commitment** (Plaid
-positions it for hobbyists) and bills Transactions as a per-bank monthly subscription, on the order
-of a few dollars a month for our handful of accounts. Exact rates are shown during the application.
+**Why this reverses the earlier Pay-as-you-go call.** We first chose full Production/Pay-as-you-go,
+reasoning that real money deserved the "real" tier and the paperwork was a fair price for freedom
+from the 10-Item cap. Two things changed that once we saw the actual flow:
 
-**What it costs instead is paperwork and a queue**, and this is the part to take seriously:
-Production requires application display info, company information, agreeing to the MSA, and
-**Plaid's security questionnaire** — which is specifically what gates access to OAuth banks like
-Chase. Plaid says to submit it early because review takes time.
+1. **The decision is asymmetric.** Trial → Production is a door we can walk through *later*, the day
+   we actually hit the cap. Production is a door we can't walk back (applying forecloses Trial).
+   Starting on Trial preserves both options; committing to Production destroys one. Given genuine
+   uncertainty about future needs, take the path that keeps options open.
+2. **Realistic usage fits inside 10.** A two-person household is ~4–6 logins, linked once and kept.
+   The earlier worry — "freedom to link and unlink freely" — only bites if we *churn* through more
+   than 10 lifetime links, which a stable household won't. That advantage was theoretical; it was
+   weighted over actual behavior.
 
-**This is a one-way door: once the Production application is submitted, the free Trial plan is no
-longer available as a fallback.** Accepted knowingly.
+Bonus: the Production flow was asking for an **SSN and date of birth**. For a personal hobby app,
+skipping that (Trial doesn't require it) is a real privacy win. And the cost: Trial is free where
+Pay-as-you-go was a small-but-perpetual monthly charge — YAGNI.
 
-**Therefore the application is submitted immediately, in parallel with the build** (§11 verifies
-everything in sandbox regardless, so Plaid's review clock runs alongside the work instead of after
-it). Draft answers, grounded in this app's actual architecture, live in
-`docs/plaid-production-application.md`.
+**The counter-case we accepted the risk on:** if usage turns out to involve experimenting with many
+institutions (linking and dropping lots of different banks), the 10-Item no-refund cap bites and
+we'd upgrade to Production anyway. Judged unlikely for this household.
 
 To set up, in order:
 
-1. Submit the Production access application (display info, company info, MSA, security
-   questionnaire). **Do this first — it's the long pole.**
+1. Submit the Trial application (a few project details; no questionnaire, no SSN). **Done
+   2026-07-16 — awaiting approval.**
 2. On approval: copy the **production** `client_id` and `secret` (different values from the sandbox
    ones).
 3. Register the OAuth redirect URI: `https://every-dollar-counts.vercel.app/plaid/oauth`.
 4. Set the app display name so the bank's consent screen says "Every Dollar Counts."
 
-Item slots are no longer scarce on this plan — but every linked bank is a real monthly charge and a
-real credential, so §11 still proves each flow in sandbox before spending one.
+**Item slots are scarce and unrefundable (10, no give-back), so §11 proves every flow in sandbox
+before spending a single one.** If we ever hit the cap, upgrade to Production then — see
+`docs/plaid-production-application.md`, which holds the (now-deferred) security-questionnaire draft
+for exactly that day.
 
 ## 4. Code change 1 — OAuth redirect
 
@@ -176,21 +183,23 @@ real bank linking happens on the live site, not on localhost.
 
 ## 11. How we verify
 
-Everything is proven in sandbox before a real credential or a real charge is involved. This also
-means the build is **not blocked** on Plaid's review of the Production application (§3) — steps 1
+Everything is proven in sandbox before a real credential or a real Item slot is spent. This also
+means the build is **not blocked** on Plaid's review of the Trial application (§3) — steps 1
 and 2 need nothing from Plaid but the sandbox keys we already have.
 
 1. **Sandbox, OAuth test bank.** Plaid's sandbox includes an OAuth institution. Exercise the full
    redirect round-trip there and confirm a bank links end to end.
 2. **Sandbox, the rest.** Reconnect (Plaid can force an item into `ITEM_LOGIN_REQUIRED` on demand)
    and disconnect, including confirming the transactions actually leave the table.
-3. **Production, one real bank.** Link it. Confirm the transactions are ours, the balance matches
-   what the bank's own website says, and Refresh pulls new activity.
-4. **Production, the rest.** Brokerage and credit cards. Confirm net worth against a number we
+3. **Production data, one real bank.** Link it. Confirm the transactions are ours, the balance
+   matches what the bank's own website says, and Refresh pulls new activity. *(Spends 1 of 10 Item
+   slots — deliberately, only after steps 1–2 pass.)*
+4. **Production data, the rest.** Brokerage and credit cards. Confirm net worth against a number we
    already know to be true.
 
-Steps 3–4 wait on Production approval. If approval lands before the code is ready, nothing changes;
-we still don't skip 1 and 2.
+Steps 3–4 wait on Trial approval. If approval lands before the code is ready, nothing changes; we
+still don't skip 1 and 2, and we still don't link a real bank casually — each one is an unrefundable
+slot.
 
 ## 12. Explicitly out of scope
 
