@@ -42,35 +42,55 @@ A few decisions worth explaining:
 
 ## Running it locally
 
-You'll need a [Supabase](https://supabase.com) project and a [Plaid](https://plaid.com) account — the free sandbox is plenty, and it gives you fake banks with fake transactions to develop against.
+You'll need a [Supabase](https://supabase.com) project and a [Plaid](https://plaid.com) account — the free tiers are plenty, and Plaid's sandbox gives you fake banks with fake transactions to develop against. (This section was road-tested by a non-engineer following it step by step; the dialogs and gotchas below are the ones that actually came up.)
 
 ```bash
 git clone https://github.com/smilne3/every-dollar-counts.git
 cd every-dollar-counts
 npm install
 cp .env.example .env.local   # then fill it in, see below
-npm run dev
 ```
 
-Apply the migrations in `db/migrations/` to your Supabase project in order, then seed a household:
+### 1. Fill in `.env.local`
 
-```bash
-node scripts/seed-household.mjs      # create a household + invite the first member
-node scripts/seed-sandbox-bank.mjs   # link a Plaid sandbox bank with fake transactions
-```
-
-`.env.local` needs:
+The Supabase values live in your project's dashboard under **Project Settings → API Keys**. One trap: `NEXT_PUBLIC_SUPABASE_URL` is the project's *API address* (`https://<project-ref>.supabase.co`), not the dashboard page you're looking at (`supabase.com/dashboard/...`).
 
 | variable | what it's for |
 | --- | --- |
-| `NEXT_PUBLIC_SUPABASE_URL` | your Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Supabase publishable key (safe for the browser) |
-| `SUPABASE_SERVICE_ROLE_KEY` | server-only; bypasses RLS for ingest and invites |
-| `PLAID_CLIENT_ID` / `PLAID_SECRET` | Plaid credentials |
+| `NEXT_PUBLIC_SUPABASE_URL` | your project's API URL — `https://<project-ref>.supabase.co` |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | publishable key (safe for the browser), starts `sb_publishable_` |
+| `SUPABASE_SERVICE_ROLE_KEY` | secret key, starts `sb_secret_`; server-only, bypasses RLS |
+| `PLAID_CLIENT_ID` / `PLAID_SECRET` | from the [Plaid dashboard](https://dashboard.plaid.com), Keys page |
 | `PLAID_ENV` | `sandbox` to start |
 | `TOKEN_ENCRYPTION_KEY` | 32 bytes of hex — `openssl rand -hex 32` |
 
 Never prefix a secret with `NEXT_PUBLIC_`; that ships it to the browser. `npm run check:secrets` guards against exactly that mistake.
+
+### 2. Create the database tables
+
+In the Supabase dashboard, open the **SQL Editor** and run each file from `db/migrations/` in order — paste a file's contents, click **Run**, replace with the next file, repeat:
+
+`001 → 002 → 003 → 004 → 006 → 007 → 008 → 009` (there is no 005 — the gap is historical, you're not missing a file).
+
+Two warning dialogs will pop up along the way; both are expected:
+
+- **"…creates tables without enabling Row Level Security"** → choose **Run without RLS**. Security for every table is switched on in one deliberate step, `006_rls_policies.sql` — just don't stop before you've run it.
+- **"…includes destructive operations"** → choose **Run query**. That's the harmless `drop … if exists` housekeeping that makes each file safe to re-run.
+
+Each run should end with "Success. No rows returned".
+
+### 3. Seed a household and sign in
+
+```bash
+node --env-file=.env.local scripts/seed-household.mjs you@example.com "Your Household"
+node --env-file=.env.local scripts/seed-sandbox-bank.mjs   # optional: link a fake bank with transactions
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) and use **"Email me a login link"** with the address you just seeded. Two honest caveats:
+
+- **The Google button won't work yet.** Fresh Supabase projects have no Google provider, so it returns a raw "provider is not enabled" error. Email link is the out-of-the-box path; Google needs its own OAuth client wired up under **Authentication → Providers** (see [Supabase's guide](https://supabase.com/docs/guides/auth/social-login/auth-google)).
+- **Supabase's built-in email sender is rate-limited** to a couple of messages an hour. If the login link doesn't arrive, wait it out rather than re-requesting.
 
 ```bash
 npm test           # unit tests (Vitest)

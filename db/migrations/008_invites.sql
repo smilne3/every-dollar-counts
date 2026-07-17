@@ -14,7 +14,4 @@ create policy "manage your invites" on invites
   using ( household_id in (select private.household_ids()) )
   with check ( household_id in (select private.household_ids()) );
 
--- Seed Sarah's email as a safety net (covers the OAuth account-linking edge case).
-insert into invites (email, household_id)
-select 'milne.sarahlynne@gmail.com', id from households where name = 'Milne Haus'
-on conflict (email) do nothing;
+-- The first invite is created by scripts/seed-household.mjs, not here.
