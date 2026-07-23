@@ -191,8 +191,23 @@ git commit -m "feat(db): add plaid item status/products and cascade transactions
 **Interfaces:**
 - Produces:
   - `plaidErrorCode(err: unknown): string | null`
-  - `isReconnectError(err: unknown): boolean`
+  - `plaidDisplayMessage(err: unknown): string | null` — Plaid's own user-facing wording; prefer it
+  - `classifyPlaidError(err): 'reconnect' | 'action_at_bank' | 'temporary' | 'config'`
+  - `isReconnectError(err) / isTemporaryError(err)` — thin wrappers over the classifier
+  - `isAlreadyRemoved(err): boolean` — for the disconnect route
+  - `isOutOfItemSlots(err): boolean` — the `TRIAL_CONNECTION_LIMIT` 10-slot ceiling
   - `shouldSyncTransactions(item: { products: string[] | null; status: string | null }): boolean`
+
+> **Built and verified 2026-07-23.** Four categories, not two — because each maps to a different
+> instruction on screen, and the wrong one costs an unrefundable Item slot. Plaid's docs are
+> explicit that `ITEM_LOCKED` / `PASSWORD_RESET_REQUIRED` / `USER_SETUP_REQUIRED` are fixed *at the
+> bank*, **not** by Link update mode, so a Reconnect button for them just fails and invites a
+> relink. `RATE_LIMIT_EXCEEDED` was removed: it is Plaid's error_**type**, never an error_code, so
+> it matched nothing — the real per-endpoint codes are listed instead. `INVALID_ACCESS_TOKEN` is
+> its own `config` category because it means the token "pertains to a different API environment",
+> the exact mix-up `plaid_env` exists to catch; reported as "bank unavailable" it would hide the
+> most likely failure of this whole migration. Tests are table-driven so deleting a reconnect,
+> action_at_bank, or config code fails the suite (verified by mutation).
 
 - [ ] **Step 1: Write the failing test for `plaid-errors`**
 
@@ -1059,15 +1074,22 @@ export async function POST() {
     } catch (e) {
       // NOTHING rethrows. One sick bank must never stop the others — that is the whole point of
       // this loop, and sandbox never produced the errors that make it matter. Production does:
-      // INSTITUTION_DOWN, RATE_LIMIT_EXCEEDED, ITEM_LOCKED, PASSWORD_RESET_REQUIRED, and a failed
+      // INSTITUTION_DOWN, rate limits, ITEM_LOCKED, PASSWORD_RESET_REQUIRED, and a failed
       // decrypt are all live possibilities.
+      //
+      // Use classifyPlaidError — do NOT hand-roll a ternary here. An earlier draft of this plan
+      // had `isTemporaryError(e) ? 'temporarily_unavailable' : 'temporarily_unavailable'`, two
+      // identical branches, so the classification never actually influenced the stored status and
+      // every unknown failure (including a decrypt error, which has nothing to do with any bank)
+      // was reported to the owner as a bank outage.
       const code = plaidErrorCode(e) ?? 'UNKNOWN_ERROR'
-      const status = isReconnectError(e)
-        ? 'needs_reconnect'
-        : isTemporaryError(e)
-          ? 'temporarily_unavailable'
-          : 'temporarily_unavailable'
-      if (isReconnectError(e)) brokenNow++
+      const status = {
+        reconnect: 'needs_reconnect',
+        action_at_bank: 'action_at_bank',
+        temporary: 'temporarily_unavailable',
+        config: 'config_error',
+      }[classifyPlaidError(e)]
+      if (status === 'needs_reconnect') brokenNow++
       else failed++
       console.error('[plaid] sync failed for item', item.id, code, e)
       await supabaseAdmin
@@ -1091,10 +1113,10 @@ export async function POST() {
 }
 ```
 
-Update the import to include `isTemporaryError`:
+Import the classifier:
 
 ```ts
-import { isReconnectError, isTemporaryError, plaidErrorCode } from '@/lib/plaid-errors'
+import { classifyPlaidError, plaidErrorCode } from '@/lib/plaid-errors'
 ```
 
 > **Why unknown errors are treated as temporary rather than as "needs reconnect":** telling Sarah to
