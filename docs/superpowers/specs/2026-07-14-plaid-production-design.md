@@ -79,8 +79,12 @@ To set up, in order:
 
 1. Submit the Trial application (a few project details; no questionnaire, no SSN). **Done
    2026-07-16 — approved 2026-07-23.**
-2. Copy the **production** `client_id` and `secret` (different values from the sandbox ones).
-   **Outstanding.**
+2. Copy the **production secret**. **Outstanding.**
+   *Corrected 2026-07-23 (verified in the dashboard and in Plaid's glossary):* there is **one
+   `client_id` for the whole team** — *"the same for all API calls made on behalf of your
+   organization, regardless of the API environment."* Only the **secret** differs per environment,
+   and the Keys page lists "Production secret" and "Sandbox secret" separately. So
+   `PLAID_CLIENT_ID` does **not** change at cutover; `PLAID_SECRET` is the only key that does.
 3. Register the OAuth redirect URI: `https://every-dollar-counts.vercel.app/plaid/oauth`.
    **Outstanding — this is a hard gate, not a nicety.** Until it is registered, the big OAuth banks
    (Chase, BofA, Wells Fargo, Capital One, Citi) will not open at all.

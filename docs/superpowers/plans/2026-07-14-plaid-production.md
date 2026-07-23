@@ -1664,7 +1664,9 @@ of your ten connections permanently, and they are never refunded.
 2. **Do the Plaid dashboard setup** (nothing works without this):
    - Register the OAuth redirect URI `https://every-dollar-counts.vercel.app/plaid/oauth`.
    - Set the app display name to "Every Dollar Counts" — this is what the bank's consent screen shows.
-   - Copy the **production** `client_id` and `secret` (different values from the sandbox ones).
+   - Copy the **production secret** (Developers → Keys → "Production secret" → copy button).
+     There is only **one `client_id`** for the whole team — it is the same in sandbox and
+     production, so `PLAID_CLIENT_ID` does **not** change. Only the secret does.
    - While you're there: search the institution coverage explorer for any standalone loan servicer
      you plan to connect, and check it supports `liabilities`. Free, and it may save a wasted attempt.
 3. **Ship the code.** Merge `feature/plaid-production` to `main` (Vercel auto-deploys).
@@ -1681,7 +1683,9 @@ of your ten connections permanently, and they are never refunded.
 6. **Set production env on Vercel (production scope only):**
    - `PLAID_ENV=production` — spelled exactly that, lowercase. Any other value silently falls back
      to sandbox.
-   - `PLAID_CLIENT_ID` / `PLAID_SECRET` = the **production** credentials
+   - `PLAID_SECRET` = the **Production secret** from Developers → Keys.
+     **Leave `PLAID_CLIENT_ID` alone** — one client ID serves every environment, and the value
+     already in Vercel is correct. Changing it is a way to break things, not a step.
    - `PLAID_REDIRECT_URI=https://every-dollar-counts.vercel.app/plaid/oauth`
    - Leave `TOKEN_ENCRYPTION_KEY` unchanged.
    - Set `PLAID_ENV=sandbox` explicitly on the **Preview** and **Development** scopes too, so a
