@@ -13,6 +13,7 @@
   "dependencies": {
     "@supabase/ssr": "^0.12.1",
     "@supabase/supabase-js": "^2.110.3",
+    "@vercel/analytics": "^2.0.1",
     "next": "16.2.10",
     "plaid": "^43.0.0",
     "react": "19.2.4",
