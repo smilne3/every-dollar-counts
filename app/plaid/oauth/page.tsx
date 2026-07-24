@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { usePlaidLink } from 'react-plaid-link'
@@ -9,6 +9,19 @@ import {
   clearPendingLink,
   completePendingLink,
 } from '@/components/plaid-link-context'
+
+// True only after the client has mounted. useSyncExternalStore is the SSR-safe way to read this
+// without a setState-in-effect (which React 19's lint rule forbids). It lets the server and first
+// client render agree on the neutral placeholder, so the statically-prerendered HTML never flashes
+// the scary "couldn't finish" error state before the token loads.
+const emptySubscribe = () => () => {}
+function useMounted() {
+  return useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false
+  )
+}
 
 // Where an OAuth bank (Wells Fargo, Chase, BofA…) sends the user back to. Re-initialize Link with
 // the SAME token we saved before redirecting, plus receivedRedirectUri, and Link resumes and fires
@@ -20,6 +33,7 @@ import {
 // loadPendingLink is what makes a render-time read safe during prerendering.
 export default function PlaidOAuthPage() {
   const router = useRouter()
+  const mounted = useMounted()
   const [token] = useState<string | null>(() => loadPendingLink()?.token ?? null)
   const [error, setError] = useState<string | null>(null)
 
@@ -30,7 +44,13 @@ export default function PlaidOAuthPage() {
         setError(result.error)
         return
       }
-      router.replace('/dashboard')
+      // Carry a "connected but still importing" note across the redirect so it isn't lost — this is
+      // the Wells Fargo path, and a fresh link with no transactions yet is exactly what tempts a
+      // slot-burning re-link. The dashboard renders ?notice=.
+      const dest = result.warning
+        ? `/dashboard?notice=${encodeURIComponent(result.warning)}`
+        : '/dashboard'
+      router.replace(dest)
     },
     [router]
   )
@@ -50,6 +70,17 @@ export default function PlaidOAuthPage() {
   useEffect(() => {
     if (token && ready) open()
   }, [token, ready, open])
+
+  // Until the client has mounted, always render the neutral placeholder — this is what the static
+  // prerender emits, so the error state below can never flash in the prerendered HTML on a
+  // successful return.
+  if (!mounted) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-canvas px-4">
+        <p className="text-sm text-muted">Finishing up your bank connection…</p>
+      </div>
+    )
+  }
 
   // No saved context: an expired attempt, a different browser, or a private window. Never leave
   // the user on a spinner that cannot resolve — the bank connection may already exist at Plaid,

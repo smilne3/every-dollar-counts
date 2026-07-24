@@ -28,6 +28,7 @@ const RECONNECT_CODES = new Set([
   'INVALID_UPDATED_USERNAME',
   'MANUAL_VERIFICATION_REQUIRED',
   'USER_PERMISSION_REVOKED',
+  'USER_ACCOUNT_REVOKED',
 ])
 
 // Plaid's remedy for each of these is an action at the institution, NOT update mode:
@@ -81,6 +82,28 @@ const CONFIG_CODES = new Set([
   'INVALID_PRODUCT',
   'ITEM_NOT_FOUND',
 ])
+
+// A LOG-SAFE summary of a Plaid/axios error. NEVER log a raw Plaid error object: the axios error
+// carries `config.headers` (which include PLAID-SECRET, the account-wide master credential) and
+// `config.data` (the request body, which contains the decrypted access_token). Node's util.inspect
+// serializes those verbatim, and Vercel persists stderr into viewable runtime logs — so logging the
+// raw error on a routine bank outage would write the crown-jewel credentials to disk. This returns
+// only the non-sensitive fields (Plaid's error body has no secrets) plus a plain message fallback.
+export function plaidLogSafe(err: unknown): string {
+  const e = err as {
+    response?: { status?: number; data?: { error_type?: string; error_code?: string } }
+    code?: string
+    message?: string
+  }
+  const parts = [
+    e?.response?.status != null ? `http=${e.response.status}` : null,
+    e?.response?.data?.error_type ? `type=${e.response.data.error_type}` : null,
+    e?.response?.data?.error_code ? `code=${e.response.data.error_code}` : null,
+    e?.code ? `net=${e.code}` : null, // ECONNRESET / ETIMEDOUT etc. — no body, so no code above
+  ].filter(Boolean)
+  if (parts.length) return parts.join(' ')
+  return e?.message ? e.message : String(err)
+}
 
 // Plaid's node SDK throws axios errors carrying the API error body on err.response.data.
 export function plaidErrorCode(err: unknown): string | null {

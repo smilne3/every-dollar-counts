@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { CountryCode, Products } from 'plaid'
 import { plaidClient, plaidEnv } from '@/lib/plaid'
-import { plaidErrorCode, isOutOfItemSlots } from '@/lib/plaid-errors'
+import { plaidLogSafe, isOutOfItemSlots } from '@/lib/plaid-errors'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { decrypt } from '@/lib/crypto'
@@ -117,7 +117,7 @@ export async function POST(req: Request) {
         { status: 409 }
       )
     }
-    console.error('[plaid] linkTokenCreate failed', plaidErrorCode(e) ?? e)
+    console.error('[plaid] linkTokenCreate failed', plaidLogSafe(e))
     return NextResponse.json(
       { error: "Couldn't start the bank connection. Nothing was connected — safe to try again." },
       { status: 502 }

@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { decrypt } from '@/lib/crypto'
 import { plaidEnv } from '@/lib/plaid'
-import { plaidErrorCode } from '@/lib/plaid-errors'
+import { plaidLogSafe } from '@/lib/plaid-errors'
 import { storeAccounts, syncAndStore } from '@/lib/ingest'
 import { shouldSyncTransactions } from '@/lib/sync-policy'
 
@@ -22,6 +22,11 @@ const BREAKING = new Set([
   'PENDING_EXPIRATION',
   'PENDING_DISCONNECT',
   'USER_PERMISSION_REVOKED',
+  // Fired when the user revokes access at the bank's own portal. For a balances-only
+  // investments/loan item this is the ONLY breakage signal — those items never call
+  // transactions/sync, and /accounts/get returns cached balances without erroring — so dropping it
+  // would show stale balances forever with no banner.
+  'USER_ACCOUNT_REVOKED',
 ])
 const DATA_READY = new Set([
   'INITIAL_UPDATE',
@@ -80,7 +85,7 @@ export async function POST(req: Request) {
     } catch (e) {
       // Never fail the webhook — Plaid retries, and a 500 loop helps nobody. The Refresh button is
       // the backstop.
-      console.error('[plaid] webhook sync failed', item.id, plaidErrorCode(e) ?? e)
+      console.error('[plaid] webhook sync failed', item.id, plaidLogSafe(e))
     }
   }
 

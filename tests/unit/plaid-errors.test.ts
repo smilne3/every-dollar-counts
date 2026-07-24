@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   plaidErrorCode,
   plaidDisplayMessage,
+  plaidLogSafe,
   classifyPlaidError,
   isReconnectError,
   isTemporaryError,
@@ -49,6 +50,7 @@ const TABLE: [string, PlaidErrorCategory][] = [
   ['INVALID_UPDATED_USERNAME', 'reconnect'],
   ['MANUAL_VERIFICATION_REQUIRED', 'reconnect'],
   ['USER_PERMISSION_REVOKED', 'reconnect'],
+  ['USER_ACCOUNT_REVOKED', 'reconnect'],
   // action_at_bank — Plaid's documented remedy is at the institution, NOT update mode
   ['ITEM_LOCKED', 'action_at_bank'],
   ['PASSWORD_RESET_REQUIRED', 'action_at_bank'],
@@ -119,6 +121,48 @@ describe('isAlreadyRemoved', () => {
     expect(isAlreadyRemoved(plaidError('INVALID_ACCESS_TOKEN'))).toBe(true)
     expect(isAlreadyRemoved(plaidError('INSTITUTION_DOWN'))).toBe(false)
     expect(isAlreadyRemoved(new Error('network'))).toBe(false)
+  })
+})
+
+// The whole point of plaidLogSafe: a raw Plaid/axios error carries config.headers (PLAID-SECRET,
+// the account-wide master credential) and config.data (the decrypted access_token). Logging it
+// would write both to Vercel's persisted runtime logs on the first routine bank outage.
+describe('plaidLogSafe never emits credentials', () => {
+  const SECRET = 'PROD_SECRET_abc123_MASTER'
+  const TOKEN = 'access-production-REAL-BANK-TOKEN'
+  // Shaped exactly like what the Plaid SDK throws.
+  const axiosLike = {
+    message: 'Request failed with status code 400',
+    config: {
+      headers: { 'PLAID-CLIENT-ID': 'cid', 'PLAID-SECRET': SECRET },
+      data: JSON.stringify({ access_token: TOKEN }),
+    },
+    response: { status: 400, data: { error_type: 'ITEM_ERROR', error_code: 'ITEM_LOGIN_REQUIRED' } },
+  }
+
+  it('returns only the safe fields for a Plaid API error', () => {
+    const out = plaidLogSafe(axiosLike)
+    expect(out).toContain('ITEM_LOGIN_REQUIRED')
+    expect(out).not.toContain(SECRET)
+    expect(out).not.toContain(TOKEN)
+  })
+
+  // The dangerous case: a network error has NO Plaid error_code, so the old `plaidErrorCode(e) ?? e`
+  // idiom fell through to logging the raw object — headers and body included.
+  it('does not leak on a network error that carries no Plaid error body', () => {
+    const netErr = {
+      message: 'socket hang up',
+      code: 'ECONNRESET',
+      config: axiosLike.config,
+    }
+    const out = plaidLogSafe(netErr)
+    expect(out).toContain('ECONNRESET')
+    expect(out).not.toContain(SECRET)
+    expect(out).not.toContain(TOKEN)
+  })
+
+  it('falls back to a plain message for a non-Plaid error', () => {
+    expect(plaidLogSafe(new Error('boom'))).toBe('boom')
   })
 })
 

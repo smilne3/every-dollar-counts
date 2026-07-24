@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { decrypt } from '@/lib/crypto'
 import { plaidClient } from '@/lib/plaid'
-import { plaidErrorCode, isAlreadyRemoved } from '@/lib/plaid-errors'
+import { plaidLogSafe, isAlreadyRemoved } from '@/lib/plaid-errors'
 
 // Disconnect a bank: remove it at Plaid, THEN delete our record. Deleting the plaid_items row
 // cascades to accounts (002) and, via the FK added in 010, on to its transactions — so nothing is
@@ -42,7 +42,7 @@ export async function POST(req: Request) {
   try {
     accessToken = decrypt(item.access_token_encrypted)
   } catch (e) {
-    console.error('[plaid] cannot decrypt token; refusing to delete row', item.id, e)
+    console.error('[plaid] cannot decrypt token; refusing to delete row', item.id, plaidLogSafe(e))
     return NextResponse.json(
       { error: 'Could not read this bank’s saved credential, so it was NOT disconnected.' },
       { status: 500 }
@@ -55,7 +55,7 @@ export async function POST(req: Request) {
     await plaidClient.itemRemove({ access_token: accessToken })
   } catch (e) {
     if (!isAlreadyRemoved(e)) {
-      console.error('[plaid] itemRemove failed', item.id, plaidErrorCode(e) ?? e)
+      console.error('[plaid] itemRemove failed', item.id, plaidLogSafe(e))
       return NextResponse.json(
         { error: 'Plaid could not disconnect that bank just now. Nothing was changed — try again.' },
         { status: 502 }

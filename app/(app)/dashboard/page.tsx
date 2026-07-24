@@ -21,7 +21,14 @@ function greeting(hour: number): string {
   return 'Good evening'
 }
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ notice?: string }>
+}) {
+  // A one-time note carried over from the OAuth return (e.g. "connected, transactions still
+  // arriving") so it isn't lost on the redirect. Next 16: searchParams is async.
+  const notice = (await searchParams)?.notice
   const supabase = await createClient()
   const { data: accountsData } = await supabase.from('accounts').select('*').order('name')
   const accounts = accountsData ?? []
@@ -127,6 +134,12 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      {notice && (
+        <div className="rounded-card border border-emerald/30 bg-emerald-050 px-4 py-3 text-sm text-emerald-600">
+          {notice}
+        </div>
+      )}
+
       {unhealthy.length > 0 && (
         <Link
           href="/settings"

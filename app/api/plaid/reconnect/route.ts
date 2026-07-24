@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { decrypt } from '@/lib/crypto'
 import { plaidEnv } from '@/lib/plaid'
-import { plaidErrorCode } from '@/lib/plaid-errors'
+import { plaidLogSafe } from '@/lib/plaid-errors'
 import { storeAccounts, syncAndStore } from '@/lib/ingest'
 import { shouldSyncTransactions } from '@/lib/sync-policy'
 
@@ -63,7 +63,7 @@ export async function POST(req: Request) {
     // The reconnect itself succeeded at Plaid — only the catch-up sync failed. Leave the item
     // marked healthy (the next Refresh will retry) and say so, rather than reporting a failure
     // that would push the user toward disconnecting and relinking, which costs a slot.
-    console.error('[plaid] post-reconnect sync failed', item.id, plaidErrorCode(e) ?? e)
+    console.error('[plaid] post-reconnect sync failed', item.id, plaidLogSafe(e))
     return NextResponse.json({
       ok: true,
       warning: 'Reconnected. New transactions have not arrived yet — press Refresh in a moment.',

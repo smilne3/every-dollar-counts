@@ -89,7 +89,7 @@ export async function POST() {
       if (status === 'needs_reconnect') brokenNow++
       else failed++
       problems.push({ bank: item.institution_name ?? 'A bank', status, code })
-      console.error('[plaid] sync failed for item', item.id, code, e)
+      console.error('[plaid] sync failed for item', item.id, code)
       await supabaseAdmin
         .from('plaid_items')
         .update({ status, status_detail: code })

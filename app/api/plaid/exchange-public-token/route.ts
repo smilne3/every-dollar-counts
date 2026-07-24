@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { plaidClient, plaidEnv } from '@/lib/plaid'
-import { plaidErrorCode } from '@/lib/plaid-errors'
+import { plaidLogSafe } from '@/lib/plaid-errors'
 import { encrypt } from '@/lib/crypto'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
@@ -45,7 +45,7 @@ export async function POST(req: Request) {
     accessToken = ex.access_token
     itemId = ex.item_id
   } catch (e) {
-    console.error('[plaid] public token exchange failed', plaidErrorCode(e) ?? e)
+    console.error('[plaid] public token exchange failed', plaidLogSafe(e))
     return NextResponse.json(
       { error: "Couldn't finish connecting that bank. Check Settings before trying again." },
       { status: 502 }
@@ -77,7 +77,7 @@ export async function POST(req: Request) {
       await plaidClient.itemRemove({ access_token: accessToken })
       console.error('[plaid] orphaned item removed at Plaid', itemId)
     } catch (e) {
-      console.error('[plaid] ALSO failed to remove orphaned item — remove it by hand', itemId, e)
+      console.error('[plaid] ALSO failed to remove orphaned item — remove it by hand', itemId, plaidLogSafe(e))
     }
     return NextResponse.json(
       { error: 'Could not save that bank. Nothing was connected — safe to try again.' },
@@ -91,7 +91,7 @@ export async function POST(req: Request) {
   } catch (e) {
     // The bank IS connected and stored; only the first balance pull failed. Say so plainly rather
     // than reporting a failure, which would invite a duplicate link and a second spent slot.
-    console.error('[plaid] initial storeAccounts failed', item.id, plaidErrorCode(e) ?? e)
+    console.error('[plaid] initial storeAccounts failed', item.id, plaidLogSafe(e))
     return NextResponse.json({
       ok: true,
       warning: 'Bank connected, but its balances have not arrived yet. Press Refresh in a moment.',
@@ -107,7 +107,7 @@ export async function POST(req: Request) {
     } catch (e) {
       // Plaid's first pull runs for minutes to hours on a real bank. An empty result here is
       // normal, not broken — and re-linking to "fix" it would spend another slot for nothing.
-      console.error('[plaid] initial sync failed', item.id, plaidErrorCode(e) ?? e)
+      console.error('[plaid] initial sync failed', item.id, plaidLogSafe(e))
       return NextResponse.json({
         ok: true,
         warning:

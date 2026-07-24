@@ -6,6 +6,14 @@ Do these in order. Steps 0–8 are reversible; step 9 onward spends unrefundable
 click Connect again. Check Settings first — if it's listed there, it worked. Every fresh attempt
 spends one of your ten bank connections permanently, and they are never refunded.
 
+**A standing rule for after go-live: never link a bank from a local (`npm run dev`) or Vercel
+Preview session against the live database.** Those run on `PLAID_ENV=sandbox`, and a sandbox bank
+linked there would write fake accounts into the same database production reads — inflating your net
+worth with invented balances that you can't disconnect from the production Settings page. The sync,
+Settings, and webhook paths ignore mismatched-environment banks, but the net-worth/spending math
+does not yet. If you ever need to test against sandbox again, do it against a throwaway Supabase
+project, not this one.
+
 ---
 
 ### Before you touch anything

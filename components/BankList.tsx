@@ -71,9 +71,13 @@ export function BankList({ items }: { items: ItemSummary[] }) {
   return (
     <>
       {error && <p className="pb-2 text-sm text-coral">{error}</p>}
-      {/* The slot budget has to be visible, not remembered: 10 lifetime, never refunded. */}
+      {/* The slot budget has to be visible, not remembered: 10 lifetime, never refunded.
+          Deliberately NOT phrased as "N of 10 used" — disconnecting deletes the row and would make
+          that number drop, which is exactly the opposite of the truth (the slot stays spent). So we
+          show the current count and state the lifetime rule separately. */}
       <p className="pb-2 text-xs text-muted">
-        Bank connections used: {items.length} of 10. Disconnecting one does not give it back.
+        {items.length} bank {items.length === 1 ? 'connection' : 'connections'} active. You get 10
+        over the lifetime of the account, and disconnecting one does not free it up.
       </p>
 
       {items.length === 0 ? (
