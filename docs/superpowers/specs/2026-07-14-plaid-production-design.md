@@ -160,13 +160,21 @@ token asks for `transactions` alone, which means a pure brokerage (Vanguard, Sch
 in the list. Adding `investments` to the same request would shrink it the other way and start
 hiding ordinary banks.
 
-So one button becomes three paths:
+So one button becomes two paths, with a third supported in code but not shipped:
 
 | What you're adding | Products requested | What we ingest |
 | --- | --- | --- |
 | Bank or credit card | `transactions` | Balances + transactions |
 | Investment account | `investments` | **Balances only** |
-| Loan or mortgage at its own servicer | `liabilities` | **Balances only** |
+| *(loan servicer — supported, no button)* | `liabilities` | **Balances only** |
+
+**Decision 2026-07-23: no "Add a loan or mortgage" button.** The mortgage is at **Wells Fargo**
+(`ins_127991`), which `/institutions/search` confirms supports `transactions` — so the mortgage
+arrives through the ordinary "Connect a bank" flow, in the same login, costing **no extra Item
+slot and no extra code**. A dedicated button only earns its place for a servicer where the
+household does not also bank, which is not the case here. The `liabilities` product stays wired
+through the link-token and exchange routes (two lines, no UI), so adding the button later is
+trivial if a standalone servicer ever appears.
 
 **Balances only is deliberate.** The brokerage's total value flows into net worth (which already
 counts it) and nothing else. We do not ingest holdings or trades — that's a portfolio tracker, and

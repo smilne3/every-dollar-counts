@@ -72,7 +72,7 @@
 - `app/api/plaid/create-link-token/route.ts` — add/update modes + `redirect_uri` + `days_requested`
 - `app/api/plaid/exchange-public-token/route.ts` — store `products` + `plaid_env`, branch sync
 - `app/api/plaid/sync-transactions/route.ts` — skip investment/broken items, mark broken, never abort
-- `components/LinkButton.tsx` — three variants (bank / investment / loan), save link context
+- `components/LinkButton.tsx` — two variants (bank / investment), save link context
 - `components/RefreshButton.tsx` — **report the outcome instead of discarding it**
 - `proxy.ts` — **exempt `/plaid/oauth` from the login gate** (without this, OAuth returns are lost)
 - `app/(app)/settings/page.tsx` — render `BankList` + "connections used: N of 10"
@@ -742,7 +742,13 @@ export async function completePendingLink(
 }
 ```
 
-- [ ] **Step 2: Rewrite `LinkButton` with three variants**
+- [ ] **Step 2: Rewrite `LinkButton` with two variants**
+
+> **Decision 2026-07-23 — no loan button.** The mortgage is at Wells Fargo, which supports
+> `transactions`, so it arrives through the ordinary bank flow inside the same login at no extra
+> Item cost. The `liabilities` product stays wired through the link-token and exchange routes, so
+> adding a button later is trivial if a standalone servicer ever appears. Skip the third button
+> below.
 
 Replace the entire contents of `components/LinkButton.tsx`:
 
@@ -981,7 +987,7 @@ With `PLAID_ENV=sandbox` and `PLAID_REDIRECT_URI=http://localhost:3000/plaid/oau
 
 ```bash
 git add components/plaid-link-context.ts components/LinkButton.tsx app/plaid/oauth/page.tsx proxy.ts
-git commit -m "feat(plaid): OAuth redirect flow, three link variants, and visible link failures"
+git commit -m "feat(plaid): OAuth redirect flow, two link variants, and visible link failures"
 ```
 
 ---
