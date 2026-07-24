@@ -12,6 +12,7 @@ import { money } from '@/lib/format'
 import { effectiveCategory } from '@/lib/effective-category'
 import { pfcToName, nonSpendingNames, transferNames, type Category } from '@/lib/categories'
 import { netWorth, cashOnHand, lastNMonths, monthlyFlows, type FlowTxn } from '@/lib/dashboard'
+import { listItemsForHousehold } from '@/lib/plaid-items'
 import { budgetedSpend, spendByCategory, monthKey, type Txn } from '@/lib/budget'
 
 function greeting(hour: number): string {
@@ -20,10 +21,28 @@ function greeting(hour: number): string {
   return 'Good evening'
 }
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ notice?: string }>
+}) {
+  // A one-time note carried over from the OAuth return (e.g. "connected, transactions still
+  // arriving") so it isn't lost on the redirect. Next 16: searchParams is async.
+  const notice = (await searchParams)?.notice
   const supabase = await createClient()
   const { data: accountsData } = await supabase.from('accounts').select('*').order('name')
   const accounts = accountsData ?? []
+
+  // Any bank that isn't syncing has to be visible on the main screen. Stale numbers that look
+  // fine are the failure this whole migration exists to prevent.
+  const { data: membershipRow } = await supabase
+    .from('memberships')
+    .select('household_id')
+    .limit(1)
+    .single()
+  const items = membershipRow ? await listItemsForHousehold(membershipRow.household_id) : []
+  const unhealthy = items.filter((i) => i.status !== 'ok')
+  const needsReconnect = unhealthy.some((i) => i.status === 'needs_reconnect')
 
   const now = new Date()
   const dateStr = new Intl.DateTimeFormat('en-US', {
@@ -115,6 +134,26 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      {notice && (
+        <div className="rounded-card border border-emerald/30 bg-emerald-050 px-4 py-3 text-sm text-emerald-600">
+          {notice}
+        </div>
+      )}
+
+      {unhealthy.length > 0 && (
+        <Link
+          href="/settings"
+          className="block rounded-card border border-coral/40 bg-coral/10 px-4 py-3 text-sm text-coral"
+        >
+          {unhealthy.length === 1
+            ? `${unhealthy[0].institution_name ?? 'A bank'} isn't syncing`
+            : `${unhealthy.length} banks aren't syncing`}
+          {needsReconnect
+            ? ' — reconnect in Settings to resume. These figures may be out of date.'
+            : ' — see Settings. These figures may be out of date.'}
+        </Link>
+      )}
+
       <PageHeader
         title={greeting(now.getHours())}
         subtitle={`${dateStr} — here's where your money stands`}

@@ -1,6 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { InvitePartnerForm } from '@/components/InvitePartnerForm'
 import { LinkButton } from '@/components/LinkButton'
+import { BankList } from '@/components/BankList'
+import { listItemsForHousehold } from '@/lib/plaid-items'
 import { CategoryManager, type CategoryUsage } from '@/components/CategoryManager'
 import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -12,6 +14,7 @@ export default async function SettingsPage() {
   const { data: households } = await supabase.from('households').select('id, name').limit(1)
   const household = households?.[0]
   const { count } = await supabase.from('accounts').select('id', { count: 'exact', head: true })
+  const items = household ? await listItemsForHousehold(household.id) : []
   const { data: categories } = await supabase
     .from('categories')
     .select('id, name, pfc_primary, sort_order')
@@ -58,6 +61,7 @@ export default async function SettingsPage() {
         <p className="text-sm text-muted">
           {count ? `${count} account(s) connected.` : 'No banks connected yet.'}
         </p>
+        <BankList items={items} />
         <LinkButton />
       </Card>
 

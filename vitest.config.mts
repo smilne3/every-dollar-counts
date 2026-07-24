@@ -16,5 +16,11 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     include: ['tests/unit/**/*.test.ts', 'tests/unit/**/*.test.tsx'],
+    // lib/plaid.ts throws at import time unless PLAID_ENV is exactly 'sandbox' | 'production'.
+    // Vitest does not read .env.local, so without this ANY test that imports something in that
+    // module's chain (lib/sync, lib/ingest, the Plaid routes) dies with a message about
+    // environment variables instead of about the code under test. Mirrors what CI already sets
+    // for the build. Never 'production' here — tests must not be able to reach real banks.
+    env: { PLAID_ENV: 'sandbox' },
   },
 })
