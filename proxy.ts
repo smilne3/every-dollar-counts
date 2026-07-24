@@ -39,7 +39,11 @@ export async function proxy(request: NextRequest) {
   const isPublic =
     pathname.startsWith('/login') ||
     pathname.startsWith('/auth') ||
-    pathname.startsWith('/plaid/oauth')
+    pathname.startsWith('/plaid/oauth') ||
+    // Plaid POSTs webhooks here with no session. The route guards itself with a shared secret on
+    // the URL; without this exemption the login gate 307s Plaid to /login and no webhook is ever
+    // processed — which silently disables the one thing that warns a bank is about to disconnect.
+    pathname.startsWith('/api/plaid/webhook')
   if (!user && !isPublic) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
