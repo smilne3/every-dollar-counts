@@ -1,6 +1,6 @@
 # Plaid Production Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 > ## Revised 2026-07-23 — read this before starting
 >
@@ -90,7 +90,7 @@
 **Interfaces:**
 - Produces: `plaid_items.status text` (`'ok'` | `'needs_reconnect'`), `plaid_items.status_detail text`, `plaid_items.products text[]`; a `transactions.account_id → accounts.account_id ON DELETE CASCADE` foreign key. Later tasks read/write these columns.
 
-- [ ] **Step 1: Write the migration**
+- [x] **Step 1: Write the migration**
 
 Create `db/migrations/010_plaid_production.sql`:
 
@@ -128,7 +128,7 @@ alter table transactions
   foreign key (account_id) references accounts(account_id) on delete cascade;
 ```
 
-- [ ] **Step 2: Add the new env var to `.env.example`**
+- [x] **Step 2: Add the new env var to `.env.example`**
 
 In `.env.example`, add under the Plaid lines:
 
@@ -138,7 +138,7 @@ PLAID_WEBHOOK_URL=    # https://every-dollar-counts.vercel.app/api/plaid/webhook
 PLAID_WEBHOOK_SECRET= # long random string; must match the ?key= on the URL registered with Plaid
 ```
 
-- [ ] **Step 2b: Make `PLAID_ENV` fail loudly instead of silently choosing sandbox**
+- [x] **Step 2b: Make `PLAID_ENV` fail loudly instead of silently choosing sandbox**
 
 In `lib/plaid.ts`, the environment test is an exact string match on `'production'` — so an unset
 value, `Production`, `prod`, or a trailing space all quietly select **sandbox**. Paired with
@@ -157,7 +157,7 @@ if (env !== 'sandbox' && env !== 'production') {
 
 Then use `env === 'production'` for the `basePath` choice.
 
-- [ ] **Step 3: Apply the migration to the Supabase project and verify**
+- [x] **Step 3: Apply the migration to the Supabase project and verify**
 
 Apply `010_plaid_production.sql` in the Supabase SQL editor (or your migration runner), then run this check:
 
@@ -173,7 +173,7 @@ Expected: four column rows, and one constraint row.
 
 > **If the FK step errors** with a foreign-key violation, orphaned transactions exist beyond what the defensive delete caught — re-run the `delete from transactions ...` statement, then the `alter table ... add constraint` statement. Do not weaken the FK.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add db/migrations/010_plaid_production.sql .env.example
@@ -209,7 +209,7 @@ git commit -m "feat(db): add plaid item status/products and cascade transactions
 > most likely failure of this whole migration. Tests are table-driven so deleting a reconnect,
 > action_at_bank, or config code fails the suite (verified by mutation).
 
-- [ ] **Step 1: Write the failing test for `plaid-errors`**
+- [x] **Step 1: Write the failing test for `plaid-errors`**
 
 Create `tests/unit/plaid-errors.test.ts`:
 
@@ -263,12 +263,12 @@ describe('isTemporaryError', () => {
 Update the import on the first line of the file to
 `import { plaidErrorCode, isReconnectError, isTemporaryError } from '@/lib/plaid-errors'`.
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `npx vitest run tests/unit/plaid-errors.test.ts`
 Expected: FAIL — cannot resolve `@/lib/plaid-errors`.
 
-- [ ] **Step 3: Implement `lib/plaid-errors.ts`**
+- [x] **Step 3: Implement `lib/plaid-errors.ts`**
 
 ```ts
 // Codes where the user must re-authenticate and Link's UPDATE MODE actually fixes it.
@@ -313,12 +313,12 @@ export function isTemporaryError(err: unknown): boolean {
 }
 ```
 
-- [ ] **Step 4: Run it to verify it passes**
+- [x] **Step 4: Run it to verify it passes**
 
 Run: `npx vitest run tests/unit/plaid-errors.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Write the failing test for `sync-policy`**
+- [x] **Step 5: Write the failing test for `sync-policy`**
 
 Create `tests/unit/sync-policy.test.ts`:
 
@@ -347,12 +347,12 @@ describe('shouldSyncTransactions', () => {
 })
 ```
 
-- [ ] **Step 6: Run it to verify it fails**
+- [x] **Step 6: Run it to verify it fails**
 
 Run: `npx vitest run tests/unit/sync-policy.test.ts`
 Expected: FAIL — cannot resolve `@/lib/sync-policy`.
 
-- [ ] **Step 7: Implement `lib/sync-policy.ts`**
+- [x] **Step 7: Implement `lib/sync-policy.ts`**
 
 ```ts
 // Whether we should call transactions/sync for an item. Investment and loan items are
@@ -371,12 +371,12 @@ export function shouldSyncTransactions(item: {
 }
 ```
 
-- [ ] **Step 8: Run it to verify it passes**
+- [x] **Step 8: Run it to verify it passes**
 
 Run: `npx vitest run tests/unit/sync-policy.test.ts`
 Expected: PASS.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add lib/plaid-errors.ts lib/sync-policy.ts tests/unit/plaid-errors.test.ts tests/unit/sync-policy.test.ts
@@ -394,11 +394,11 @@ git commit -m "feat: add pure helpers for plaid reconnect detection and sync pol
 - Consumes: `plaidClient` (`@/lib/plaid`), `supabaseAdmin` (`@/lib/supabase/admin`), `decrypt` (`@/lib/crypto`), `createClient` (`@/lib/supabase/server`).
 - Produces: `POST` accepting JSON body `{ mode?: 'add' | 'update', products?: string[], itemId?: string }`, returning `{ link_token }`. `add` (default) creates a token for new-bank linking with the given products; `update` creates an update-mode token for the given item (reconnect). Both include `redirect_uri` when `PLAID_REDIRECT_URI` is set.
 
-- [ ] **Step 1: Read the Next.js 16 route-handler guide**
+- [x] **Step 1: Read the Next.js 16 route-handler guide**
 
 Skim `node_modules/next/dist/docs/` for the route handler / Request-body guidance. Confirm reading the JSON body is `await req.json()`.
 
-- [ ] **Step 2: Replace the route with add/update handling**
+- [x] **Step 2: Replace the route with add/update handling**
 
 Replace the entire contents of `app/api/plaid/create-link-token/route.ts`:
 
@@ -495,12 +495,12 @@ export async function POST(req: Request) {
 }
 ```
 
-- [ ] **Step 3: Typecheck, lint, build**
+- [x] **Step 3: Typecheck, lint, build**
 
 Run: `npx tsc --noEmit && npm run lint && npm run build`
 Expected: all pass. (No unit test — this route has external side effects; it's covered by the manual sandbox exercise in Task 5 and §11.)
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add app/api/plaid/create-link-token/route.ts
@@ -518,7 +518,7 @@ git commit -m "feat(plaid): support update-mode and per-product link tokens with
 - Consumes: `storeAccounts`, `syncAndStore` (`@/lib/ingest`); `shouldSyncTransactions` (`@/lib/sync-policy`).
 - Produces: `POST` body now also accepts `products?: string[]`; persists it on the item and only runs `syncAndStore` when the item carries `transactions`.
 
-- [ ] **Step 1: Replace the route to persist products and branch on them**
+- [x] **Step 1: Replace the route to persist products and branch on them**
 
 Replace the entire contents of `app/api/plaid/exchange-public-token/route.ts`:
 
@@ -612,12 +612,12 @@ export async function POST(req: Request) {
 }
 ```
 
-- [ ] **Step 2: Typecheck, lint, build**
+- [x] **Step 2: Typecheck, lint, build**
 
 Run: `npx tsc --noEmit && npm run lint && npm run build`
 Expected: all pass.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add app/api/plaid/exchange-public-token/route.ts
@@ -638,7 +638,7 @@ git commit -m "feat(plaid): record products on link and skip transaction sync fo
   - `components/plaid-link-context.ts`: `type PendingLink`, `savePendingLink`, `loadPendingLink`, `clearPendingLink`, `completePendingLink(public_token, metadata)`.
   - `app/plaid/oauth/page.tsx`: the registered OAuth redirect target.
 
-- [ ] **Step 1: Create the client link-context module**
+- [x] **Step 1: Create the client link-context module**
 
 Create `components/plaid-link-context.ts`:
 
@@ -742,7 +742,7 @@ export async function completePendingLink(
 }
 ```
 
-- [ ] **Step 2: Rewrite `LinkButton` with two variants**
+- [x] **Step 2: Rewrite `LinkButton` with two variants**
 
 > **Decision 2026-07-23 — no loan button.** The mortgage is at Wells Fargo, which supports
 > `transactions`, so it arrives through the ordinary bank flow inside the same login at no extra
@@ -866,7 +866,7 @@ Update the imports at the top of the file to include `clearPendingLink`:
 import { savePendingLink, clearPendingLink, completePendingLink } from '@/components/plaid-link-context'
 ```
 
-- [ ] **Step 3: Create the OAuth return page**
+- [x] **Step 3: Create the OAuth return page**
 
 Create `app/plaid/oauth/page.tsx`:
 
@@ -945,7 +945,7 @@ export default function PlaidOAuthPage() {
 }
 ```
 
-- [ ] **Step 3b: Exempt `/plaid/oauth` from the login gate**
+- [x] **Step 3b: Exempt `/plaid/oauth` from the login gate**
 
 In `proxy.ts`, line 33, add `/plaid` to the public list:
 
@@ -966,12 +966,12 @@ spent.
 routes it calls (`exchange-public-token`, `reconnect`) independently verify the session and the
 caller's household before doing anything.
 
-- [ ] **Step 4: Typecheck, lint, build**
+- [x] **Step 4: Typecheck, lint, build**
 
 Run: `npx tsc --noEmit && npm run lint && npm run build`
 Expected: all pass. (The `/api/plaid/reconnect` fetch target doesn't exist until Task 6; that's fine — it's a string URL, not an import, so nothing breaks at build time. Don't exercise reconnect until Task 6.)
 
-- [ ] **Step 5: Manual sandbox verification — non-OAuth and OAuth add**
+- [x] **Step 5: Manual sandbox verification — non-OAuth and OAuth add**
 
 With `PLAID_ENV=sandbox` and `PLAID_REDIRECT_URI=http://localhost:3000/plaid/oauth` set locally, `npm run dev`, log in, and:
 1. Click **Connect a bank**, choose a non-OAuth sandbox bank (First Platypus Bank, `ins_109508`), log in with `user_good` / `pass_good`. Expect: the dashboard shows the bank and its transactions.
@@ -983,7 +983,7 @@ With `PLAID_ENV=sandbox` and `PLAID_REDIRECT_URI=http://localhost:3000/plaid/oau
    - Hand-edit `plaid_pending_link` in localStorage to set `createdAt` an hour in the past, then load `/plaid/oauth`. Expect: the "we couldn't finish that connection" page, not a hanging spinner.
 5. **Verify the login-gate exemption.** With the app built (`npm run build && npm run start`), request `/plaid/oauth?oauth_state_id=test` with no session cookie. Expect: **200**, not a `307` redirect to `/login`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add components/plaid-link-context.ts components/LinkButton.tsx app/plaid/oauth/page.tsx proxy.ts
@@ -1002,7 +1002,7 @@ git commit -m "feat(plaid): OAuth redirect flow, two link variants, and visible 
 - Consumes: `isReconnectError`, `plaidErrorCode` (`@/lib/plaid-errors`); `shouldSyncTransactions` (`@/lib/sync-policy`); `storeAccounts`, `syncAndStore` (`@/lib/ingest`); `savePendingLink`, `completePendingLink` (`@/components/plaid-link-context`).
 - Produces: `POST /api/plaid/reconnect` body `{ itemId }` → `{ ok }`; `ReconnectButton({ itemId }: { itemId: string })`.
 
-- [ ] **Step 1: Rewrite the sync route to skip investment/broken items and mark newly-broken ones**
+- [x] **Step 1: Rewrite the sync route to skip investment/broken items and mark newly-broken ones**
 
 Replace the entire contents of `app/api/plaid/sync-transactions/route.ts`:
 
@@ -1129,7 +1129,7 @@ import { classifyPlaidError, plaidErrorCode } from '@/lib/plaid-errors'
 > reconnect a bank that is merely offline invites a disconnect-and-relink, which spends an
 > unrefundable slot and fixes nothing. Defaulting to "wait" is the cheaper wrong answer.
 
-- [ ] **Step 1b: Make `RefreshButton` report what happened**
+- [x] **Step 1b: Make `RefreshButton` report what happened**
 
 `components/RefreshButton.tsx:14` currently does `await fetch('/api/plaid/sync-transactions', { method: 'POST' })`
 and discards the result, so a failed refresh is visually identical to a successful one. Read the JSON
@@ -1137,7 +1137,7 @@ and show a plain summary — "Updated 4 banks, 12 new transactions", or "2 banks
 `failed > 0`, or a plain error when `!res.ok`. Silent staleness is the exact failure the spec exists
 to eliminate; a Refresh button that swallows its own errors just relocates it.
 
-- [ ] **Step 2: Create the reconnect route**
+- [x] **Step 2: Create the reconnect route**
 
 Create `app/api/plaid/reconnect/route.ts`:
 
@@ -1197,7 +1197,7 @@ export async function POST(req: Request) {
 }
 ```
 
-- [ ] **Step 3: Create `ReconnectButton`**
+- [x] **Step 3: Create `ReconnectButton`**
 
 Create `components/ReconnectButton.tsx`:
 
@@ -1250,18 +1250,18 @@ export function ReconnectButton({ itemId }: { itemId: string }) {
 }
 ```
 
-- [ ] **Step 4: Typecheck, lint, build, unit tests**
+- [x] **Step 4: Typecheck, lint, build, unit tests**
 
 Run: `npx tsc --noEmit && npm run lint && npm run build && npx vitest run`
 Expected: all pass.
 
-- [ ] **Step 5: Manual sandbox verification — force a broken item and fix it**
+- [x] **Step 5: Manual sandbox verification — force a broken item and fix it**
 
 With a sandbox bank linked, force it into `ITEM_LOGIN_REQUIRED` (Plaid sandbox: call `/sandbox/item/reset_login` for the item's access token, e.g. via a one-off `node --env-file=.env.local` script using `plaidClient.sandboxItemResetLogin`). Then:
 1. Click **Refresh**. Expect: the response includes `brokenNow: 1`, and the item's `status` in the DB is `needs_reconnect`.
 2. Use the **Reconnect** button (rendered by Task 7's BankList; for an isolated check you can temporarily drop `<ReconnectButton itemId={...} />` onto the settings page). Re-auth with `user_good`/`pass_good`. Expect: `status` returns to `ok` and Refresh syncs normally again.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add app/api/plaid/sync-transactions/route.ts app/api/plaid/reconnect/route.ts components/ReconnectButton.tsx
@@ -1283,7 +1283,7 @@ git commit -m "feat(plaid): detect broken bank logins on sync and add a reconnec
   - `lib/plaid-items.ts`: `type ItemSummary = { id, institution_name, status, products, created_at }`; `listItemsForHousehold(householdId: string): Promise<ItemSummary[]>` — **safe columns only, never the token.**
   - `components/BankList.tsx`: `BankList({ items }: { items: ItemSummary[] })`.
 
-- [ ] **Step 1: Create the item-listing helper**
+- [x] **Step 1: Create the item-listing helper**
 
 Create `lib/plaid-items.ts`:
 
@@ -1312,7 +1312,7 @@ export async function listItemsForHousehold(householdId: string): Promise<ItemSu
 }
 ```
 
-- [ ] **Step 2: Create the remove-item route**
+- [x] **Step 2: Create the remove-item route**
 
 Create `app/api/plaid/remove-item/route.ts`:
 
@@ -1394,7 +1394,7 @@ Add `plaidErrorCode` to the imports:
 import { plaidErrorCode } from '@/lib/plaid-errors'
 ```
 
-- [ ] **Step 3: Create `BankList`**
+- [x] **Step 3: Create `BankList`**
 
 Create `components/BankList.tsx`:
 
@@ -1494,7 +1494,7 @@ export function BankList({ items }: { items: ItemSummary[] }) {
 }
 ```
 
-- [ ] **Step 4: Wire `BankList` into the settings page**
+- [x] **Step 4: Wire `BankList` into the settings page**
 
 In `app/(app)/settings/page.tsx`, add the import near the other component imports:
 
@@ -1519,16 +1519,16 @@ Finally, replace the Banks card body (the `<p>…account(s) connected…</p>` an
       </Card>
 ```
 
-- [ ] **Step 5: Typecheck, lint, build**
+- [x] **Step 5: Typecheck, lint, build**
 
 Run: `npx tsc --noEmit && npm run lint && npm run build`
 Expected: all pass.
 
-- [ ] **Step 6: Manual sandbox verification — disconnect removes transactions too**
+- [x] **Step 6: Manual sandbox verification — disconnect removes transactions too**
 
 Link a sandbox bank so it has accounts and transactions. Note a transaction count on the Transactions page. On Settings, click **Disconnect**, confirm. Expect: the bank disappears, and its transactions are gone from the Transactions page and dashboard totals (verify with a DB query that no `transactions` rows remain for the removed item's account IDs — the cascade should leave zero).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add app/api/plaid/remove-item/route.ts lib/plaid-items.ts components/BankList.tsx "app/(app)/settings/page.tsx"
@@ -1545,7 +1545,7 @@ git commit -m "feat(plaid): disconnect a bank from settings, cascading its trans
 **Interfaces:**
 - Consumes: `listItemsForHousehold` (`@/lib/plaid-items`).
 
-- [ ] **Step 1: Fetch items and render a banner when any bank is broken**
+- [x] **Step 1: Fetch items and render a banner when any bank is broken**
 
 In `app/(app)/dashboard/page.tsx`, add the import:
 
@@ -1580,16 +1580,16 @@ Then, in the returned JSX for the main (non-empty) branch, immediately after the
 
 (`Link` is already imported at the top of this file.)
 
-- [ ] **Step 2: Typecheck, lint, build**
+- [x] **Step 2: Typecheck, lint, build**
 
 Run: `npx tsc --noEmit && npm run lint && npm run build`
 Expected: all pass.
 
-- [ ] **Step 3: Manual verification**
+- [x] **Step 3: Manual verification**
 
 With a bank forced into `needs_reconnect` (as in Task 6), load the dashboard. Expect: the banner appears and links to Settings. Reconnect the bank; reload. Expect: the banner is gone.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add "app/(app)/dashboard/page.tsx"
@@ -1606,7 +1606,7 @@ git commit -m "feat(dashboard): warn when a bank connection needs reconnecting"
 **Interfaces:**
 - Consumes: `SUPABASE_SERVICE_ROLE_KEY`, `NEXT_PUBLIC_SUPABASE_URL` from env.
 
-- [ ] **Step 1: Create the guarded reset script**
+- [x] **Step 1: Create the guarded reset script**
 
 Create `scripts/reset-plaid-data.mjs`:
 
@@ -1670,7 +1670,7 @@ console.log(
 > **Delete this script once the cutover is done.** It has one job and one day to do it, and it lives
 > in a repo whose only database is the real one.
 
-- [ ] **Step 2: Create the go-live runbook**
+- [x] **Step 2: Create the go-live runbook**
 
 Create `docs/plaid-production-cutover.md`:
 
@@ -1756,7 +1756,7 @@ Trial plan: 10 linked banks, lifetime, unrefundable. Upgrading to full Productio
 in `docs/plaid-production-application.md`.
 ```
 
-- [ ] **Step 3: Verify the guard**
+- [x] **Step 3: Verify the guard**
 
 Run without the flag: `node --env-file=.env.local scripts/reset-plaid-data.mjs`
 Expected: exits non-zero with the "Refusing to run without --confirm" message, deletes nothing.
@@ -1768,7 +1768,7 @@ Expected: exits non-zero with the "Refusing to run without --confirm" message, d
 > `--confirm` path works comes on cutover day, when it runs against sandbox-tagged rows with a fresh
 > backup sitting behind it (runbook steps 0 and 5).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add scripts/reset-plaid-data.mjs docs/plaid-production-cutover.md
@@ -1793,7 +1793,7 @@ look broken and tempt a slot-burning re-link.
 **Interfaces:**
 - Produces: `POST /api/plaid/webhook` → `{ ok }`. No auth session — Plaid calls it, not a browser.
 
-- [ ] **Step 1: Create the webhook route**
+- [x] **Step 1: Create the webhook route**
 
 Create `app/api/plaid/webhook/route.ts`:
 
@@ -1871,12 +1871,12 @@ export async function POST(req: Request) {
 }
 ```
 
-- [ ] **Step 2: Typecheck, lint, build**
+- [x] **Step 2: Typecheck, lint, build**
 
 Run: `npx tsc --noEmit && npm run lint && npm run build`
 Expected: all pass.
 
-- [ ] **Step 3: Manual sandbox verification**
+- [x] **Step 3: Manual sandbox verification**
 
 Set `PLAID_WEBHOOK_SECRET` locally and POST a fake payload to the route with the right `?key=`,
 using an `item_id` that exists in the DB:
@@ -1890,7 +1890,7 @@ curl -X POST "http://localhost:3000/api/plaid/webhook?key=$PLAID_WEBHOOK_SECRET"
 Expect: that item's `status` becomes `needs_reconnect` and the dashboard banner appears. Then POST
 the same payload **without** the `key` parameter and expect a 404 with no change to the row.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add app/api/plaid/webhook/route.ts
@@ -1901,16 +1901,16 @@ git commit -m "feat(plaid): receive item and transaction webhooks (closes #14)"
 
 ## Final verification
 
-- [ ] `npx vitest run` — all unit tests pass (including the two new helper suites).
-- [ ] `npx tsc --noEmit && npm run lint && npm run build && npm run check:secrets` — all clean.
+- [x] `npx vitest run` — all unit tests pass (including the two new helper suites).
+- [x] `npx tsc --noEmit && npm run lint && npm run build && npm run check:secrets` — all clean.
       **Run lint explicitly — `next build` no longer runs ESLint, so a hard lint error can pass the build.**
-- [ ] The manual sandbox exercises in Tasks 5, 6, 7, 8, 10 have all been performed successfully,
+- [x] The manual sandbox exercises in Tasks 5, 6, 7, 8, 10 have all been performed successfully,
       **including the failure-path rehearsals in Task 5 Step 5.** Those are the ones that protect
       Item slots, and they are the easiest to skip because everything "already works."
-- [ ] `curl -D - http://localhost:3999/plaid/oauth` on a production build returns **200**, not a 307
+- [x] `curl -D - http://localhost:3999/plaid/oauth` on a production build returns **200**, not a 307
       to `/login`.
-- [ ] Open a PR from `feature/plaid-production` (PR #16 already tracks the docs; this adds the code).
-- [ ] Before running the cutover runbook: the Plaid dashboard setup (redirect URI, display name,
+- [x] Open a PR from `feature/plaid-production` (PR #16 already tracks the docs; this adds the code).
+- [x] Before running the cutover runbook: the Plaid dashboard setup (redirect URI, display name,
       production keys, webhook URL) is **done**, and the database and `TOKEN_ENCRYPTION_KEY` are
       backed up. The Trial plan is approved as of 2026-07-23, so approval is no longer the gate —
       the rehearsal is.
