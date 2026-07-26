@@ -8,7 +8,7 @@ Mint shut down, and the replacements all wanted a subscription to show me my own
 
 ![The dashboard: net worth, cash on hand, spending vs income, recent activity, and every linked account](docs/dashboard.png)
 
-<sub>Running against Plaid's sandbox — every account above is a fake bank with fake transactions, and the household is a placeholder.</sub>
+<sub>Demo data shown — the accounts and household above are placeholders, so no real balances live in the repo. The deployed app connects to real banks.</sub>
 
 ## What it does
 
@@ -60,8 +60,10 @@ The Supabase values live in your project's dashboard under **Project Settings �
 | `NEXT_PUBLIC_SUPABASE_URL` | your project's API URL — `https://<project-ref>.supabase.co` |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | publishable key (safe for the browser), starts `sb_publishable_` |
 | `SUPABASE_SERVICE_ROLE_KEY` | secret key, starts `sb_secret_`; server-only, bypasses RLS |
-| `PLAID_CLIENT_ID` / `PLAID_SECRET` | from the [Plaid dashboard](https://dashboard.plaid.com), Keys page |
-| `PLAID_ENV` | `sandbox` to start |
+| `PLAID_CLIENT_ID` / `PLAID_SECRET` | from the [Plaid dashboard](https://dashboard.plaid.com), Keys page (the client_id is the same across environments; the secret differs) |
+| `PLAID_ENV` | `sandbox` for local dev (required — the app refuses to start on any other value than `sandbox` or `production`) |
+| `PLAID_REDIRECT_URI` | `http://localhost:3000/plaid/oauth` — where a bank returns you after its OAuth login; register the same URL in the Plaid dashboard. Needed to link OAuth banks; leave blank and non-OAuth banks still work |
+| `PLAID_WEBHOOK_URL` / `PLAID_WEBHOOK_SECRET` | optional locally (webhooks need a public HTTPS URL); used in production to hear about broken connections and freshly-arrived transactions |
 | `TOKEN_ENCRYPTION_KEY` | 32 bytes of hex — `openssl rand -hex 32` |
 
 Never prefix a secret with `NEXT_PUBLIC_`; that ships it to the browser. `npm run check:secrets` guards against exactly that mistake.
@@ -70,7 +72,7 @@ Never prefix a secret with `NEXT_PUBLIC_`; that ships it to the browser. `npm ru
 
 In the Supabase dashboard, open the **SQL Editor** and run each file from `db/migrations/` in order — paste a file's contents, click **Run**, replace with the next file, repeat:
 
-`001 → 002 → 003 → 004 → 006 → 007 → 008 → 009` (there is no 005 — the gap is historical, you're not missing a file).
+`001 → 002 → 003 → 004 → 006 → 007 → 008 → 009 → 010` (there is no 005 — the gap is historical, you're not missing a file).
 
 Two warning dialogs will pop up along the way; both are expected:
 
@@ -100,7 +102,7 @@ npm run build
 
 ## Status
 
-The v1 feature set is done and running on real infrastructure against Plaid's sandbox. Pointing it at real banks needs a Plaid production application, which is the next step.
+Live on real bank data. The v1 feature set is done, and the app runs against Plaid **production** — real accounts, real balances, real transactions — with OAuth bank linking, a reconnect flow for when a connection breaks, disconnect, and webhooks for broken-connection and new-transaction notices. Local development still uses Plaid's sandbox (fake banks), which is what the setup above configures.
 
 Known gaps are tracked in [issues](https://github.com/smilne3/every-dollar-counts/issues). The honest ones: refunds are still counted as income, the transactions list silently caps at 200 rows, and there's no way to disconnect a bank yet.
 
