@@ -21,6 +21,12 @@ export function isLiability(type: string | null): boolean {
   return LIABILITY_TYPES.has(type ?? '')
 }
 
+// Manually-entered assets (e.g. the home) added to the asset side of net worth. The mortgage stays
+// a live Plaid liability, so the home's net contribution is automatically (home value - mortgage).
+export function sumManualAssets(assets: { value: number | null }[]): number {
+  return assets.reduce((s, a) => s + (a.value ?? 0), 0)
+}
+
 // Net worth = assets - liabilities across all connected accounts.
 export function netWorth(accounts: Acct[]): number {
   let assets = 0

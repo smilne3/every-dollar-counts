@@ -3,6 +3,8 @@ import { InvitePartnerForm } from '@/components/InvitePartnerForm'
 import { LinkButton } from '@/components/LinkButton'
 import { BankList } from '@/components/BankList'
 import { listItemsForHousehold } from '@/lib/plaid-items'
+import { HomeValueCard } from '@/components/HomeValueCard'
+import { listManualAssets } from '@/lib/manual-assets'
 import { CategoryManager, type CategoryUsage } from '@/components/CategoryManager'
 import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -15,6 +17,8 @@ export default async function SettingsPage() {
   const household = households?.[0]
   const { count } = await supabase.from('accounts').select('id', { count: 'exact', head: true })
   const items = household ? await listItemsForHousehold(household.id) : []
+  const manualAssets = household ? await listManualAssets(household.id) : []
+  const home = manualAssets.find((a) => a.name === 'Home') ?? null
   const { data: categories } = await supabase
     .from('categories')
     .select('id, name, pfc_primary, sort_order')
@@ -63,6 +67,15 @@ export default async function SettingsPage() {
         </p>
         <BankList items={items} />
         <LinkButton />
+      </Card>
+
+      <Card className="p-5 space-y-3">
+        <h2 className="text-base font-semibold text-ink">Home value</h2>
+        <p className="text-sm text-muted">
+          Add your home&apos;s value so net worth reflects your equity. The mortgage is already
+          counted as a debt, so this shows what the house adds after the loan.
+        </p>
+        <HomeValueCard initialValue={home?.value ?? null} updatedAt={home?.updated_at ?? null} />
       </Card>
 
       <Card className="p-5 space-y-3">
