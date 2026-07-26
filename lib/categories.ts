@@ -36,6 +36,23 @@ export const NON_SPENDING_PFC = new Set(['INCOME', 'TRANSFER_IN', 'TRANSFER_OUT'
 // so moving money between your own accounts doesn't look like new income).
 export const TRANSFER_PFC = new Set(['TRANSFER_IN', 'TRANSFER_OUT'])
 
+// Paying off a credit card is an internal transfer, but Plaid tags it LOAN_PAYMENTS (not TRANSFER),
+// so the primary-based sets above miss it. The give-away is the DETAILED category. A card payment
+// shows up twice — money out of checking (looks like spending) and money into the card (looks like
+// income) — and neither is real: the purchases were already counted as spending when they happened.
+// So credit-card payments must be excluded from both spending and income. Genuine loan payments
+// (mortgage, car, student) are real single-counted outflows and are NOT excluded.
+const CREDIT_CARD_PAYMENT_DETAILED = 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT'
+
+// True for an auto-categorized credit-card payment. A user override wins (existing contract): if
+// they deliberately recategorized it, respect that and let normal category logic apply.
+export function isCreditCardPayment(t: {
+  pfc_detailed: string | null
+  user_category: string | null
+}): boolean {
+  return !t.user_category && t.pfc_detailed === CREDIT_CARD_PAYMENT_DETAILED
+}
+
 // Map: Plaid PFC primary -> the household's category name for it.
 export function pfcToName(categories: Category[]): Record<string, string> {
   const m: Record<string, string> = {}

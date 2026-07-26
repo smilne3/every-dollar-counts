@@ -10,10 +10,17 @@ const pfcMap: Record<string, string> = {
 }
 const nonSpending = new Set(['Income', 'Transfer In', 'Transfer Out'])
 
-const t = (amount: number, date: string, pfc: string, override: string | null = null) => ({
+const t = (
+  amount: number,
+  date: string,
+  pfc: string,
+  override: string | null = null,
+  pfc_detailed: string | null = null
+) => ({
   amount,
   date,
   pfc_primary: pfc,
+  pfc_detailed,
   user_category: override,
 })
 
@@ -30,6 +37,23 @@ describe('spendByCategory', () => {
     )
     expect(r['Food & Drink']).toBeCloseTo(16.33)
     expect(r['Transportation']).toBeCloseTo(5.4)
+  })
+
+  // Credit-card payments are internal transfers (paying off already-counted purchases). They carry
+  // pfc_primary=LOAN_PAYMENTS, so the name-based exclusion misses them; they must be excluded by
+  // detailed category. A mortgage payment, by contrast, is real spending and stays.
+  it('excludes credit-card payments but keeps genuine loan payments', () => {
+    const r = spendByCategory(
+      [
+        t(8930.72, '2026-07-10', 'LOAN_PAYMENTS', null, 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT'),
+        t(493.75, '2026-07-11', 'LOAN_PAYMENTS', null, 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT'),
+        t(3929.35, '2026-07-01', 'LOAN_PAYMENTS', null, 'LOAN_PAYMENTS_MORTGAGE_PAYMENT'),
+      ],
+      { ...pfcMap, LOAN_PAYMENTS: 'Loan Payments' },
+      nonSpending
+    )
+    // only the mortgage remains under Loan Payments; the two card payments are gone
+    expect(r['Loan Payments']).toBeCloseTo(3929.35)
   })
 
   it('ignores inflows and income/transfers', () => {
