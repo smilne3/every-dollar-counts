@@ -6,14 +6,26 @@ import { Button } from '@/components/ui/Button'
 import { SearchIcon } from '@/components/ui/icons'
 import { inputClass } from '@/components/ui/styles'
 import { effectiveCategory } from '@/lib/effective-category'
-import { pfcToName, type Category } from '@/lib/categories'
+import {
+  pfcToName,
+  nonSpendingNames,
+  transferNames,
+  isCreditCardPayment,
+  type Category,
+} from '@/lib/categories'
 
 export default async function TransactionsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>
+  searchParams: Promise<{
+    q?: string
+    account?: string
+    category?: string
+    month?: string
+    flow?: string
+  }>
 }) {
-  const { q } = await searchParams
+  const { q, account, category, month, flow } = await searchParams
   const safe = (q ?? '').replace(/[,()%*]/g, ' ').trim()
 
   const supabase = await createClient()
@@ -27,13 +39,39 @@ export default async function TransactionsPage({
 
   let query = supabase
     .from('transactions')
-    .select('id, name, merchant_name, amount, date, user_category, pfc_primary')
+    .select('id, name, merchant_name, amount, date, user_category, pfc_primary, pfc_detailed, account_id')
     .eq('removed', false)
     .order('date', { ascending: false })
     .limit(200)
   if (safe) query = query.or(`name.ilike.%${safe}%,merchant_name.ilike.%${safe}%`)
+  // Account and month are plain columns — filter in SQL.
+  if (account) query = query.eq('account_id', account)
+  if (month) {
+    const [y, m] = month.split('-').map(Number)
+    const start = `${month}-01`
+    const nextY = m === 12 ? y + 1 : y
+    const nextM = m === 12 ? 1 : m + 1
+    const end = `${nextY}-${String(nextM).padStart(2, '0')}-01`
+    query = query.gte('date', start).lt('date', end)
+  }
   const { data: txns } = await query
-  const list = txns ?? []
+  let list = txns ?? []
+
+  // Category and flow are on the transaction's EFFECTIVE category (computed), so filter in memory.
+  if (category) {
+    list = list.filter((t) => effectiveCategory(t, pfcMap) === category)
+  }
+  if (flow === 'in' || flow === 'out') {
+    const nonSpending = nonSpendingNames(categories) // income + transfers
+    const transfers = transferNames(categories)
+    list = list.filter((t) => {
+      if (isCreditCardPayment(t)) return false
+      const cat = effectiveCategory(t, pfcMap)
+      if (transfers.has(cat)) return false
+      const isIncomeCat = nonSpending.has(cat) && !transfers.has(cat)
+      return flow === 'in' ? isIncomeCat : !isIncomeCat
+    })
+  }
 
   return (
     <div className="space-y-6">
@@ -57,6 +95,23 @@ export default async function TransactionsPage({
           </form>
         }
       />
+
+      {(account || category || flow) && (
+        <div className="flex items-center gap-2 text-sm">
+          <span className="rounded-full bg-emerald-050 px-3 py-1 text-emerald-600">
+            {account
+              ? 'Filtered to one account'
+              : category
+                ? `Category: ${category}${month ? ` · ${month}` : ''}`
+                : flow === 'in'
+                  ? `Money in${month ? ` · ${month}` : ''}`
+                  : `Money out${month ? ` · ${month}` : ''}`}
+          </span>
+          <a href="/transactions" className="text-muted hover:text-ink">
+            Clear
+          </a>
+        </div>
+      )}
 
       {list.length === 0 ? (
         <Card className="p-8 text-center">
