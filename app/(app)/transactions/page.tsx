@@ -37,6 +37,17 @@ export default async function TransactionsPage({
   const pfcMap = pfcToName(categories)
   const categoryOptions = categories.map((c) => c.name)
 
+  // Only needed to name the account in the filter chip when drilling in from a Net Worth / Cash row.
+  let accountName: string | null = null
+  if (account) {
+    const { data: acct } = await supabase
+      .from('accounts')
+      .select('name')
+      .eq('account_id', account)
+      .maybeSingle()
+    accountName = acct?.name ?? null
+  }
+
   let query = supabase
     .from('transactions')
     .select('id, name, merchant_name, amount, date, user_category, pfc_primary, pfc_detailed, account_id')
@@ -69,7 +80,11 @@ export default async function TransactionsPage({
       const cat = effectiveCategory(t, pfcMap)
       if (transfers.has(cat)) return false
       const isIncomeCat = nonSpending.has(cat) && !transfers.has(cat)
-      return flow === 'in' ? isIncomeCat : !isIncomeCat
+      // Money in must be an actual inflow in an income category — matching monthlyFlows, which only
+      // counts amount < 0 toward income. Without the sign guard, an income-category *outflow*
+      // (a clawback, or a user-overridden row) would show here but never appear in the income total,
+      // so the list wouldn't reconcile with the "Money in" figure it drills from.
+      return flow === 'in' ? isIncomeCat && t.amount < 0 : !isIncomeCat
     })
   }
 
@@ -80,6 +95,12 @@ export default async function TransactionsPage({
         subtitle="Search and re-categorize your spending."
         actions={
           <form className="flex items-center gap-2">
+            {/* Carry the active drill-down filters through a search submit; a GET form only sends
+                its own controls, so without these, searching would silently drop the drill context. */}
+            {account && <input type="hidden" name="account" value={account} />}
+            {category && <input type="hidden" name="category" value={category} />}
+            {month && <input type="hidden" name="month" value={month} />}
+            {flow && <input type="hidden" name="flow" value={flow} />}
             <div className="w-full sm:w-64">
               <input
                 name="q"
@@ -100,7 +121,7 @@ export default async function TransactionsPage({
         <div className="flex items-center gap-2 text-sm">
           <span className="rounded-full bg-emerald-050 px-3 py-1 text-emerald-600">
             {account
-              ? 'Filtered to one account'
+              ? `Account: ${accountName ?? 'one account'}`
               : category
                 ? `Category: ${category}${month ? ` · ${month}` : ''}`
                 : flow === 'in'
