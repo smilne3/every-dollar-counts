@@ -7,7 +7,9 @@ import { plaidEnv } from '@/lib/plaid'
 // stale-value nudge on the dashboard.
 export async function POST(req: Request) {
   const { value } = await req.json().catch(() => ({}) as { value?: unknown })
-  const v = Number(value)
+  // Tolerate a currency-formatted string ("$750,000") as well as a number — the client strips it
+  // too, but be defensive at the boundary.
+  const v = Number(String(value).replace(/[$,\s]/g, ''))
   if (!Number.isFinite(v) || v < 0) {
     return NextResponse.json({ error: 'a non-negative value is required' }, { status: 400 })
   }

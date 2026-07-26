@@ -22,9 +22,11 @@ export function HomeValueCard({
 
   async function save(e: React.FormEvent) {
     e.preventDefault()
-    const v = Number(value)
+    // Accept what Zillow shows verbatim — "$750,000" — by stripping $, commas, and spaces. The
+    // card tells the user to copy from Zillow, so this must parse the way Zillow formats it.
+    const v = Number(value.replace(/[$,\s]/g, ''))
     if (!Number.isFinite(v) || v < 0) {
-      setError('Enter a number (what your home is worth).')
+      setError('Enter your home value, e.g. 750000 or $750,000.')
       return
     }
     setBusy(true)
