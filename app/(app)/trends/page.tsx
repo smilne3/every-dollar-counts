@@ -24,7 +24,7 @@ export default async function TrendsPage() {
 
   const { data: txns } = await supabase
     .from('transactions')
-    .select('amount, date, user_category, pfc_primary')
+    .select('amount, date, user_category, pfc_primary, pfc_detailed')
     .eq('removed', false)
     .gte('date', `${lastM}-01`)
   const list = txns ?? []

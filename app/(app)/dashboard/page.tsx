@@ -84,7 +84,7 @@ export default async function DashboardPage({
 
   const { data: flowTxns } = await supabase
     .from('transactions')
-    .select('amount, date, user_category, pfc_primary')
+    .select('amount, date, user_category, pfc_primary, pfc_detailed')
     .eq('removed', false)
     .gte('date', sixStart)
   const flows = monthlyFlows((flowTxns ?? []) as FlowTxn[], pfcMap, nonSpending, transfers, months)

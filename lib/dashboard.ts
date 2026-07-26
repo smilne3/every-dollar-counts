@@ -1,4 +1,5 @@
 import { effectiveCategory } from './effective-category'
+import { isCreditCardPayment } from './categories'
 import { monthKey } from './budget'
 
 export type FlowTxn = {
@@ -6,6 +7,7 @@ export type FlowTxn = {
   date: string
   user_category: string | null
   pfc_primary: string | null
+  pfc_detailed: string | null
 }
 
 export type Acct = { type: string | null; current_balance: number | null }
@@ -83,6 +85,8 @@ export function monthlyFlows(
     const mk = monthKey(t.date)
     const bucket = acc[mk]
     if (!bucket) continue
+    // A credit-card payment is an internal transfer — skip both legs (out of checking, into card).
+    if (isCreditCardPayment(t)) continue
     const cat = effectiveCategory(t, pfcMap)
     if (t.amount > 0) {
       if (!spendingExclude.has(cat)) bucket.spending += t.amount

@@ -60,11 +60,11 @@ describe('monthlyFlows', () => {
   ]
 
   const txns: FlowTxn[] = [
-    { amount: 50, date: '2026-07-03', user_category: null, pfc_primary: 'FOOD_AND_DRINK' },
-    { amount: -2000, date: '2026-07-05', user_category: null, pfc_primary: 'INCOME' },
-    { amount: -500, date: '2026-07-06', user_category: null, pfc_primary: 'TRANSFER_IN' },
-    { amount: 30, date: '2026-06-11', user_category: null, pfc_primary: 'FOOD_AND_DRINK' },
-    { amount: 999, date: '2026-05-01', user_category: null, pfc_primary: 'FOOD_AND_DRINK' }, // out of range
+    { amount: 50, date: '2026-07-03', user_category: null, pfc_primary: 'FOOD_AND_DRINK', pfc_detailed: null },
+    { amount: -2000, date: '2026-07-05', user_category: null, pfc_primary: 'INCOME', pfc_detailed: null },
+    { amount: -500, date: '2026-07-06', user_category: null, pfc_primary: 'TRANSFER_IN', pfc_detailed: null },
+    { amount: 30, date: '2026-06-11', user_category: null, pfc_primary: 'FOOD_AND_DRINK', pfc_detailed: null },
+    { amount: 999, date: '2026-05-01', user_category: null, pfc_primary: 'FOOD_AND_DRINK', pfc_detailed: null }, // out of range
   ]
 
   it('counts paychecks as income but excludes transfers, and excludes both from spending', () => {
@@ -77,10 +77,66 @@ describe('monthlyFlows', () => {
 
   it('respects user_category overrides', () => {
     const overridden: FlowTxn[] = [
-      { amount: 40, date: '2026-07-02', user_category: 'Income', pfc_primary: 'FOOD_AND_DRINK' },
+      { amount: 40, date: '2026-07-02', user_category: 'Income', pfc_primary: 'FOOD_AND_DRINK', pfc_detailed: null },
     ]
     const flows = monthlyFlows(overridden, pfcMap, spendingExclude, incomeExclude, months)
     // amount > 0 but category is 'Income' (excluded from spending) -> not counted
     expect(flows.find((f) => f.key === '2026-07')).toMatchObject({ spending: 0, income: 0 })
+  })
+
+  // A credit-card payment is an internal transfer: money leaves checking (looks like spending) and
+  // arrives at the card (looks like income). Plaid tags both legs LOAN_PAYMENTS_CREDIT_CARD_PAYMENT.
+  // Neither leg is real — the purchases were already counted as spending when made.
+  it('excludes credit-card payments from BOTH spending and income', () => {
+    const ccPay: FlowTxn[] = [
+      // checking side: money out
+      {
+        amount: 900,
+        date: '2026-07-10',
+        user_category: null,
+        pfc_primary: 'LOAN_PAYMENTS',
+        pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT',
+      },
+      // card side: money in (payment arriving)
+      {
+        amount: -900,
+        date: '2026-07-10',
+        user_category: null,
+        pfc_primary: 'LOAN_PAYMENTS',
+        pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT',
+      },
+    ]
+    const flows = monthlyFlows(ccPay, pfcMap, spendingExclude, incomeExclude, months)
+    expect(flows.find((f) => f.key === '2026-07')).toMatchObject({ spending: 0, income: 0 })
+  })
+
+  // A mortgage payment IS a real recurring outflow — it must still count as spending.
+  it('still counts a mortgage payment as spending', () => {
+    const mortgage: FlowTxn[] = [
+      {
+        amount: 1500,
+        date: '2026-07-10',
+        user_category: null,
+        pfc_primary: 'LOAN_PAYMENTS',
+        pfc_detailed: 'LOAN_PAYMENTS_MORTGAGE_PAYMENT',
+      },
+    ]
+    const flows = monthlyFlows(mortgage, pfcMap, spendingExclude, incomeExclude, months)
+    expect(flows.find((f) => f.key === '2026-07')).toMatchObject({ spending: 1500, income: 0 })
+  })
+
+  // If the user deliberately recategorized a card payment, honor the override (existing contract).
+  it('honors a user override on a credit-card payment', () => {
+    const overridden: FlowTxn[] = [
+      {
+        amount: 900,
+        date: '2026-07-10',
+        user_category: 'Food & Drink',
+        pfc_primary: 'LOAN_PAYMENTS',
+        pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT',
+      },
+    ]
+    const flows = monthlyFlows(overridden, pfcMap, spendingExclude, incomeExclude, months)
+    expect(flows.find((f) => f.key === '2026-07')).toMatchObject({ spending: 900 })
   })
 })

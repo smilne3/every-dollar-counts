@@ -1,10 +1,12 @@
 import { effectiveCategory } from './effective-category'
+import { isCreditCardPayment } from './categories'
 
 export type Txn = {
   amount: number
   date: string
   user_category: string | null
   pfc_primary: string | null
+  pfc_detailed: string | null
 }
 
 // 'YYYY-MM' bucket for a 'YYYY-MM-DD' date.
@@ -22,6 +24,7 @@ export function spendByCategory(
   const out: Record<string, number> = {}
   for (const t of txns) {
     if (t.amount <= 0) continue
+    if (isCreditCardPayment(t)) continue // internal transfer, not spending
     const cat = effectiveCategory(t, pfcMap)
     if (nonSpending.has(cat)) continue
     out[cat] = (out[cat] ?? 0) + t.amount
@@ -59,6 +62,7 @@ export function spendThisVsLast(
   const lastMonth: Record<string, number> = {}
   for (const t of txns) {
     if (t.amount <= 0) continue
+    if (isCreditCardPayment(t)) continue // internal transfer, not spending
     const cat = effectiveCategory(t, pfcMap)
     if (nonSpending.has(cat)) continue
     const mk = monthKey(t.date)
