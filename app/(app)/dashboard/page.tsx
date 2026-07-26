@@ -11,8 +11,16 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { money } from '@/lib/format'
 import { effectiveCategory } from '@/lib/effective-category'
 import { pfcToName, nonSpendingNames, transferNames, type Category } from '@/lib/categories'
-import { netWorth, cashOnHand, lastNMonths, monthlyFlows, type FlowTxn } from '@/lib/dashboard'
+import {
+  netWorth,
+  cashOnHand,
+  lastNMonths,
+  monthlyFlows,
+  sumManualAssets,
+  type FlowTxn,
+} from '@/lib/dashboard'
 import { listItemsForHousehold } from '@/lib/plaid-items'
+import { listManualAssets } from '@/lib/manual-assets'
 import { budgetedSpend, spendByCategory, monthKey, type Txn } from '@/lib/budget'
 
 function greeting(hour: number): string {
@@ -41,10 +49,14 @@ export default async function DashboardPage({
     .limit(1)
     .single()
   const items = membershipRow ? await listItemsForHousehold(membershipRow.household_id) : []
+  const manualAssets = membershipRow ? await listManualAssets(membershipRow.household_id) : []
+  const home = manualAssets.find((a) => a.name === 'Home') ?? null
   const unhealthy = items.filter((i) => i.status !== 'ok')
   const needsReconnect = unhealthy.some((i) => i.status === 'needs_reconnect')
 
   const now = new Date()
+  const homeStale =
+    home != null && now.getTime() - new Date(home.updated_at).getTime() > 30 * 24 * 60 * 60 * 1000
   const dateStr = new Intl.DateTimeFormat('en-US', {
     weekday: 'long',
     month: 'long',
@@ -118,7 +130,7 @@ export default async function DashboardPage({
     amount: t.amount as number,
   }))
 
-  const worth = netWorth(accounts)
+  const worth = netWorth(accounts) + sumManualAssets(manualAssets)
   const cash = cashOnHand(accounts)
   const depCount = accounts.filter((a) => a.type === 'depository').length
 
@@ -151,6 +163,15 @@ export default async function DashboardPage({
           {needsReconnect
             ? ' — reconnect in Settings to resume. These figures may be out of date.'
             : ' — see Settings. These figures may be out of date.'}
+        </Link>
+      )}
+
+      {homeStale && (
+        <Link
+          href="/settings"
+          className="block rounded-card border border-amber/40 bg-amber/10 px-4 py-3 text-sm text-amber"
+        >
+          Your home value was last updated over a month ago — check Zillow and update it in Settings.
         </Link>
       )}
 

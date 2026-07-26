@@ -4,7 +4,15 @@ import { BreakdownList, type BreakdownRow } from '@/components/BreakdownList'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
 import { groupAccountsByKind, sortedSpendRows } from '@/lib/breakdown'
-import { netWorth, cashOnHand, lastNMonths, monthlyFlows, type FlowTxn } from '@/lib/dashboard'
+import {
+  netWorth,
+  cashOnHand,
+  lastNMonths,
+  monthlyFlows,
+  sumManualAssets,
+  type FlowTxn,
+} from '@/lib/dashboard'
+import { listManualAssets } from '@/lib/manual-assets'
 import { spendByCategory, monthKey, type Txn } from '@/lib/budget'
 import { pfcToName, nonSpendingNames, transferNames, type Category } from '@/lib/categories'
 
@@ -24,13 +32,23 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
   const accounts = accountsData ?? []
   const currency = accounts[0]?.iso_currency_code ?? 'USD'
 
+  // Manual assets (the home) count on the asset side of net worth, netting against the live mortgage.
+  const { data: membershipRow } = await supabase
+    .from('memberships')
+    .select('household_id')
+    .limit(1)
+    .single()
+  const manualAssets = membershipRow
+    ? await listManualAssets(membershipRow.household_id)
+    : []
+
   const header = TITLES[metric]
   let rows: BreakdownRow[] = []
   let total: { label: string; amount: number; currency: string } | undefined
 
   if (metric === 'net-worth') {
     const g = groupAccountsByKind(accounts)
-    rows = [...g.assets, ...g.liabilities].map((a) => ({
+    const accountRows: BreakdownRow[] = [...g.assets, ...g.liabilities].map((a) => ({
       key: a.id,
       label: a.name,
       sub: a.subtype,
@@ -39,7 +57,26 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
       owed: a.owed,
       href: `/transactions?account=${encodeURIComponent(a.account_id)}`,
     }))
-    total = { label: 'Net worth', amount: netWorth(accounts), currency }
+    // Manual assets (the home) sit on the asset side; they have no transactions, so no drill link.
+    const manualRows: BreakdownRow[] = manualAssets.map((a) => ({
+      key: `manual-${a.id}`,
+      label: a.name,
+      sub: 'Manually entered',
+      amount: a.value,
+      currency,
+      owed: false,
+    }))
+    // Assets (accounts + manual) first, then liabilities.
+    rows = [
+      ...accountRows.filter((r) => !r.owed),
+      ...manualRows,
+      ...accountRows.filter((r) => r.owed),
+    ]
+    total = {
+      label: 'Net worth',
+      amount: netWorth(accounts) + sumManualAssets(manualAssets),
+      currency,
+    }
   } else if (metric === 'cash') {
     // Cash = depository accounts only; reuse cashOnHand() for the total.
     const depository = accounts.filter((a) => a.type === 'depository')
