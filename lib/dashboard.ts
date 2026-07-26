@@ -72,6 +72,9 @@ export function lastNMonths(now: Date, n: number): { key: string; label: string 
 //   never count as spending.
 // - income excludes `incomeExclude` (transfers only) so paychecks still count as
 //   income but moving money between your own accounts does not.
+// - a refund is an inflow (amount < 0) in a SPENDING category (e.g. a Travel refund). It nets
+//   DOWN that category's spending rather than counting as income — otherwise every merchant
+//   refund inflates income and leaves the original purchase counted at full price.
 export function monthlyFlows(
   txns: FlowTxn[],
   pfcMap: Record<string, string>,
@@ -88,10 +91,18 @@ export function monthlyFlows(
     // A credit-card payment is an internal transfer — skip both legs (out of checking, into card).
     if (isCreditCardPayment(t)) continue
     const cat = effectiveCategory(t, pfcMap)
+    // Transfers (in incomeExclude) are neither spending nor income.
+    if (incomeExclude.has(cat)) continue
+    // Income categories are in spendingExclude but not incomeExclude (transfers are already gone).
+    const isIncomeCategory = spendingExclude.has(cat)
     if (t.amount > 0) {
-      if (!spendingExclude.has(cat)) bucket.spending += t.amount
+      // Money out: spending, unless it's an income category (rare; e.g. a clawback).
+      if (!isIncomeCategory) bucket.spending += t.amount
     } else if (t.amount < 0) {
-      if (!incomeExclude.has(cat)) bucket.income += -t.amount
+      // Money in: real income for an income category; otherwise a refund that nets down spending
+      // (amount is negative, so += reduces the category's spending).
+      if (isIncomeCategory) bucket.income += -t.amount
+      else bucket.spending += t.amount
     }
   }
   return months.map((m) => ({ ...m, ...acc[m.key] }))

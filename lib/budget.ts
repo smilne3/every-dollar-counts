@@ -23,10 +23,10 @@ export function spendByCategory(
 ): Record<string, number> {
   const out: Record<string, number> = {}
   for (const t of txns) {
-    if (t.amount <= 0) continue
     if (isCreditCardPayment(t)) continue // internal transfer, not spending
     const cat = effectiveCategory(t, pfcMap)
-    if (nonSpending.has(cat)) continue
+    if (nonSpending.has(cat)) continue // income + transfers
+    // Outflows add; refunds (inflows in a spending category) net the category down.
     out[cat] = (out[cat] ?? 0) + t.amount
   }
   return out
@@ -61,11 +61,11 @@ export function spendThisVsLast(
   const thisMonth: Record<string, number> = {}
   const lastMonth: Record<string, number> = {}
   for (const t of txns) {
-    if (t.amount <= 0) continue
     if (isCreditCardPayment(t)) continue // internal transfer, not spending
     const cat = effectiveCategory(t, pfcMap)
-    if (nonSpending.has(cat)) continue
+    if (nonSpending.has(cat)) continue // income + transfers
     const mk = monthKey(t.date)
+    // Outflows add; refunds (inflows in a spending category) net the category down.
     if (mk === thisM) thisMonth[cat] = (thisMonth[cat] ?? 0) + t.amount
     else if (mk === lastM) lastMonth[cat] = (lastMonth[cat] ?? 0) + t.amount
   }
