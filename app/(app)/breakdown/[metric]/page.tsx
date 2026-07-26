@@ -1,0 +1,125 @@
+import { notFound } from 'next/navigation'
+import { createClient } from '@/lib/supabase/server'
+import { BreakdownList, type BreakdownRow } from '@/components/BreakdownList'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { Card } from '@/components/ui/Card'
+import { groupAccountsByKind, sortedSpendRows } from '@/lib/breakdown'
+import { netWorth, cashOnHand, lastNMonths, monthlyFlows, type FlowTxn } from '@/lib/dashboard'
+import { spendByCategory, monthKey, type Txn } from '@/lib/budget'
+import { pfcToName, nonSpendingNames, transferNames, type Category } from '@/lib/categories'
+
+const TITLES: Record<string, { title: string; subtitle: string }> = {
+  'net-worth': { title: 'Net worth', subtitle: 'Everything you own, minus what you owe' },
+  cash: { title: 'Cash on hand', subtitle: 'Balances in your everyday accounts' },
+  spent: { title: 'Spent this month', subtitle: 'Where the money went, by category' },
+  saved: { title: 'Saved this month', subtitle: 'Money in versus money out' },
+}
+
+export default async function BreakdownPage({ params }: { params: Promise<{ metric: string }> }) {
+  const { metric } = await params
+  if (!TITLES[metric]) notFound()
+
+  const supabase = await createClient()
+  const { data: accountsData } = await supabase.from('accounts').select('*').order('name')
+  const accounts = accountsData ?? []
+  const currency = accounts[0]?.iso_currency_code ?? 'USD'
+
+  const header = TITLES[metric]
+  let rows: BreakdownRow[] = []
+  let total: { label: string; amount: number; currency: string } | undefined
+
+  if (metric === 'net-worth') {
+    const g = groupAccountsByKind(accounts)
+    rows = [...g.assets, ...g.liabilities].map((a) => ({
+      key: a.id,
+      label: a.name,
+      sub: a.subtype,
+      amount: a.balance,
+      currency,
+      owed: a.owed,
+      href: `/transactions?account=${encodeURIComponent(a.account_id)}`,
+    }))
+    total = { label: 'Net worth', amount: netWorth(accounts), currency }
+  } else if (metric === 'cash') {
+    // Cash = depository accounts only; reuse cashOnHand() for the total.
+    const depository = accounts.filter((a) => a.type === 'depository')
+    rows = depository.map((a) => ({
+      key: a.id,
+      label: a.name ?? 'Account',
+      sub: a.subtype,
+      amount: a.current_balance ?? 0,
+      currency,
+      href: `/transactions?account=${encodeURIComponent(a.account_id)}`,
+    }))
+    total = { label: 'Cash on hand', amount: cashOnHand(accounts), currency }
+  } else {
+    // spent / saved both need this month's flows
+    const { data: cats } = await supabase
+      .from('categories')
+      .select('id, name, pfc_primary, sort_order')
+      .order('sort_order')
+    const categories = (cats ?? []) as Category[]
+    const pfcMap = pfcToName(categories)
+    const nonSpending = nonSpendingNames(categories)
+    const transfers = transferNames(categories)
+
+    const now = new Date()
+    const months = lastNMonths(now, 6)
+    const thisKey = months[months.length - 1].key
+    const { data: flowTxns } = await supabase
+      .from('transactions')
+      .select('amount, date, user_category, pfc_primary, pfc_detailed')
+      .eq('removed', false)
+      .gte('date', `${thisKey}-01`)
+    const monthTxns = ((flowTxns ?? []) as Txn[]).filter((t) => monthKey(t.date) === thisKey)
+
+    if (metric === 'spent') {
+      const byCat = spendByCategory(monthTxns, pfcMap, nonSpending)
+      rows = sortedSpendRows(byCat).map((r) => ({
+        key: r.category,
+        label: r.category,
+        amount: r.amount,
+        currency,
+        href: `/transactions?category=${encodeURIComponent(r.category)}&month=${thisKey}`,
+      }))
+      const spent = rows.reduce((s, r) => s + r.amount, 0)
+      total = { label: 'Total spent', amount: spent, currency }
+    } else {
+      // saved
+      const flows = monthlyFlows(
+        (flowTxns ?? []) as FlowTxn[],
+        pfcMap,
+        nonSpending,
+        transfers,
+        months
+      )
+      const m = flows[flows.length - 1]
+      rows = [
+        {
+          key: 'in',
+          label: 'Money in (income)',
+          amount: m.income,
+          currency,
+          href: `/transactions?flow=in&month=${thisKey}`,
+        },
+        {
+          key: 'out',
+          label: 'Money out (spending)',
+          amount: m.spending,
+          currency,
+          href: `/transactions?flow=out&month=${thisKey}`,
+        },
+      ]
+      total = { label: 'Saved this month', amount: m.income - m.spending, currency }
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <PageHeader title={header.title} subtitle={header.subtitle} />
+      <Card className="p-5">
+        <BreakdownList rows={rows} total={total} />
+      </Card>
+    </div>
+  )
+}
