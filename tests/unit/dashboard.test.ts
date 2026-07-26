@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { netWorth, cashOnHand, lastNMonths, monthlyFlows, type FlowTxn } from '@/lib/dashboard'
+import {
+  netWorth,
+  cashOnHand,
+  lastNMonths,
+  monthlyFlows,
+  sumManualAssets,
+  type FlowTxn,
+} from '@/lib/dashboard'
 
 describe('netWorth', () => {
   it('sums assets minus liabilities across account types', () => {
@@ -16,6 +23,15 @@ describe('netWorth', () => {
 
   it('treats null balances and unknown types as zero/ignored', () => {
     expect(netWorth([{ type: 'depository', current_balance: null }, { type: null, current_balance: 999 }])).toBe(0)
+  })
+})
+
+describe('sumManualAssets', () => {
+  it('sums values, treating null as zero', () => {
+    expect(sumManualAssets([{ value: 500000 }, { value: null }, { value: 12000 }])).toBe(512000)
+  })
+  it('is zero for an empty list', () => {
+    expect(sumManualAssets([])).toBe(0)
   })
 })
 
