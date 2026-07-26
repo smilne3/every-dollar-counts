@@ -115,7 +115,11 @@ export default async function TransactionsPage({
 
       {list.length === 0 ? (
         <Card className="p-8 text-center">
-          <p className="text-sm text-muted">No transactions yet. Connect a bank on the Dashboard.</p>
+          <p className="text-sm text-muted">
+            {account || category || month || flow || safe
+              ? 'No transactions to show for this view. (Balances-only accounts like a mortgage have none.)'
+              : 'No transactions yet. Connect a bank on the Dashboard.'}
+          </p>
         </Card>
       ) : (
         <Card className="overflow-hidden p-0">
