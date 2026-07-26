@@ -20,6 +20,12 @@ function Svg({ className, children }: { className?: string; children: ReactNode 
   )
 }
 
+export const ChevronRightIcon = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <path d="m9 18 6-6-6-6" />
+  </Svg>
+)
+
 export const HomeIcon = ({ className }: IconProps) => (
   <Svg className={className}>
     <path d="M3 11l9-8 9 8" />

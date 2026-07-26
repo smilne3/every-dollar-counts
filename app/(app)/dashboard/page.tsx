@@ -169,6 +169,7 @@ export default async function DashboardPage({
         <StatCard
           label="Net worth"
           value={money(worth, currency)}
+          href="/breakdown/net-worth"
           foot={
             <span className="text-muted">
               Across {accounts.length} account{accounts.length === 1 ? '' : 's'}
@@ -178,16 +179,23 @@ export default async function DashboardPage({
         <StatCard
           label="Cash on hand"
           value={money(cash, currency)}
+          href="/breakdown/cash"
           foot={
             <span className="text-muted">
               In {depCount} account{depCount === 1 ? '' : 's'}
             </span>
           }
         />
-        <StatCard label={`Spent in ${thisMonthLabel}`} value={money(spent, currency)} foot={budgetFoot} />
+        <StatCard
+          label={`Spent in ${thisMonthLabel}`}
+          value={money(spent, currency)}
+          href="/breakdown/spent"
+          foot={budgetFoot}
+        />
         <StatCard
           label="Saved this month"
           value={<span className={saved < 0 ? 'text-coral' : 'text-ink'}>{money(saved, currency)}</span>}
+          href="/breakdown/saved"
           foot={
             <span className="text-muted">
               {money(income, currency)} in · {money(spent, currency)} out
