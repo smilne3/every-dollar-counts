@@ -56,6 +56,19 @@ describe('spendByCategory', () => {
     expect(r['Loan Payments']).toBeCloseTo(3929.35)
   })
 
+  // A refund (inflow in a spending category) must NET DOWN that category, not be ignored.
+  it('nets refunds against their spending category', () => {
+    const r = spendByCategory(
+      [
+        t(800, '2026-07-04', 'TRAVEL'),
+        t(-500, '2026-07-20', 'TRAVEL'), // refund
+      ],
+      { ...pfcMap, TRAVEL: 'Travel' },
+      nonSpending
+    )
+    expect(r['Travel']).toBeCloseTo(300)
+  })
+
   it('ignores inflows and income/transfers', () => {
     const r = spendByCategory(
       [

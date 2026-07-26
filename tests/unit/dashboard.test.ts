@@ -125,6 +125,28 @@ describe('monthlyFlows', () => {
     expect(flows.find((f) => f.key === '2026-07')).toMatchObject({ spending: 1500, income: 0 })
   })
 
+  // A refund is an inflow (amount < 0) whose category is a SPENDING category — e.g. a $500 airline
+  // refund tagged Travel. It must REDUCE Travel spending, not count as income (the old bug) and not
+  // vanish. A genuine paycheck (inflow in the Income category) still counts as income.
+  it('nets a refund against its spending category instead of counting it as income', () => {
+    const withRefund: FlowTxn[] = [
+      { amount: 800, date: '2026-07-04', user_category: null, pfc_primary: 'TRAVEL', pfc_detailed: null },
+      { amount: -500, date: '2026-07-20', user_category: null, pfc_primary: 'TRAVEL', pfc_detailed: null }, // refund
+    ]
+    const map = { ...pfcMap, TRAVEL: 'Travel' }
+    const flows = monthlyFlows(withRefund, map, spendingExclude, incomeExclude, months)
+    // net Travel spend = 800 - 500 = 300; income unaffected
+    expect(flows.find((f) => f.key === '2026-07')).toMatchObject({ spending: 300, income: 0 })
+  })
+
+  it('still counts a genuine paycheck (inflow in an income category) as income', () => {
+    const paycheck: FlowTxn[] = [
+      { amount: -2000, date: '2026-07-05', user_category: null, pfc_primary: 'INCOME', pfc_detailed: null },
+    ]
+    const flows = monthlyFlows(paycheck, pfcMap, spendingExclude, incomeExclude, months)
+    expect(flows.find((f) => f.key === '2026-07')).toMatchObject({ spending: 0, income: 2000 })
+  })
+
   // If the user deliberately recategorized a card payment, honor the override (existing contract).
   it('honors a user override on a credit-card payment', () => {
     const overridden: FlowTxn[] = [
