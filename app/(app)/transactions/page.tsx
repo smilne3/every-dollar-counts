@@ -28,6 +28,10 @@ export default async function TransactionsPage({
 }) {
   const { q, account, category, month, flow, page: pageParam } = await searchParams
   const safe = (q ?? '').replace(/[,()%*]/g, ' ').trim()
+  // Category/flow are filtered in memory over one page, so those views are single-page (they're
+  // month-scoped drill-downs). Ignore any page param on them so a hand-crafted URL can't page into
+  // the wrong window.
+  const inMemoryFiltered = !!(category || flow === 'in' || flow === 'out')
 
   const supabase = await createClient()
   const { data: cats } = await supabase
@@ -50,7 +54,7 @@ export default async function TransactionsPage({
   }
 
   const PER_PAGE = 200
-  const page = Math.max(1, Number(pageParam) || 1)
+  const page = inMemoryFiltered ? 1 : Math.max(1, Number(pageParam) || 1)
   const from = (page - 1) * PER_PAGE
 
   // { count: 'exact' } returns the TOTAL matching count alongside the ranged page, so the list can
@@ -99,9 +103,8 @@ export default async function TransactionsPage({
     })
   }
 
-  // Category/flow are filtered in memory, so `totalMatching` (a SQL count) wouldn't describe them.
-  // Those views are month-scoped drill-downs (small), so they show a simple count and no paging.
-  const inMemoryFiltered = !!(category || flow === 'in' || flow === 'out')
+  // `totalMatching` (a SQL count) doesn't describe the in-memory-filtered views, so those show a
+  // simple count and no paging (see inMemoryFiltered above).
   const shownFrom = list.length ? from + 1 : 0
   const shownTo = from + list.length
   const hasPrev = !inMemoryFiltered && page > 1
@@ -172,7 +175,7 @@ export default async function TransactionsPage({
       {list.length === 0 ? (
         <Card className="p-8 text-center">
           <p className="text-sm text-muted">
-            {account || category || month || flow || safe
+            {account || category || month || flow || safe || page > 1
               ? 'No transactions to show for this view. (Balances-only accounts like a mortgage have none.)'
               : 'No transactions yet. Connect a bank on the Dashboard.'}
           </p>
