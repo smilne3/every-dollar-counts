@@ -104,16 +104,35 @@ describe('progress', () => {
 })
 
 describe('spendThisVsLast', () => {
-  it('buckets by month', () => {
+  it('buckets by month (full period when throughDay covers the month)', () => {
     const r = spendThisVsLast(
       [t(10, '2026-07-05', 'FOOD_AND_DRINK'), t(30, '2026-06-20', 'FOOD_AND_DRINK')],
       '2026-07',
       '2026-06',
       pfcMap,
-      nonSpending
+      nonSpending,
+      31
     )
     expect(r.thisMonth['Food & Drink']).toBe(10)
     expect(r.lastMonth['Food & Drink']).toBe(30)
+  })
+
+  // The #9 fix: mid-month, last month must be capped at the same day so it's a fair comparison.
+  it('caps last month at throughDay (apples-to-apples, not partial-vs-whole)', () => {
+    const r = spendThisVsLast(
+      [
+        t(10, '2026-07-05', 'FOOD_AND_DRINK'), // this month, day 5
+        t(30, '2026-06-05', 'FOOD_AND_DRINK'), // last month, day 5 — counts
+        t(200, '2026-06-25', 'FOOD_AND_DRINK'), // last month, day 25 — excluded on the 10th
+      ],
+      '2026-07',
+      '2026-06',
+      pfcMap,
+      nonSpending,
+      10 // "today" is the 10th
+    )
+    expect(r.thisMonth['Food & Drink']).toBe(10)
+    expect(r.lastMonth['Food & Drink']).toBe(30) // the day-25 $200 is not yet "reached" this month
   })
 })
 

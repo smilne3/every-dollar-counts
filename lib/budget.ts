@@ -51,12 +51,17 @@ export function progress(spend: number, limit: number): { ratio: number; over: b
 }
 
 // Split spending per category name across this month vs last month.
+// Compare this month against last month, per category. `throughDay` makes it apples-to-apples:
+// this month is month-to-date, so last month is capped at the SAME day of the month (e.g. on the
+// 14th, Jun 1–14 vs Jul 1–14). Without this cap, mid-month every category looks like a triumph —
+// a partial month against a whole one — which is misleading on a budget tool (#9).
 export function spendThisVsLast(
   txns: Txn[],
   thisM: string,
   lastM: string,
   pfcMap: Record<string, string>,
-  nonSpending: Set<string>
+  nonSpending: Set<string>,
+  throughDay: number
 ) {
   const thisMonth: Record<string, number> = {}
   const lastMonth: Record<string, number> = {}
@@ -66,8 +71,16 @@ export function spendThisVsLast(
     if (nonSpending.has(cat)) continue // income + transfers
     const mk = monthKey(t.date)
     // Outflows add; refunds (inflows in a spending category) net the category down.
-    if (mk === thisM) thisMonth[cat] = (thisMonth[cat] ?? 0) + t.amount
-    else if (mk === lastM) lastMonth[cat] = (lastMonth[cat] ?? 0) + t.amount
+    if (mk === thisM) {
+      thisMonth[cat] = (thisMonth[cat] ?? 0) + t.amount
+    } else if (mk === lastM && dayOfMonth(t.date) <= throughDay) {
+      lastMonth[cat] = (lastMonth[cat] ?? 0) + t.amount
+    }
   }
   return { thisMonth, lastMonth }
+}
+
+// Day component of a 'YYYY-MM-DD' date, as a number.
+export function dayOfMonth(date: string): number {
+  return Number(date.slice(8, 10))
 }

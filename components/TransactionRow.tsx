@@ -25,7 +25,12 @@ export function TransactionRow({
       <td className="px-4 py-3 whitespace-nowrap text-sm text-muted">{t.date}</td>
       <td className="px-4 py-3 font-medium text-ink">{t.merchant_name ?? t.name}</td>
       <td className="px-4 py-3">
-        <CategoryPicker transactionId={t.id} value={categoryName} options={categoryOptions} />
+        <CategoryPicker
+          transactionId={t.id}
+          value={categoryName}
+          options={categoryOptions}
+          label={t.merchant_name ?? t.name ?? undefined}
+        />
       </td>
       <td
         className={`px-4 py-3 text-right font-medium tabular-nums ${display < 0 ? 'text-ink' : 'text-emerald'}`}
