@@ -38,7 +38,16 @@ export default async function TrendsPage() {
     .map(([category, amount]) => ({ category, amount }))
     .sort((a, b) => b.amount - a.amount)
 
-  const { thisMonth, lastMonth } = spendThisVsLast(list, thisM, lastM, pfcMap, nonSpending)
+  // Cap last month at today's day-of-month so the comparison is fair mid-month (#9).
+  const throughDay = now.getDate()
+  const { thisMonth, lastMonth } = spendThisVsLast(
+    list,
+    thisM,
+    lastM,
+    pfcMap,
+    nonSpending,
+    throughDay
+  )
   const names = Array.from(new Set([...Object.keys(thisMonth), ...Object.keys(lastMonth)]))
   const momData = names
     .map((category) => ({
@@ -73,7 +82,7 @@ export default async function TrendsPage() {
         <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold text-ink">This month vs last</h2>
           <span className="text-xs text-faint">
-            {monthLabel} vs {lastMonthLabel}
+            {monthLabel} vs {lastMonthLabel}, through day {throughDay}
           </span>
         </div>
         <div className="mt-3">

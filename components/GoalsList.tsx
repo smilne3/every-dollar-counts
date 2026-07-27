@@ -131,6 +131,7 @@ function GoalCard({
             min="0"
             value={saved}
             onChange={(e) => setSaved(e.target.value)}
+            aria-label={`Amount saved for ${goal.name}`}
             className={inputClass}
           />
         </div>

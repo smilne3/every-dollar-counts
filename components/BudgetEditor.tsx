@@ -73,6 +73,7 @@ export function BudgetEditor({
                 min="0"
                 step="1"
                 placeholder="No limit"
+                aria-label={`${c} monthly budget limit`}
                 value={limits[c]}
                 onChange={(e) => setLimits({ ...limits, [c]: e.target.value })}
                 className={`${inputClass} w-28 text-right`}

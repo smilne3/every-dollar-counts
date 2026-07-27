@@ -23,10 +23,15 @@ export default async function TransactionsPage({
     category?: string
     month?: string
     flow?: string
+    page?: string
   }>
 }) {
-  const { q, account, category, month, flow } = await searchParams
+  const { q, account, category, month, flow, page: pageParam } = await searchParams
   const safe = (q ?? '').replace(/[,()%*]/g, ' ').trim()
+  // Category/flow are filtered in memory over one page, so those views are single-page (they're
+  // month-scoped drill-downs). Ignore any page param on them so a hand-crafted URL can't page into
+  // the wrong window.
+  const inMemoryFiltered = !!(category || flow === 'in' || flow === 'out')
 
   const supabase = await createClient()
   const { data: cats } = await supabase
@@ -48,12 +53,21 @@ export default async function TransactionsPage({
     accountName = acct?.name ?? null
   }
 
+  const PER_PAGE = 200
+  const page = inMemoryFiltered ? 1 : Math.max(1, Number(pageParam) || 1)
+  const from = (page - 1) * PER_PAGE
+
+  // { count: 'exact' } returns the TOTAL matching count alongside the ranged page, so the list can
+  // say "Showing 200 of 1,847" instead of silently ending at 200 (#7).
   let query = supabase
     .from('transactions')
-    .select('id, name, merchant_name, amount, date, user_category, pfc_primary, pfc_detailed, account_id')
+    .select(
+      'id, name, merchant_name, amount, date, user_category, pfc_primary, pfc_detailed, account_id',
+      { count: 'exact' }
+    )
     .eq('removed', false)
     .order('date', { ascending: false })
-    .limit(200)
+    .range(from, from + PER_PAGE - 1)
   if (safe) query = query.or(`name.ilike.%${safe}%,merchant_name.ilike.%${safe}%`)
   // Account and month are plain columns — filter in SQL.
   if (account) query = query.eq('account_id', account)
@@ -65,7 +79,8 @@ export default async function TransactionsPage({
     const end = `${nextY}-${String(nextM).padStart(2, '0')}-01`
     query = query.gte('date', start).lt('date', end)
   }
-  const { data: txns } = await query
+  const { data: txns, count } = await query
+  const totalMatching = count ?? 0
   let list = txns ?? []
 
   // Category and flow are on the transaction's EFFECTIVE category (computed), so filter in memory.
@@ -87,6 +102,27 @@ export default async function TransactionsPage({
       return flow === 'in' ? isIncomeCat && t.amount < 0 : !isIncomeCat
     })
   }
+
+  // `totalMatching` (a SQL count) doesn't describe the in-memory-filtered views, so those show a
+  // simple count and no paging (see inMemoryFiltered above).
+  const shownFrom = list.length ? from + 1 : 0
+  const shownTo = from + list.length
+  const hasPrev = !inMemoryFiltered && page > 1
+  const hasNext = !inMemoryFiltered && from + PER_PAGE < totalMatching
+  const pageHref = (p: number) => {
+    const sp = new URLSearchParams()
+    if (q) sp.set('q', q)
+    if (account) sp.set('account', account)
+    if (month) sp.set('month', month)
+    if (p > 1) sp.set('page', String(p))
+    const qs = sp.toString()
+    return qs ? `/transactions?${qs}` : '/transactions'
+  }
+  const countLabel = inMemoryFiltered
+    ? `Showing ${list.length} transaction${list.length === 1 ? '' : 's'}`
+    : totalMatching === 0
+      ? 'No transactions'
+      : `Showing ${shownFrom.toLocaleString()}–${shownTo.toLocaleString()} of ${totalMatching.toLocaleString()}`
 
   return (
     <div className="space-y-6">
@@ -134,10 +170,12 @@ export default async function TransactionsPage({
         </div>
       )}
 
+      {list.length > 0 && <p className="text-xs text-faint">{countLabel}</p>}
+
       {list.length === 0 ? (
         <Card className="p-8 text-center">
           <p className="text-sm text-muted">
-            {account || category || month || flow || safe
+            {account || category || month || flow || safe || page > 1
               ? 'No transactions to show for this view. (Balances-only accounts like a mortgage have none.)'
               : 'No transactions yet. Connect a bank on the Dashboard.'}
           </p>
@@ -175,6 +213,26 @@ export default async function TransactionsPage({
             </table>
           </div>
         </Card>
+      )}
+
+      {(hasPrev || hasNext) && (
+        <div className="flex items-center justify-between">
+          {hasPrev ? (
+            <a href={pageHref(page - 1)} className="text-sm font-medium text-emerald hover:text-emerald-600">
+              ← Newer
+            </a>
+          ) : (
+            <span />
+          )}
+          <span className="text-xs text-faint">Page {page}</span>
+          {hasNext ? (
+            <a href={pageHref(page + 1)} className="text-sm font-medium text-emerald hover:text-emerald-600">
+              Older →
+            </a>
+          ) : (
+            <span />
+          )}
+        </div>
       )}
     </div>
   )

@@ -8,10 +8,12 @@ export function CategoryPicker({
   transactionId,
   value,
   options,
+  label,
 }: {
   transactionId: string
   value: string
   options: string[]
+  label?: string
 }) {
   const router = useRouter()
   const [val, setVal] = useState(value)
@@ -34,7 +36,13 @@ export function CategoryPicker({
   }
 
   return (
-    <select value={val} onChange={change} disabled={saving} className={selectClass}>
+    <select
+      value={val}
+      onChange={change}
+      disabled={saving}
+      aria-label={label ? `Category for ${label}` : 'Transaction category'}
+      className={selectClass}
+    >
       {opts.map((c) => (
         <option key={c} value={c}>
           {c}

@@ -38,6 +38,7 @@ export function InvitePartnerForm({ householdId }: { householdId: string }) {
           type="email"
           required
           placeholder="partner@email.com"
+          aria-label="Partner's email address"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />

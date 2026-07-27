@@ -72,6 +72,7 @@ export function CategoryManager({
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
           placeholder="New category (e.g. Kids, Pets)…"
+          aria-label="New category name"
           className={`${inputClass} flex-1`}
         />
         <Button type="submit" disabled={busy}>
@@ -108,6 +109,7 @@ function CategoryRow({
       <input
         value={name}
         onChange={(e) => setName(e.target.value)}
+        aria-label={`Rename category ${cat.name}`}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
             e.preventDefault()
