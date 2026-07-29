@@ -125,7 +125,11 @@ Allocation is **pro-rata across the categories of that claim's expense splits**,
 
 ### Modified
 
-`spendByCategory`, `spendThisVsLast` (`lib/budget.ts`) and `monthlyFlows` (`lib/dashboard.ts`) call `spendableAmount(...)` instead of reading `t.amount`, and fold in any `reimbursement_write_offs` rows falling in the period as ordinary spending in their stored category. Their `Txn` / `FlowTxn` types gain `id: string`.
+`spendByCategory`, `spendThisVsLast` (`lib/budget.ts`) and `monthlyFlows` (`lib/dashboard.ts`) call `spendableAmount(...)` instead of reading `t.amount`. Their `Txn` / `FlowTxn` types gain `id: string`.
+
+**Write-offs need no changes inside those three functions.** A helper `writeOffsAsTxns(writeOffs)` maps stored write-off rows into in-memory transaction-shaped values (`user_category` = the stored category, `amount`, `date`), which pages concatenate onto their transaction list before the month filtering they already do. `effectiveCategory` honours `user_category` first, so each write-off lands in the right category by the existing path.
+
+This is in-memory synthesis at read time, which is categorically different from the rejected option in §4 — nothing is written to `transactions`, so the user's ledger still matches their bank statement.
 
 ### Folded-in refactor: one `SpendContext`
 
@@ -183,7 +187,7 @@ The live "your share" readout is the point of the layout: you see the number tha
 ## 8. Edge cases
 
 - **Splits exceed the transaction amount** → rejected by the API. A per-row `check (amount > 0)` cannot see sibling rows, so the cross-row sum is validated server-side on every write, against both `abs(transaction.amount)` and — for a repayment — the claim's current outstanding.
-- **Overpayment** — Dave rounds $250 up to $260. You tag $250 against the claim (the API won't accept a repayment split above outstanding), and the extra $10 is simply **left unsplit**, so it falls through as ordinary income. No capping logic is needed in the math layer: the surplus is income for the same reason any untagged inflow is. This is the same "the remainder is implicit" property as §4, running in the other direction.
+- **Overpayment** — Dave rounds $250 up to $260. You tag $250 against the claim (the API won't accept a repayment split above outstanding), and the extra $10 is simply **left unsplit**, so it is treated exactly as an untagged $10 inflow of that category would be: income in an income category, or a refund netting that category down in a spending category. No capping logic is needed in the math layer. This is the same "the remainder is implicit" property as §4, running in the other direction.
 - **Money arrives after a write-off** → the claim is closed and stays closed; that inflow is ordinary income. Reopening is out of scope.
 - **Transaction deleted, or `removed = true`** → splits cascade via FK; claim totals recompute from what remains. Frozen write-off rows are unaffected by design (§5).
 - **Deleting a claim that has splits** → `ConfirmDialog`, then cascade.
