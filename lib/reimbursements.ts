@@ -75,3 +75,64 @@ export function writeOffsAsTxns(writeOffs: WriteOff[]): WriteOffTxn[] {
     pfc_detailed: null,
   }))
 }
+
+export type PersonTotal = {
+  owedBy: string // 'Unattributed' when the split has no owed_by
+  owed: number
+  returned: number
+  outstanding: number
+}
+
+export type ClaimTotals = {
+  owed: number
+  returned: number
+  outstanding: number
+  settled: boolean // DERIVED from the totals — deliberately not a stored column
+  writtenOff: boolean
+  byPerson: PersonTotal[] // biggest outstanding first
+}
+
+const UNATTRIBUTED = 'Unattributed'
+
+// Totals for ONE claim. `splits` must be that claim's splits; `amountById` maps transaction id to
+// its signed amount, which is how a split's direction is read: a split on an outflow is money owed
+// to you, a split on an inflow is money that came back.
+export function claimTotals(
+  claim: Claim,
+  splits: Split[],
+  amountById: Record<string, number>
+): ClaimTotals {
+  const people = new Map<string, PersonTotal>()
+  let owed = 0
+  let returned = 0
+
+  for (const s of splits) {
+    const txnAmount = amountById[s.transaction_id]
+    // Unknown transaction (deleted, or outside the fetched window): skip rather than guess, since a
+    // missing amount would otherwise read as an inflow and be counted as a repayment.
+    if (txnAmount === undefined) continue
+    const isRepayment = txnAmount < 0
+
+    const key = s.owed_by?.trim() || UNATTRIBUTED
+    const p = people.get(key) ?? { owedBy: key, owed: 0, returned: 0, outstanding: 0 }
+    if (isRepayment) {
+      returned += s.amount
+      p.returned += s.amount
+    } else {
+      owed += s.amount
+      p.owed += s.amount
+    }
+    p.outstanding = p.owed - p.returned
+    people.set(key, p)
+  }
+
+  const outstanding = owed - returned
+  return {
+    owed,
+    returned,
+    outstanding,
+    settled: outstanding <= 0,
+    writtenOff: claim.written_off_on !== null,
+    byPerson: [...people.values()].sort((a, b) => b.outstanding - a.outstanding),
+  }
+}

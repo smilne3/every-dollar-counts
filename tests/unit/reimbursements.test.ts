@@ -3,7 +3,9 @@ import {
   reimbursedByTxn,
   spendableAmount,
   writeOffsAsTxns,
+  claimTotals,
   type Split,
+  type Claim,
 } from '@/lib/reimbursements'
 
 const split = (transaction_id: string, amount: number, owed_by: string | null = null): Split => ({
@@ -96,5 +98,88 @@ describe('writeOffsAsTxns', () => {
     expect(new Set(ids).size).toBe(2)
     // Real transaction ids are uuids, so a prefixed id cannot pick up a real split.
     for (const id of ids) expect(id.startsWith('writeoff:')).toBe(true)
+  })
+})
+
+describe('claimTotals', () => {
+  const open: Claim = { id: 'c1', name: 'Vacation rental', written_off_on: null }
+
+  // The scenario from the spec: $1,000 rental, $250 each from three people, Dave has paid.
+  const splits: Split[] = [
+    { transaction_id: 'rental', claim_id: 'c1', owed_by: 'Dave', amount: 250 },
+    { transaction_id: 'rental', claim_id: 'c1', owed_by: 'Sam', amount: 250 },
+    { transaction_id: 'rental', claim_id: 'c1', owed_by: 'Priya', amount: 250 },
+    { transaction_id: 'dave-repay', claim_id: 'c1', owed_by: 'Dave', amount: 250 },
+  ]
+  const amountById = { rental: 1000, 'dave-repay': -250 }
+
+  it('splits owed from returned by the sign of the transaction', () => {
+    const r = claimTotals(open, splits, amountById)
+    expect(r.owed).toBeCloseTo(750)
+    expect(r.returned).toBeCloseTo(250)
+    expect(r.outstanding).toBeCloseTo(500)
+  })
+
+  it('breaks the outstanding amount down per person', () => {
+    const r = claimTotals(open, splits, amountById)
+    const byName = Object.fromEntries(r.byPerson.map((p) => [p.owedBy, p]))
+    expect(byName['Dave'].outstanding).toBeCloseTo(0)
+    expect(byName['Sam'].outstanding).toBeCloseTo(250)
+    expect(byName['Priya'].outstanding).toBeCloseTo(250)
+  })
+
+  it('sorts the biggest outstanding debtor first', () => {
+    const r = claimTotals(open, splits, amountById)
+    expect(r.byPerson[r.byPerson.length - 1].owedBy).toBe('Dave') // fully paid, so last
+  })
+
+  // "Settled" is DERIVED, never stored — there is no status column to drift.
+  it('derives settled from the totals, not from a stored field', () => {
+    const paid: Split[] = [
+      { transaction_id: 'rental', claim_id: 'c1', owed_by: 'Dave', amount: 250 },
+      { transaction_id: 'dave-repay', claim_id: 'c1', owed_by: 'Dave', amount: 250 },
+    ]
+    const r = claimTotals(open, paid, { rental: 1000, 'dave-repay': -250 })
+    expect(r.outstanding).toBe(0)
+    expect(r.settled).toBe(true)
+    expect(r.writtenOff).toBe(false)
+  })
+
+  it('is not settled while anything is outstanding', () => {
+    expect(claimTotals(open, splits, amountById).settled).toBe(false)
+  })
+
+  it('reports a written-off claim as written off', () => {
+    const written: Claim = { id: 'c1', name: 'Q3 work travel', written_off_on: '2026-11-03' }
+    const r = claimTotals(written, splits, amountById)
+    expect(r.writtenOff).toBe(true)
+  })
+
+  it('groups splits with no person under Unattributed', () => {
+    const r = claimTotals(
+      open,
+      [{ transaction_id: 'rental', claim_id: 'c1', owed_by: null, amount: 400 }],
+      { rental: 500 }
+    )
+    expect(r.byPerson).toHaveLength(1)
+    expect(r.byPerson[0].owedBy).toBe('Unattributed')
+    expect(r.byPerson[0].outstanding).toBeCloseTo(400)
+  })
+
+  it('is all zeroes for a claim with no splits', () => {
+    const r = claimTotals(open, [], {})
+    expect(r).toMatchObject({ owed: 0, returned: 0, outstanding: 0, byPerson: [] })
+  })
+
+  // A split whose transaction is missing from the map (deleted, or outside the fetched window)
+  // must not silently count as a repayment just because its amount reads as 0.
+  it('ignores a split whose transaction is unknown', () => {
+    const r = claimTotals(
+      open,
+      [{ transaction_id: 'ghost', claim_id: 'c1', owed_by: 'Dave', amount: 250 }],
+      {}
+    )
+    expect(r.owed).toBe(0)
+    expect(r.returned).toBe(0)
   })
 })
