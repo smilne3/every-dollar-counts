@@ -14,7 +14,7 @@ import {
 } from '@/lib/dashboard'
 import { listManualAssets } from '@/lib/manual-assets'
 import { spendByCategory, monthKey, type Txn } from '@/lib/budget'
-import { pfcToName, nonSpendingNames, transferNames, type Category } from '@/lib/categories'
+import { type Category } from '@/lib/categories'
 import { buildSpendContext } from '@/lib/spend-context'
 import { writeOffsAsTxns, type Split, type WriteOff } from '@/lib/reimbursements'
 
@@ -98,9 +98,6 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
       .select('id, name, pfc_primary, sort_order')
       .order('sort_order')
     const categories = (cats ?? []) as Category[]
-    const pfcMap = pfcToName(categories)
-    const nonSpending = nonSpendingNames(categories)
-    const transfers = transferNames(categories)
 
     const now = new Date()
     const months = lastNMonths(now, 6)
@@ -140,13 +137,7 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
       total = { label: 'Total spent', amount: spent, currency }
     } else {
       // saved
-      const flows = monthlyFlows(
-        (flowTxns ?? []) as FlowTxn[],
-        pfcMap,
-        nonSpending,
-        transfers,
-        months
-      )
+      const flows = monthlyFlows(withWriteOffs as FlowTxn[], ctx, months)
       const m = flows[flows.length - 1]
       rows = [
         {

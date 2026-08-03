@@ -10,7 +10,7 @@ import { StatCard } from '@/components/ui/StatCard'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { money } from '@/lib/format'
 import { effectiveCategory } from '@/lib/effective-category'
-import { pfcToName, nonSpendingNames, transferNames, type Category } from '@/lib/categories'
+import { pfcToName, type Category } from '@/lib/categories'
 import {
   netWorth,
   cashOnHand,
@@ -90,8 +90,6 @@ export default async function DashboardPage({
     .order('sort_order')
   const categories = (catsData ?? []) as Category[]
   const pfcMap = pfcToName(categories)
-  const nonSpending = nonSpendingNames(categories)
-  const transfers = transferNames(categories)
 
   const months = lastNMonths(now, 6)
   const sixStart = `${months[0].key}-01`
@@ -117,7 +115,7 @@ export default async function DashboardPage({
     ...writeOffsAsTxns((writeOffRows ?? []) as WriteOff[]),
   ]
 
-  const flows = monthlyFlows((flowTxns ?? []) as FlowTxn[], pfcMap, nonSpending, transfers, months)
+  const flows = monthlyFlows(withWriteOffs as FlowTxn[], ctx, months)
   const thisMonth = flows[flows.length - 1]
   const spent = thisMonth.spending
   const income = thisMonth.income
