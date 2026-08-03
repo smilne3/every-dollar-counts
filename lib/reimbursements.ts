@@ -108,8 +108,8 @@ export function claimTotals(
 
   for (const s of splits) {
     const txnAmount = amountById[s.transaction_id]
-    // Unknown transaction (deleted, or outside the fetched window): skip rather than guess, since a
-    // missing amount would otherwise read as an inflow and be counted as a repayment.
+    // Unknown transaction (deleted, or outside the fetched window): skip rather than guess, since it
+    // has no direction and would silently be treated as an expense, inflating what the claim is owed.
     if (txnAmount === undefined) continue
     const isRepayment = txnAmount < 0
 

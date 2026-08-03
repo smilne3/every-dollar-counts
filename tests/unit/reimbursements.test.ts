@@ -172,7 +172,7 @@ describe('claimTotals', () => {
   })
 
   // A split whose transaction is missing from the map (deleted, or outside the fetched window)
-  // must not silently count as a repayment just because its amount reads as 0.
+  // must be skipped entirely, since without the guard it would silently be treated as an expense.
   it('ignores a split whose transaction is unknown', () => {
     const r = claimTotals(
       open,
@@ -181,5 +181,21 @@ describe('claimTotals', () => {
     )
     expect(r.owed).toBe(0)
     expect(r.returned).toBe(0)
+    expect(r.byPerson).toHaveLength(0) // No person bucket created before the continue
+  })
+
+  // Proves the guard is strict (=== undefined), not falsy: a transaction with amount 0 exists
+  // and should be processed (0 is not < 0, so it counts as owed), unlike an undefined amount.
+  it('processes a transaction with amount 0 as an outflow', () => {
+    const r = claimTotals(
+      open,
+      [{ transaction_id: 'zero-expense', claim_id: 'c1', owed_by: 'Dave', amount: 50 }],
+      { 'zero-expense': 0 }
+    )
+    expect(r.owed).toBeCloseTo(50) // Processed as an outflow, not skipped
+    expect(r.returned).toBe(0)
+    expect(r.byPerson).toHaveLength(1)
+    expect(r.byPerson[0].owedBy).toBe('Dave')
+    expect(r.byPerson[0].owed).toBeCloseTo(50)
   })
 })
