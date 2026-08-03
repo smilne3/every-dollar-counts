@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { spendByCategory, budgetedSpend, progress, spendThisVsLast, monthKey } from '@/lib/budget'
+import type { SpendContext } from '@/lib/spend-context'
 
 const pfcMap: Record<string, string> = {
   FOOD_AND_DRINK: 'Food & Drink',
@@ -10,13 +11,29 @@ const pfcMap: Record<string, string> = {
 }
 const nonSpending = new Set(['Income', 'Transfer In', 'Transfer Out'])
 
+// A context with no reimbursables — the baseline every pre-existing test uses. These tests passing
+// unchanged is the proof that an empty split map is a no-op.
+const ctx = (
+  over: Partial<SpendContext> = {},
+  map: Record<string, string> = pfcMap
+): SpendContext => ({
+  pfcMap: map,
+  nonSpending,
+  transfers: new Set(['Transfer In', 'Transfer Out']),
+  reimbursedByTxn: {},
+  ...over,
+})
+
+let seq = 0
 const t = (
   amount: number,
   date: string,
   pfc: string,
   override: string | null = null,
-  pfc_detailed: string | null = null
+  pfc_detailed: string | null = null,
+  id: string = `t${++seq}`
 ) => ({
+  id,
   amount,
   date,
   pfc_primary: pfc,
@@ -32,8 +49,7 @@ describe('spendByCategory', () => {
         t(4.33, '2026-07-10', 'FOOD_AND_DRINK'),
         t(5.4, '2026-07-13', 'TRANSPORTATION'),
       ],
-      pfcMap,
-      nonSpending
+      ctx()
     )
     expect(r['Food & Drink']).toBeCloseTo(16.33)
     expect(r['Transportation']).toBeCloseTo(5.4)
@@ -49,8 +65,7 @@ describe('spendByCategory', () => {
         t(493.75, '2026-07-11', 'LOAN_PAYMENTS', null, 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT'),
         t(3929.35, '2026-07-01', 'LOAN_PAYMENTS', null, 'LOAN_PAYMENTS_MORTGAGE_PAYMENT'),
       ],
-      { ...pfcMap, LOAN_PAYMENTS: 'Loan Payments' },
-      nonSpending
+      ctx({}, { ...pfcMap, LOAN_PAYMENTS: 'Loan Payments' })
     )
     // only the mortgage remains under Loan Payments; the two card payments are gone
     expect(r['Loan Payments']).toBeCloseTo(3929.35)
@@ -63,8 +78,7 @@ describe('spendByCategory', () => {
         t(800, '2026-07-04', 'TRAVEL'),
         t(-500, '2026-07-20', 'TRAVEL'), // refund
       ],
-      { ...pfcMap, TRAVEL: 'Travel' },
-      nonSpending
+      ctx({}, { ...pfcMap, TRAVEL: 'Travel' })
     )
     expect(r['Travel']).toBeCloseTo(300)
   })
@@ -76,8 +90,7 @@ describe('spendByCategory', () => {
         t(1000, '2026-07-12', 'TRANSFER_OUT'),
         t(20, '2026-07-12', 'ENTERTAINMENT'),
       ],
-      pfcMap,
-      nonSpending
+      ctx()
     )
     expect(r['Income']).toBeUndefined()
     expect(r['Transfer Out']).toBeUndefined()
@@ -87,11 +100,50 @@ describe('spendByCategory', () => {
   it('honors a user re-categorization (by name)', () => {
     const r = spendByCategory(
       [t(12, '2026-07-10', 'FOOD_AND_DRINK', 'Entertainment')],
-      pfcMap,
-      nonSpending
+      ctx()
     )
     expect(r['Entertainment']).toBe(12)
     expect(r['Food & Drink']).toBeUndefined()
+  })
+
+  // #27: the $1,000 rental split three ways. Only the unsplit $250 is the user's spending.
+  it('counts only the unsplit remainder of a reimbursable outflow', () => {
+    const rental = t(1000, '2026-07-04', 'TRAVEL', null, null, 'rental')
+    const r = spendByCategory(
+      [rental],
+      ctx({ reimbursedByTxn: { rental: 750 } }, { ...pfcMap, TRAVEL: 'Travel' })
+    )
+    expect(r['Travel']).toBeCloseTo(250)
+  })
+
+  // A repayment tagged to a claim is flow-neutral: it must NOT net the category down like a refund.
+  it('ignores a fully tagged repayment inflow', () => {
+    const rental = t(1000, '2026-07-04', 'TRAVEL', null, null, 'rental')
+    const repay = t(-250, '2026-08-03', 'TRAVEL', null, null, 'repay')
+    const r = spendByCategory(
+      [rental, repay],
+      ctx({ reimbursedByTxn: { rental: 750, repay: 250 } }, { ...pfcMap, TRAVEL: 'Travel' })
+    )
+    // 250 of real spending, and the repayment contributes nothing at all.
+    expect(r['Travel']).toBeCloseTo(250)
+  })
+
+  // A written-off claim arrives as a synthesised transaction in its allocated category.
+  it('counts a write-off as spending in its allocated category', () => {
+    const r = spendByCategory(
+      [
+        {
+          id: 'writeoff:c1:0',
+          amount: 540,
+          date: '2026-11-03',
+          user_category: 'Food & Drink',
+          pfc_primary: null,
+          pfc_detailed: null,
+        },
+      ],
+      ctx()
+    )
+    expect(r['Food & Drink']).toBeCloseTo(540)
   })
 })
 
@@ -109,8 +161,7 @@ describe('spendThisVsLast', () => {
       [t(10, '2026-07-05', 'FOOD_AND_DRINK'), t(30, '2026-06-20', 'FOOD_AND_DRINK')],
       '2026-07',
       '2026-06',
-      pfcMap,
-      nonSpending,
+      ctx(),
       31
     )
     expect(r.thisMonth['Food & Drink']).toBe(10)
@@ -127,8 +178,7 @@ describe('spendThisVsLast', () => {
       ],
       '2026-07',
       '2026-06',
-      pfcMap,
-      nonSpending,
+      ctx(),
       10 // "today" is the 10th
     )
     expect(r.thisMonth['Food & Drink']).toBe(10)

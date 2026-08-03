@@ -22,6 +22,8 @@ import {
 import { listItemsForHousehold } from '@/lib/plaid-items'
 import { listManualAssets } from '@/lib/manual-assets'
 import { budgetedSpend, spendByCategory, monthKey, type Txn } from '@/lib/budget'
+import { buildSpendContext } from '@/lib/spend-context'
+import { writeOffsAsTxns, type Split, type WriteOff } from '@/lib/reimbursements'
 
 function greeting(hour: number): string {
   if (hour < 12) return 'Good morning'
@@ -96,9 +98,25 @@ export default async function DashboardPage({
 
   const { data: flowTxns } = await supabase
     .from('transactions')
-    .select('amount, date, user_category, pfc_primary, pfc_detailed')
+    .select('id, amount, date, user_category, pfc_primary, pfc_detailed')
     .eq('removed', false)
     .gte('date', sixStart)
+
+  const { data: splitRows } = await supabase
+    .from('reimbursement_splits')
+    .select('transaction_id, claim_id, owed_by, amount')
+  const { data: writeOffRows } = await supabase
+    .from('reimbursement_write_offs')
+    .select('claim_id, category, amount, date')
+    .gte('date', sixStart)
+
+  const ctx = buildSpendContext({ categories, splits: (splitRows ?? []) as Split[] })
+  // A written-off claim is spending in the month it was written off, so it joins the list here.
+  const withWriteOffs = [
+    ...((flowTxns ?? []) as Txn[]),
+    ...writeOffsAsTxns((writeOffRows ?? []) as WriteOff[]),
+  ]
+
   const flows = monthlyFlows((flowTxns ?? []) as FlowTxn[], pfcMap, nonSpending, transfers, months)
   const thisMonth = flows[flows.length - 1]
   const spent = thisMonth.spending
@@ -113,8 +131,8 @@ export default async function DashboardPage({
 
   // Only spend in budgeted categories counts against the budget total — see budgetedSpend.
   const thisMonthKey = months[months.length - 1].key
-  const monthTxns = ((flowTxns ?? []) as Txn[]).filter((t) => monthKey(t.date) === thisMonthKey)
-  const trackedSpend = budgetedSpend(spendByCategory(monthTxns, pfcMap, nonSpending), limits)
+  const monthTxns = withWriteOffs.filter((t) => monthKey(t.date) === thisMonthKey)
+  const trackedSpend = budgetedSpend(spendByCategory(monthTxns, ctx), limits)
 
   const { data: recentTxns } = await supabase
     .from('transactions')

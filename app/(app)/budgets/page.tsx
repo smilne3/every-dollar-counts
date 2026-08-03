@@ -1,7 +1,9 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { spendByCategory } from '@/lib/budget'
-import { pfcToName, spendingCategoryNames, nonSpendingNames, type Category } from '@/lib/categories'
+import { spendingCategoryNames, type Category } from '@/lib/categories'
+import { buildSpendContext } from '@/lib/spend-context'
+import { writeOffsAsTxns, type Split, type WriteOff } from '@/lib/reimbursements'
 import { BudgetEditor } from '@/components/BudgetEditor'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { buttonClass } from '@/components/ui/Button'
@@ -19,19 +21,30 @@ export default async function BudgetsPage() {
     .select('id, name, pfc_primary, sort_order')
     .order('sort_order')
   const categories = (cats ?? []) as Category[]
-  const pfcMap = pfcToName(categories)
-  const nonSpending = nonSpendingNames(categories)
   const categoryNames = spendingCategoryNames(categories)
 
   const { data: txns } = await supabase
     .from('transactions')
-    .select('amount, date, user_category, pfc_primary, pfc_detailed')
+    .select('id, amount, date, user_category, pfc_primary, pfc_detailed')
     .eq('removed', false)
     .gte('date', monthStart)
     .lt('date', nextMonthStart)
+
+  const { data: splitRows } = await supabase
+    .from('reimbursement_splits')
+    .select('transaction_id, claim_id, owed_by, amount')
+  const { data: writeOffRows } = await supabase
+    .from('reimbursement_write_offs')
+    .select('claim_id, category, amount, date')
+    .gte('date', monthStart)
+    .lt('date', nextMonthStart)
+
   const { data: budgets } = await supabase.from('budgets').select('category, monthly_limit')
 
-  const spend = spendByCategory(txns ?? [], pfcMap, nonSpending)
+  const ctx = buildSpendContext({ categories, splits: (splitRows ?? []) as Split[] })
+  // A written-off claim is spending in the month it was written off, so it joins the list here.
+  const withWriteOffs = [...(txns ?? []), ...writeOffsAsTxns((writeOffRows ?? []) as WriteOff[])]
+  const spend = spendByCategory(withWriteOffs, ctx)
   const initialLimits: Record<string, number> = {}
   for (const b of budgets ?? []) initialLimits[b.category] = Number(b.monthly_limit)
 
