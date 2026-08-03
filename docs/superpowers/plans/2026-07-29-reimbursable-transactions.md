@@ -1034,8 +1034,10 @@ export function claimTotals(
 
   for (const s of splits) {
     const txnAmount = amountById[s.transaction_id]
-    // Unknown transaction (deleted, or outside the fetched window): skip rather than guess, since a
-    // missing amount would otherwise read as an inflow and be counted as a repayment.
+    // Unknown transaction (deleted, or outside the fetched window): skip rather than guess. Without
+    // this, `undefined < 0` is false, so the split would fall through as an EXPENSE and silently
+    // inflate what the claim claims it is owed. Must be `=== undefined`, not a falsy check — a
+    // transaction legitimately worth 0 has a known direction and should still be processed.
     if (txnAmount === undefined) continue
     const isRepayment = txnAmount < 0
 
