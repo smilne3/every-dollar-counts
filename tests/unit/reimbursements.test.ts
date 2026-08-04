@@ -4,6 +4,7 @@ import {
   spendableAmount,
   writeOffsAsTxns,
   claimTotals,
+  allocateWriteOff,
   type Split,
   type Claim,
 } from '@/lib/reimbursements'
@@ -197,5 +198,124 @@ describe('claimTotals', () => {
     expect(r.byPerson).toHaveLength(1)
     expect(r.byPerson[0].owedBy).toBe('Dave')
     expect(r.byPerson[0].owed).toBeCloseTo(50)
+  })
+})
+
+describe('allocateWriteOff', () => {
+  const open: Claim = { id: 'c1', name: 'Bourbon trail trip', written_off_on: null }
+
+  it('writes off the unreturned amount, dated the write-off day', () => {
+    const splits: Split[] = [
+      { transaction_id: 'dinner', claim_id: 'c1', owed_by: 'Dave', amount: 840 },
+      { transaction_id: 'repay', claim_id: 'c1', owed_by: 'Dave', amount: 300 },
+    ]
+    const r = allocateWriteOff(
+      open,
+      splits,
+      { dinner: 'Food & Drink', repay: 'Transfer In' },
+      { dinner: 900, repay: -300 },
+      '2026-11-03'
+    )
+    expect(r).toHaveLength(1)
+    expect(r[0].amount).toBeCloseTo(540) // 840 owed - 300 returned
+    expect(r[0].category).toBe('Food & Drink')
+    expect(r[0].date).toBe('2026-11-03') // NOT the original expense date
+    expect(r[0].claim_id).toBe('c1')
+  })
+
+  it('allocates pro-rata across the categories the expenses came from', () => {
+    const splits: Split[] = [
+      { transaction_id: 'hotel', claim_id: 'c1', owed_by: 'Sam', amount: 750 },
+      { transaction_id: 'dinner', claim_id: 'c1', owed_by: 'Sam', amount: 250 },
+    ]
+    const r = allocateWriteOff(
+      open,
+      splits,
+      { hotel: 'Travel', dinner: 'Food & Drink' },
+      { hotel: 1000, dinner: 300 },
+      '2026-11-03'
+    )
+    const byCat = Object.fromEntries(r.map((w) => [w.category, w.amount]))
+    // $1,000 owed, nothing returned: Travel 75%, Food & Drink 25%.
+    expect(byCat['Travel']).toBeCloseTo(750)
+    expect(byCat['Food & Drink']).toBeCloseTo(250)
+  })
+
+  it('allocates a partial repayment pro-rata too', () => {
+    const splits: Split[] = [
+      { transaction_id: 'hotel', claim_id: 'c1', owed_by: 'Sam', amount: 750 },
+      { transaction_id: 'dinner', claim_id: 'c1', owed_by: 'Sam', amount: 250 },
+      { transaction_id: 'repay', claim_id: 'c1', owed_by: 'Sam', amount: 400 },
+    ]
+    const r = allocateWriteOff(
+      open,
+      splits,
+      { hotel: 'Travel', dinner: 'Food & Drink', repay: 'Transfer In' },
+      { hotel: 1000, dinner: 300, repay: -400 },
+      '2026-11-03'
+    )
+    const byCat = Object.fromEntries(r.map((w) => [w.category, w.amount]))
+    // $600 unreturned, split 75/25.
+    expect(byCat['Travel']).toBeCloseTo(450)
+    expect(byCat['Food & Drink']).toBeCloseTo(150)
+    expect(r.reduce((s, w) => s + w.amount, 0)).toBeCloseTo(600)
+  })
+
+  it('merges two expenses in the same category into one row', () => {
+    const splits: Split[] = [
+      { transaction_id: 'lunch', claim_id: 'c1', owed_by: 'Sam', amount: 100 },
+      { transaction_id: 'dinner', claim_id: 'c1', owed_by: 'Sam', amount: 300 },
+    ]
+    const r = allocateWriteOff(
+      open,
+      splits,
+      { lunch: 'Food & Drink', dinner: 'Food & Drink' },
+      { lunch: 120, dinner: 350 },
+      '2026-11-03'
+    )
+    expect(r).toHaveLength(1)
+    expect(r[0].amount).toBeCloseTo(400)
+  })
+
+  it('writes off nothing for a fully repaid claim', () => {
+    const splits: Split[] = [
+      { transaction_id: 'dinner', claim_id: 'c1', owed_by: 'Dave', amount: 250 },
+      { transaction_id: 'repay', claim_id: 'c1', owed_by: 'Dave', amount: 250 },
+    ]
+    expect(
+      allocateWriteOff(
+        open,
+        splits,
+        { dinner: 'Food & Drink', repay: 'Transfer In' },
+        { dinner: 300, repay: -250 },
+        '2026-11-03'
+      )
+    ).toEqual([])
+  })
+
+  it('writes off nothing for a claim with no splits', () => {
+    expect(allocateWriteOff(open, [], {}, {}, '2026-11-03')).toEqual([])
+  })
+
+  // Rounding must not lose or invent a cent: three equal shares of $100.01 do not divide evenly, so
+  // this pins the residual-cent behaviour. The rows must sum to the outstanding amount EXACTLY.
+  it('makes the rows sum to the outstanding amount despite rounding', () => {
+    const splits: Split[] = [
+      { transaction_id: 'a', claim_id: 'c1', owed_by: null, amount: 100 },
+      { transaction_id: 'b', claim_id: 'c1', owed_by: null, amount: 100 },
+      { transaction_id: 'c', claim_id: 'c1', owed_by: null, amount: 100 },
+      // $199.99 came back, leaving $100.01 outstanding across three equal categories.
+      { transaction_id: 'repay', claim_id: 'c1', owed_by: null, amount: 199.99 },
+    ]
+    const r = allocateWriteOff(
+      open,
+      splits,
+      { a: 'Travel', b: 'Food & Drink', c: 'Entertainment', repay: 'Transfer In' },
+      { a: 100, b: 100, c: 100, repay: -199.99 },
+      '2026-11-03'
+    )
+    expect(r).toHaveLength(3)
+    // 33.34 + 33.34 + 33.33 — the last row absorbs the residual cent.
+    expect(r.reduce((s, w) => s + w.amount, 0)).toBeCloseTo(100.01, 2)
   })
 })

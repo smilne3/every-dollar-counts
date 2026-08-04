@@ -136,3 +136,50 @@ export function claimTotals(
     byPerson: [...people.values()].sort((a, b) => b.outstanding - a.outstanding),
   }
 }
+
+// Freeze a claim's unreturned amount into spending rows, dated the day the user gave up.
+// Allocated pro-rata across the categories the expenses came from, so budgets and the per-category
+// breakdown stay coherent for a claim that spanned Travel and Food & Drink.
+// FROZEN, not derived: if this were recomputed on read, later editing a split would rewrite a month
+// that had already closed — the retroactive rewrite the design explicitly rules out.
+export function allocateWriteOff(
+  claim: Claim,
+  splits: Split[],
+  categoryById: Record<string, string>,
+  amountById: Record<string, number>,
+  onDate: string
+): WriteOff[] {
+  const { owed, outstanding } = claimTotals(claim, splits, amountById)
+  if (outstanding <= 0 || owed <= 0) return []
+
+  // Owed per category, from the expense splits only (repayments carry the payer's category, which
+  // has nothing to do with what was bought).
+  const owedByCategory = new Map<string, number>()
+  for (const s of splits) {
+    const txnAmount = amountById[s.transaction_id]
+    if (txnAmount === undefined || txnAmount < 0) continue // unknown, or a repayment
+    const cat = categoryById[s.transaction_id]
+    if (!cat) continue
+    owedByCategory.set(cat, (owedByCategory.get(cat) ?? 0) + s.amount)
+  }
+  if (owedByCategory.size === 0) return []
+
+  const cats = [...owedByCategory.entries()]
+  const rows: WriteOff[] = []
+  let allocated = 0
+  cats.forEach(([category, catOwed], i) => {
+    const isLast = i === cats.length - 1
+    // The last row takes the remainder so the rows sum EXACTLY to `outstanding` — rounding each
+    // share independently would lose or invent a cent.
+    const amount = isLast
+      ? round2(outstanding - allocated)
+      : round2((catOwed / owed) * outstanding)
+    allocated += amount
+    rows.push({ claim_id: claim.id, category, amount, date: onDate })
+  })
+  return rows
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100
+}
