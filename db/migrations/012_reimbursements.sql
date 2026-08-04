@@ -35,7 +35,12 @@ create table if not exists reimbursement_write_offs (
   claim_id uuid not null references reimbursement_claims(id) on delete cascade,
   category text not null,             -- effective-category NAME, as budgets store it
   amount numeric not null,
-  date date not null                  -- the write-off date, NOT the original expense date
+  date date not null,                 -- the write-off date, NOT the original expense date
+  -- Makes a retried write-off idempotent: if the write-off insert succeeds but the follow-up
+  -- update marking the claim written off fails, the API route re-enters on retry and upserts
+  -- onto this constraint (overwriting the same per-category rows) instead of inserting a second,
+  -- duplicate set that would silently double-count the claim's spending.
+  unique (claim_id, category)
 );
 create index if not exists reimbursement_write_offs_date_idx on reimbursement_write_offs (date);
 

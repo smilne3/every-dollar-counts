@@ -138,9 +138,16 @@ async function writeOff(
   )
 
   if (rows.length) {
+    // Upsert, not insert: if the claim-mark below fails after this succeeds, a retry re-enters this
+    // function (written_off_on is still null) and recomputes the same rows. The unique (claim_id,
+    // category) constraint on reimbursement_write_offs makes that convergent — overwrite, not
+    // duplicate — instead of silently double-counting the claim's spending.
     const { error } = await supabase
       .from('reimbursement_write_offs')
-      .insert(rows.map((r) => ({ ...r, household_id: hid })))
+      .upsert(
+        rows.map((r) => ({ ...r, household_id: hid })),
+        { onConflict: 'claim_id,category' }
+      )
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   }
   const { error: markError } = await supabase
@@ -169,8 +176,8 @@ export async function PATCH(req: Request) {
   return NextResponse.json({ ok: true })
 }
 
-// Deleting a claim cascades its splits (FK), so the money it was excluding returns to spending.
-// The UI guards this with ConfirmDialog.
+// Deleting an OPEN claim cascades its splits (FK), so the money it was excluding returns to
+// spending — that's correct and intended. The UI guards this with ConfirmDialog.
 export async function DELETE(req: Request) {
   const { id } = await req.json()
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
@@ -179,6 +186,24 @@ export async function DELETE(req: Request) {
     data: { user },
   } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+
+  const { data: claim } = await supabase
+    .from('reimbursement_claims')
+    .select('id, written_off_on')
+    .eq('id', id)
+    .single()
+  if (!claim) return NextResponse.json({ error: 'not found' }, { status: 404 })
+  // A written-off claim's reimbursement_write_offs rows are a frozen record of spending that
+  // already counted in a (possibly closed) month. Deleting the claim would cascade-delete those
+  // rows and un-exclude its splits, silently changing that month after the fact — exactly the
+  // retroactive rewrite this feature exists to prevent. Only an open claim may be deleted.
+  if (claim.written_off_on) {
+    return NextResponse.json(
+      { error: 'cannot delete a written-off claim: it is a frozen record of spending that already counted' },
+      { status: 400 }
+    )
+  }
+
   const { error } = await supabase.from('reimbursement_claims').delete().eq('id', id)
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   return NextResponse.json({ ok: true })

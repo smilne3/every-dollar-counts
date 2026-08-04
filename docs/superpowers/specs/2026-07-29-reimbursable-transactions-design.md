@@ -87,6 +87,7 @@ reimbursement_write_offs
   category     text not null                    -- effective-category NAME, as budgets store it
   amount       numeric not null
   date         date not null                    -- the write-off date, not the expense date
+  unique (claim_id, category)                   -- makes a retried write-off idempotent (see below)
 ```
 
 All three get this repo's standard RLS policy — `household_id in (select private.household_ids())` for all operations — matching `011_manual_assets.sql`.
@@ -107,6 +108,8 @@ One symmetric table covers both directions, and a repayment that covers two clai
 The write-off amount and its category allocation are computed **once**, when you click Write off, and stored. Deriving them on read would mean that editing or deleting a split on a written-off claim silently changes a month you already closed — reintroducing the retroactive rewrite §3.1 rules out.
 
 Allocation is **pro-rata across the categories of that claim's expense splits**, by split amount. A vacation claim spanning Travel and Food & Drink writes off proportionally to each, so budgets and the per-category breakdown stay coherent. One row per category (typically 1–5 rows).
+
+Writing off is two writes — insert the rows, then mark the claim — and they are not in one transaction. If the insert lands and the mark fails, the re-entry guard (which reads `written_off_on`) would let a retry through and insert a second set of rows, silently double-counting that claim's spending. The `unique (claim_id, category)` constraint plus an upsert closes this: a retry recomputes identical rows and overwrites them, so the operation converges no matter where it was interrupted.
 
 ## 6. The math layer
 
@@ -190,7 +193,12 @@ The live "your share" readout is the point of the layout: you see the number tha
 - **Overpayment** — Dave rounds $250 up to $260. You tag $250 against the claim (the API won't accept a repayment split above outstanding), and the extra $10 is simply **left unsplit**, so it is treated exactly as an untagged $10 inflow of that category would be: income in an income category, or a refund netting that category down in a spending category. No capping logic is needed in the math layer. This is the same "the remainder is implicit" property as §4, running in the other direction.
 - **Money arrives after a write-off** → the claim is closed and stays closed; that inflow is ordinary income. Reopening is out of scope.
 - **Transaction deleted, or `removed = true`** → splits cascade via FK; claim totals recompute from what remains. Frozen write-off rows are unaffected by design (§5).
-- **Deleting a claim that has splits** → `ConfirmDialog`, then cascade.
+- **Deleting an OPEN claim** → `ConfirmDialog`, then cascade. Its splits go, and the money they were excluding counts as spending again in the months it happened — correct, because an open claim's exclusions were always provisional.
+- **Deleting a WRITTEN-OFF claim** → refused by the API (400), and the UI does not offer the action.
+
+  An earlier draft of this section said both "frozen write-off rows are unaffected by design" and "deleting a claim → cascade". Those cannot both hold: `reimbursement_write_offs.claim_id` cascades, so deleting a written-off claim would wipe its frozen rows *and* un-exclude its original splits — rewriting a month that had already closed, which is exactly what §3.1 forbids. The invariant wins. A written-off claim is a permanent record of spending that has already counted.
+
+  The accepted cost: a write-off made in error cannot be undone, since reopening a written-off claim is also out of scope (§8, above). If that proves painful in practice, the fix is a deliberate "reverse a write-off" action that posts a compensating entry in the *current* month — not a deletion that edits the past.
 - **A claim whose splits span several categories** → write-off allocates pro-rata (§5).
 - **A claim with `owed_by` left blank** → allowed; it groups under "Unattributed" on the claim's per-person list.
 - **`plaid_env` (#23)** → the new queries are scoped exactly like the existing money reads. This feature must not widen that open bug.
