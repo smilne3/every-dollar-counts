@@ -23,7 +23,7 @@ import { listItemsForHousehold } from '@/lib/plaid-items'
 import { listManualAssets } from '@/lib/manual-assets'
 import { budgetedSpend, spendByCategory, monthKey, type Txn } from '@/lib/budget'
 import { buildSpendContext } from '@/lib/spend-context'
-import { writeOffsAsTxns, type Split, type WriteOff } from '@/lib/reimbursements'
+import { claimTotals, writeOffsAsTxns, type Claim, type Split, type WriteOff } from '@/lib/reimbursements'
 
 function greeting(hour: number): string {
   if (hour < 12) return 'Good morning'
@@ -107,6 +107,32 @@ export default async function DashboardPage({
     .from('reimbursement_write_offs')
     .select('claim_id, category, amount, date')
     .gte('date', sixStart)
+
+  const { data: openClaims } = await supabase
+    .from('reimbursement_claims')
+    .select('id, name, written_off_on')
+    .is('written_off_on', null)
+
+  // A split can reference a transaction older than the six-month window fetched above for
+  // `flowTxns`, so look up the amounts for exactly the referenced ids rather than reusing that list.
+  const splitTxnIds = [...new Set(((splitRows ?? []) as Split[]).map((s) => s.transaction_id))]
+  const { data: splitTxns } = await supabase
+    .from('transactions')
+    .select('id, amount')
+    .in('id', splitTxnIds.length ? splitTxnIds : ['00000000-0000-0000-0000-000000000000'])
+  const amountByIdForClaims: Record<string, number> = {}
+  for (const t of splitTxns ?? []) amountByIdForClaims[t.id as string] = Number(t.amount)
+
+  // Net worth deliberately does NOT include this (§3.4) — it stays real account balances plus
+  // manually-entered assets. Outstanding reimbursements are money owed to you, not money you have.
+  const owedToYou = ((openClaims ?? []) as Claim[]).reduce((sum, c) => {
+    const { outstanding } = claimTotals(
+      c,
+      ((splitRows ?? []) as Split[]).filter((s) => s.claim_id === c.id),
+      amountByIdForClaims
+    )
+    return sum + Math.max(0, outstanding)
+  }, 0)
 
   const ctx = buildSpendContext({ categories, splits: (splitRows ?? []) as Split[] })
   // A written-off claim is spending in the month it was written off, so it joins the list here.
@@ -240,6 +266,17 @@ export default async function DashboardPage({
           }
         />
       </div>
+
+      {owedToYou > 0 && (
+        <Link
+          href="/reimbursements"
+          aria-label={`Owed to you: ${money(owedToYou, currency)}`}
+          className="flex items-center justify-between rounded-lg border border-line px-4 py-3 text-sm hover:bg-surface-2"
+        >
+          <span className="text-muted">Owed to you</span>
+          <span className="font-medium tabular-nums text-ink">{money(owedToYou, currency)}</span>
+        </Link>
+      )}
 
       {/* grid-cols-1 (= minmax(0,1fr)), not a bare `grid`: an implicit auto track sizes to
           max-content, so the chart's intrinsic width scrolls the whole page sideways on a
