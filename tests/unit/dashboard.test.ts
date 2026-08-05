@@ -205,7 +205,11 @@ describe('monthlyFlows', () => {
   })
 
   // The cross-month case #27 exists to fix: fronting money in July and being repaid in August must
-  // leave BOTH months undistorted — no July spike, and no negative August spending.
+  // leave BOTH months undistorted — no July spike, and no negative August spending. The repay leg is
+  // deliberately an INCOME-category inflow (not a transfer): the spec's own motivating scenario is
+  // "$500 dinner, $400 back from work", and a TRANSFER_IN repayment would be skipped by
+  // `ctx.transfers.has(cat)` in lib/dashboard.ts before spendableAmount ever ran, making the
+  // "repayment is not income" assertion pass for a reason this feature had nothing to do with.
   it('leaves both months clean across a cross-month reimbursement', () => {
     const flows = monthlyFlows(
       [
@@ -222,7 +226,7 @@ describe('monthlyFlows', () => {
           amount: -500,
           date: '2026-07-03',
           user_category: null,
-          pfc_primary: 'TRANSFER_IN',
+          pfc_primary: 'INCOME',
           pfc_detailed: null,
         },
       ],
@@ -232,5 +236,33 @@ describe('monthlyFlows', () => {
     expect(flows[0].spending).toBe(0) // June: not a $500 spike
     expect(flows[1].spending).toBe(0) // July: not -$500
     expect(flows[1].income).toBe(0) // and the repayment is not income
+  })
+
+  // The test above is only meaningful if removing the tag flips it: an INCOME-category repayment
+  // that is NOT tagged to a claim must count as ordinary income, same as any other paycheck.
+  it('counts an untagged repayment landing in an income category as ordinary income', () => {
+    const flows = monthlyFlows(
+      [
+        {
+          id: 'flight',
+          amount: 500,
+          date: '2026-06-04',
+          user_category: null,
+          pfc_primary: 'TRAVEL',
+          pfc_detailed: null,
+        },
+        {
+          id: 'repay',
+          amount: -500,
+          date: '2026-07-03',
+          user_category: null,
+          pfc_primary: 'INCOME',
+          pfc_detailed: null,
+        },
+      ],
+      ctx({ flight: 500 }), // repay is untagged this time
+      months
+    )
+    expect(flows[1].income).toBe(500)
   })
 })

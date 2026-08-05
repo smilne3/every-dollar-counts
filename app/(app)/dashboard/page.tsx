@@ -115,10 +115,14 @@ export default async function DashboardPage({
 
   // A split can reference a transaction older than the six-month window fetched above for
   // `flowTxns`, so look up the amounts for exactly the referenced ids rather than reusing that list.
+  // `removed` is excluded so a soft-deleted (Plaid repost) transaction's split falls out of
+  // amountByIdForClaims — claimTotals then skips it via its txnAmount-undefined guard, instead of
+  // counting a claim against a transaction that no longer renders anywhere in the app.
   const splitTxnIds = [...new Set(((splitRows ?? []) as Split[]).map((s) => s.transaction_id))]
   const { data: splitTxns } = await supabase
     .from('transactions')
     .select('id, amount')
+    .eq('removed', false)
     .in('id', splitTxnIds.length ? splitTxnIds : ['00000000-0000-0000-0000-000000000000'])
   const amountByIdForClaims: Record<string, number> = {}
   for (const t of splitTxns ?? []) amountByIdForClaims[t.id as string] = Number(t.amount)

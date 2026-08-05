@@ -28,10 +28,17 @@ export async function POST(req: Request) {
 
   const { data: txn } = await supabase
     .from('transactions')
-    .select('id, amount')
+    .select('id, amount, removed')
     .eq('id', transactionId)
     .maybeSingle()
   if (!txn) return NextResponse.json({ error: 'transaction not found' }, { status: 404 })
+  // `removed` is a soft flag (a Plaid repost), not a delete — the row never disappears, so nothing
+  // stops a split being created on it after the fact. That split would then be unreachable (the
+  // transactions list filters `removed = false`) while still inflating claim totals, so refuse it
+  // at creation time rather than relying on every reader to filter it out later.
+  if (txn.removed) {
+    return NextResponse.json({ error: 'that transaction was removed' }, { status: 400 })
+  }
 
   const { data: claim } = await supabase
     .from('reimbursement_claims')
@@ -55,10 +62,14 @@ export async function POST(req: Request) {
     .from('reimbursement_splits')
     .select('transaction_id, claim_id, owed_by, amount')
     .eq('claim_id', claimId)
+  // Excluding removed transactions here means a soft-deleted sibling split falls out of the claim's
+  // outstanding total (claimTotals skips it via the txnAmount-undefined guard), rather than a dead
+  // row still capping how much of a fresh repayment this endpoint will accept.
   const ids = [...new Set(((claimSplits ?? []) as Split[]).map((s) => s.transaction_id))]
   const { data: claimTxns } = await supabase
     .from('transactions')
     .select('id, amount')
+    .eq('removed', false)
     .in('id', ids.length ? ids : ['00000000-0000-0000-0000-000000000000'])
   const amountById: Record<string, number> = {}
   for (const t of claimTxns ?? []) amountById[t.id as string] = Number(t.amount)
@@ -125,10 +136,13 @@ export async function DELETE(req: Request) {
     .select('id, transaction_id, claim_id, owed_by, amount')
     .eq('claim_id', split.claim_id)
   const remaining = ((claimSplits ?? []) as (Split & { id: string })[]).filter((s) => s.id !== id)
+  // Excluding removed transactions here matches every other claim-totals read: a soft-deleted
+  // sibling's split drops out of `owed`/`returned` instead of skewing the over-returned check below.
   const ids = [...new Set(remaining.map((s) => s.transaction_id))]
   const { data: txns } = await supabase
     .from('transactions')
     .select('id, amount')
+    .eq('removed', false)
     .in('id', ids.length ? ids : ['00000000-0000-0000-0000-000000000000'])
   const amountById: Record<string, number> = {}
   for (const t of txns ?? []) amountById[t.id as string] = Number(t.amount)

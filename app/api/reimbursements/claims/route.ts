@@ -33,7 +33,13 @@ export async function GET() {
   const { data: splits } = await supabase
     .from('reimbursement_splits')
     .select('transaction_id, claim_id, owed_by, amount')
-  const { data: txns } = await supabase.from('transactions').select('id, amount, date')
+  // Excluding removed rows is what lets claimTotals recompute "from what remains": a removed
+  // transaction's splits fall out of amountById, so claimTotals' txnAmount-undefined guard skips
+  // them instead of counting an unreachable split as still-owed money.
+  const { data: txns } = await supabase
+    .from('transactions')
+    .select('id, amount, date')
+    .eq('removed', false)
 
   const amountById: Record<string, number> = {}
   for (const t of txns ?? []) amountById[t.id as string] = Number(t.amount)
@@ -113,9 +119,17 @@ async function writeOff(
   const pfcMap = pfcToName((cats ?? []) as Category[])
 
   const ids = [...new Set(((splits ?? []) as Split[]).map((s) => s.transaction_id))]
+  // `removed` MUST be excluded here specifically: a Plaid repost soft-deletes the original row
+  // (`removed = true`) without ever deleting it, so the FK cascade on reimbursement_splits never
+  // fires and the split survives, unreachable, on a transaction that renders nowhere in the app. If
+  // this lookup counted that transaction's amount, allocateWriteOff would treat its split as still
+  // outstanding and freeze real spending — dated today — for money that never actually left the
+  // account. Dropping it here means claimTotals' txnAmount-undefined guard skips the orphaned split,
+  // so the write-off allocates only what's backed by a live transaction.
   const { data: txns } = await supabase
     .from('transactions')
     .select('id, amount, user_category, pfc_primary')
+    .eq('removed', false)
     .in('id', ids.length ? ids : ['00000000-0000-0000-0000-000000000000'])
 
   const amountById: Record<string, number> = {}

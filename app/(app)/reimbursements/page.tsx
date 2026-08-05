@@ -14,7 +14,13 @@ export default async function ReimbursementsPage() {
   const { data: splitRows } = await supabase
     .from('reimbursement_splits')
     .select('transaction_id, claim_id, owed_by, amount')
-  const { data: txns } = await supabase.from('transactions').select('id, amount, date')
+  // A removed (Plaid-repost) transaction is a soft-deleted row, not a hard delete, so the FK cascade
+  // on reimbursement_splits never fires for it. Excluding it here is what makes its splits fall out
+  // of every total below (claimTotals skips a split whose transaction_id isn't in amountById).
+  const { data: txns } = await supabase
+    .from('transactions')
+    .select('id, amount, date')
+    .eq('removed', false)
 
   const amountById: Record<string, number> = {}
   const dateById: Record<string, string> = {}
