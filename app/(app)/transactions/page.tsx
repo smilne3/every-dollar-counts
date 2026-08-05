@@ -42,6 +42,31 @@ export default async function TransactionsPage({
   const pfcMap = pfcToName(categories)
   const categoryOptions = categories.map((c) => c.name)
 
+  const { data: claimRows } = await supabase
+    .from('reimbursement_claims')
+    .select('id, name')
+    .is('written_off_on', null)
+    .order('created_at', { ascending: false })
+  const claims = (claimRows ?? []) as { id: string; name: string }[]
+
+  const { data: splitRows } = await supabase
+    .from('reimbursement_splits')
+    .select('id, transaction_id, claim_id, owed_by, amount')
+  const splitsByTxn: Record<string, { id: string; claim_id: string; owed_by: string | null; amount: number }[]> = {}
+  for (const s of splitRows ?? []) {
+    const key = s.transaction_id as string
+    ;(splitsByTxn[key] ??= []).push({
+      id: s.id as string,
+      claim_id: s.claim_id as string,
+      owed_by: s.owed_by as string | null,
+      amount: Number(s.amount),
+    })
+  }
+  // Autocomplete for the person field, so "Dave" stays one person instead of fragmenting.
+  const knownPeople = [
+    ...new Set((splitRows ?? []).map((s) => (s.owed_by as string | null)?.trim()).filter(Boolean)),
+  ] as string[]
+
   // Only needed to name the account in the filter chip when drilling in from a Net Worth / Cash row.
   let accountName: string | null = null
   if (account) {
@@ -198,6 +223,9 @@ export default async function TransactionsPage({
                   <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-faint">
                     Amount
                   </th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-faint">
+                    <span className="sr-only">Split</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -207,6 +235,9 @@ export default async function TransactionsPage({
                     t={t}
                     categoryName={effectiveCategory(t, pfcMap)}
                     categoryOptions={categoryOptions}
+                    splits={splitsByTxn[t.id] ?? []}
+                    claims={claims}
+                    knownPeople={knownPeople}
                   />
                 ))}
               </tbody>
