@@ -100,7 +100,7 @@ export function ClaimList({ claims }: { claims: ClaimRow[] }) {
             <div
               className="mt-3 h-2 overflow-hidden rounded-full bg-surface-2"
               role="progressbar"
-              aria-valuenow={pct}
+              aria-valuenow={Math.min(100, pct)}
               aria-valuemin={0}
               aria-valuemax={100}
               aria-label={`${c.name} repaid`}
