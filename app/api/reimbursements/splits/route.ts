@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { claimTotals, type Claim, type Split } from '@/lib/reimbursements'
-import { validateSplit } from '@/lib/split-validation'
+import { validateSplit, validateSplitDeletion } from '@/lib/split-validation'
 
 async function household(supabase: Awaited<ReturnType<typeof createClient>>) {
   const {
@@ -78,6 +78,11 @@ export async function POST(req: Request) {
   })
   if (!check.ok) return NextResponse.json({ error: check.error }, { status: 400 })
 
+  // Known race: two rapid POSTs both read the same `existingOnTxn`/`outstanding` before either
+  // writes, so they can jointly exceed the caps `validateSplit` just checked. No per-row `check`
+  // constraint can close this — the constraint being enforced is a sum across sibling rows, which a
+  // single row can't see. Accepted for now (ruled on, not revisited this round); closing it would
+  // need an RPC doing the read-check-write atomically, or a serializable transaction.
   const { error } = await supabase.from('reimbursement_splits').insert({
     household_id: hid,
     transaction_id: transactionId,
@@ -97,6 +102,45 @@ export async function DELETE(req: Request) {
     data: { user },
   } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+
+  const { data: split } = await supabase
+    .from('reimbursement_splits')
+    .select('id, transaction_id, claim_id, owed_by, amount')
+    .eq('id', id)
+    .maybeSingle()
+  if (!split) return NextResponse.json({ error: 'not found' }, { status: 404 })
+
+  const { data: claim } = await supabase
+    .from('reimbursement_claims')
+    .select('id, name, written_off_on')
+    .eq('id', split.claim_id)
+    .maybeSingle()
+  if (!claim) return NextResponse.json({ error: 'claim not found' }, { status: 404 })
+
+  // Recompute the claim's totals as they'd be with this split already gone — that's the state
+  // `validateSplitDeletion` needs to catch both a written-off claim (its splits are frozen history)
+  // and an open claim that this delete would leave over-returned (see the function's comment).
+  const { data: claimSplits } = await supabase
+    .from('reimbursement_splits')
+    .select('id, transaction_id, claim_id, owed_by, amount')
+    .eq('claim_id', split.claim_id)
+  const remaining = ((claimSplits ?? []) as (Split & { id: string })[]).filter((s) => s.id !== id)
+  const ids = [...new Set(remaining.map((s) => s.transaction_id))]
+  const { data: txns } = await supabase
+    .from('transactions')
+    .select('id, amount')
+    .in('id', ids.length ? ids : ['00000000-0000-0000-0000-000000000000'])
+  const amountById: Record<string, number> = {}
+  for (const t of txns ?? []) amountById[t.id as string] = Number(t.amount)
+  const { owed, returned } = claimTotals(claim as Claim, remaining, amountById)
+
+  const check = validateSplitDeletion({
+    claimWrittenOff: claim.written_off_on !== null,
+    remainingOwed: owed,
+    remainingReturned: returned,
+  })
+  if (!check.ok) return NextResponse.json({ error: check.error }, { status: 400 })
+
   const { error } = await supabase.from('reimbursement_splits').delete().eq('id', id)
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   return NextResponse.json({ ok: true })
