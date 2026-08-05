@@ -1942,7 +1942,7 @@ git commit -m "feat: splits API with cross-row and outstanding validation (#27)"
 
 **Interfaces:**
 - Consumes: the two API routes (Tasks 9, 10).
-- Produces: `<SplitEditor transactionId amount existingSplits claims onClose />` where
+- Produces: `<SplitEditor transactionId amount existingSplits claims knownPeople />` where
   `existingSplits: { id: string; claim_id: string; owed_by: string | null; amount: number }[]`
   and `claims: { id: string; name: string }[]`.
 
