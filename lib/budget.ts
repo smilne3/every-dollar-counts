@@ -1,7 +1,10 @@
 import { effectiveCategory } from './effective-category'
 import { isCreditCardPayment } from './categories'
+import { spendableAmount } from './reimbursements'
+import type { SpendContext } from './spend-context'
 
 export type Txn = {
+  id: string
   amount: number
   date: string
   user_category: string | null
@@ -14,20 +17,17 @@ export function monthKey(date: string): string {
   return date.slice(0, 7)
 }
 
-// Sum spending (Plaid amount > 0 = money out) per effective category NAME.
-// pfcMap = Plaid primary -> category name; nonSpending = category names to exclude.
-export function spendByCategory(
-  txns: Txn[],
-  pfcMap: Record<string, string>,
-  nonSpending: Set<string>
-): Record<string, number> {
+// Sum spending per effective category NAME, net of anything reimbursable (#27).
+export function spendByCategory(txns: Txn[], ctx: SpendContext): Record<string, number> {
   const out: Record<string, number> = {}
   for (const t of txns) {
     if (isCreditCardPayment(t)) continue // internal transfer, not spending
-    const cat = effectiveCategory(t, pfcMap)
-    if (nonSpending.has(cat)) continue // income + transfers
-    // Outflows add; refunds (inflows in a spending category) net the category down.
-    out[cat] = (out[cat] ?? 0) + t.amount
+    const cat = effectiveCategory(t, ctx.pfcMap)
+    if (ctx.nonSpending.has(cat)) continue // income + transfers
+    // spendableAmount, not t.amount: the reimbursable portion is not the user's spending, and a
+    // tagged repayment contributes 0 rather than netting the category down like a refund.
+    // Outflows add; genuine refunds (untagged inflows in a spending category) still net down.
+    out[cat] = (out[cat] ?? 0) + spendableAmount(t, ctx.reimbursedByTxn)
   }
   return out
 }
@@ -59,22 +59,21 @@ export function spendThisVsLast(
   txns: Txn[],
   thisM: string,
   lastM: string,
-  pfcMap: Record<string, string>,
-  nonSpending: Set<string>,
+  ctx: SpendContext,
   throughDay: number
 ) {
   const thisMonth: Record<string, number> = {}
   const lastMonth: Record<string, number> = {}
   for (const t of txns) {
     if (isCreditCardPayment(t)) continue // internal transfer, not spending
-    const cat = effectiveCategory(t, pfcMap)
-    if (nonSpending.has(cat)) continue // income + transfers
+    const cat = effectiveCategory(t, ctx.pfcMap)
+    if (ctx.nonSpending.has(cat)) continue // income + transfers
     const mk = monthKey(t.date)
-    // Outflows add; refunds (inflows in a spending category) net the category down.
+    const amt = spendableAmount(t, ctx.reimbursedByTxn) // net of reimbursables (#27)
     if (mk === thisM) {
-      thisMonth[cat] = (thisMonth[cat] ?? 0) + t.amount
+      thisMonth[cat] = (thisMonth[cat] ?? 0) + amt
     } else if (mk === lastM && dayOfMonth(t.date) <= throughDay) {
-      lastMonth[cat] = (lastMonth[cat] ?? 0) + t.amount
+      lastMonth[cat] = (lastMonth[cat] ?? 0) + amt
     }
   }
   return { thisMonth, lastMonth }

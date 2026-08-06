@@ -14,7 +14,9 @@ import {
 } from '@/lib/dashboard'
 import { listManualAssets } from '@/lib/manual-assets'
 import { spendByCategory, monthKey, type Txn } from '@/lib/budget'
-import { pfcToName, nonSpendingNames, transferNames, type Category } from '@/lib/categories'
+import { type Category } from '@/lib/categories'
+import { buildSpendContext } from '@/lib/spend-context'
+import { writeOffsAsTxns, type Split, type WriteOff } from '@/lib/reimbursements'
 
 const TITLES: Record<string, { title: string; subtitle: string }> = {
   'net-worth': { title: 'Net worth', subtitle: 'Everything you own, minus what you owe' },
@@ -96,22 +98,34 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
       .select('id, name, pfc_primary, sort_order')
       .order('sort_order')
     const categories = (cats ?? []) as Category[]
-    const pfcMap = pfcToName(categories)
-    const nonSpending = nonSpendingNames(categories)
-    const transfers = transferNames(categories)
 
     const now = new Date()
     const months = lastNMonths(now, 6)
     const thisKey = months[months.length - 1].key
     const { data: flowTxns } = await supabase
       .from('transactions')
-      .select('amount, date, user_category, pfc_primary, pfc_detailed')
+      .select('id, amount, date, user_category, pfc_primary, pfc_detailed')
       .eq('removed', false)
       .gte('date', `${thisKey}-01`)
-    const monthTxns = ((flowTxns ?? []) as Txn[]).filter((t) => monthKey(t.date) === thisKey)
+
+    const { data: splitRows } = await supabase
+      .from('reimbursement_splits')
+      .select('transaction_id, claim_id, owed_by, amount')
+    const { data: writeOffRows } = await supabase
+      .from('reimbursement_write_offs')
+      .select('claim_id, category, amount, date')
+      .gte('date', `${thisKey}-01`)
+
+    const ctx = buildSpendContext({ categories, splits: (splitRows ?? []) as Split[] })
+    // A written-off claim is spending in the month it was written off, so it joins the list here.
+    const withWriteOffs = [
+      ...((flowTxns ?? []) as Txn[]),
+      ...writeOffsAsTxns((writeOffRows ?? []) as WriteOff[]),
+    ]
+    const monthTxns = withWriteOffs.filter((t) => monthKey(t.date) === thisKey)
 
     if (metric === 'spent') {
-      const byCat = spendByCategory(monthTxns, pfcMap, nonSpending)
+      const byCat = spendByCategory(monthTxns, ctx)
       rows = sortedSpendRows(byCat).map((r) => ({
         key: r.category,
         label: r.category,
@@ -123,13 +137,7 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
       total = { label: 'Total spent', amount: spent, currency }
     } else {
       // saved
-      const flows = monthlyFlows(
-        (flowTxns ?? []) as FlowTxn[],
-        pfcMap,
-        nonSpending,
-        transfers,
-        months
-      )
+      const flows = monthlyFlows(withWriteOffs as FlowTxn[], ctx, months)
       const m = flows[flows.length - 1]
       rows = [
         {

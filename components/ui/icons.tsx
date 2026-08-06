@@ -143,3 +143,11 @@ export const ArrowDownLeftIcon = ({ className }: IconProps) => (
     <path d="M16 17H7V8" />
   </Svg>
 )
+
+export const HandCoinsIcon = ({ className }: IconProps) => (
+  <Svg className={className}>
+    <circle cx="16.5" cy="6.5" r="3.5" />
+    <path d="M3 13.5h4l2.5 2h3a1.5 1.5 0 0 1 0 3H10" />
+    <path d="M3 21h4l3-1.5 5.5-2a1.75 1.75 0 0 0-1.5-3" />
+  </Svg>
+)

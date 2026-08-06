@@ -65,26 +65,31 @@ describe('lastNMonths', () => {
 describe('monthlyFlows', () => {
   const pfcMap = {
     FOOD_AND_DRINK: 'Food & Drink',
+    TRAVEL: 'Travel',
     INCOME: 'Income',
     TRANSFER_IN: 'Transfer In',
   }
-  const spendingExclude = new Set(['Income', 'Transfer In'])
-  const incomeExclude = new Set(['Transfer In'])
+  const ctx = (reimbursedByTxn: Record<string, number> = {}) => ({
+    pfcMap,
+    nonSpending: new Set(['Income', 'Transfer In']),
+    transfers: new Set(['Transfer In']),
+    reimbursedByTxn,
+  })
   const months = [
     { key: '2026-06', label: 'Jun' },
     { key: '2026-07', label: 'Jul' },
   ]
 
   const txns: FlowTxn[] = [
-    { amount: 50, date: '2026-07-03', user_category: null, pfc_primary: 'FOOD_AND_DRINK', pfc_detailed: null },
-    { amount: -2000, date: '2026-07-05', user_category: null, pfc_primary: 'INCOME', pfc_detailed: null },
-    { amount: -500, date: '2026-07-06', user_category: null, pfc_primary: 'TRANSFER_IN', pfc_detailed: null },
-    { amount: 30, date: '2026-06-11', user_category: null, pfc_primary: 'FOOD_AND_DRINK', pfc_detailed: null },
-    { amount: 999, date: '2026-05-01', user_category: null, pfc_primary: 'FOOD_AND_DRINK', pfc_detailed: null }, // out of range
+    { id: 'f1', amount: 50, date: '2026-07-03', user_category: null, pfc_primary: 'FOOD_AND_DRINK', pfc_detailed: null },
+    { id: 'f2', amount: -2000, date: '2026-07-05', user_category: null, pfc_primary: 'INCOME', pfc_detailed: null },
+    { id: 'f3', amount: -500, date: '2026-07-06', user_category: null, pfc_primary: 'TRANSFER_IN', pfc_detailed: null },
+    { id: 'f4', amount: 30, date: '2026-06-11', user_category: null, pfc_primary: 'FOOD_AND_DRINK', pfc_detailed: null },
+    { id: 'f5', amount: 999, date: '2026-05-01', user_category: null, pfc_primary: 'FOOD_AND_DRINK', pfc_detailed: null }, // out of range
   ]
 
   it('counts paychecks as income but excludes transfers, and excludes both from spending', () => {
-    const flows = monthlyFlows(txns, pfcMap, spendingExclude, incomeExclude, months)
+    const flows = monthlyFlows(txns, ctx(), months)
     expect(flows).toEqual([
       { key: '2026-06', label: 'Jun', spending: 30, income: 0 },
       { key: '2026-07', label: 'Jul', spending: 50, income: 2000 },
@@ -93,9 +98,9 @@ describe('monthlyFlows', () => {
 
   it('respects user_category overrides', () => {
     const overridden: FlowTxn[] = [
-      { amount: 40, date: '2026-07-02', user_category: 'Income', pfc_primary: 'FOOD_AND_DRINK', pfc_detailed: null },
+      { id: 'f6', amount: 40, date: '2026-07-02', user_category: 'Income', pfc_primary: 'FOOD_AND_DRINK', pfc_detailed: null },
     ]
-    const flows = monthlyFlows(overridden, pfcMap, spendingExclude, incomeExclude, months)
+    const flows = monthlyFlows(overridden, ctx(), months)
     // amount > 0 but category is 'Income' (excluded from spending) -> not counted
     expect(flows.find((f) => f.key === '2026-07')).toMatchObject({ spending: 0, income: 0 })
   })
@@ -107,6 +112,7 @@ describe('monthlyFlows', () => {
     const ccPay: FlowTxn[] = [
       // checking side: money out
       {
+        id: 'cc1',
         amount: 900,
         date: '2026-07-10',
         user_category: null,
@@ -115,6 +121,7 @@ describe('monthlyFlows', () => {
       },
       // card side: money in (payment arriving)
       {
+        id: 'cc2',
         amount: -900,
         date: '2026-07-10',
         user_category: null,
@@ -122,7 +129,7 @@ describe('monthlyFlows', () => {
         pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT',
       },
     ]
-    const flows = monthlyFlows(ccPay, pfcMap, spendingExclude, incomeExclude, months)
+    const flows = monthlyFlows(ccPay, ctx(), months)
     expect(flows.find((f) => f.key === '2026-07')).toMatchObject({ spending: 0, income: 0 })
   })
 
@@ -130,6 +137,7 @@ describe('monthlyFlows', () => {
   it('still counts a mortgage payment as spending', () => {
     const mortgage: FlowTxn[] = [
       {
+        id: 'mort1',
         amount: 1500,
         date: '2026-07-10',
         user_category: null,
@@ -137,7 +145,7 @@ describe('monthlyFlows', () => {
         pfc_detailed: 'LOAN_PAYMENTS_MORTGAGE_PAYMENT',
       },
     ]
-    const flows = monthlyFlows(mortgage, pfcMap, spendingExclude, incomeExclude, months)
+    const flows = monthlyFlows(mortgage, ctx(), months)
     expect(flows.find((f) => f.key === '2026-07')).toMatchObject({ spending: 1500, income: 0 })
   })
 
@@ -146,20 +154,19 @@ describe('monthlyFlows', () => {
   // vanish. A genuine paycheck (inflow in the Income category) still counts as income.
   it('nets a refund against its spending category instead of counting it as income', () => {
     const withRefund: FlowTxn[] = [
-      { amount: 800, date: '2026-07-04', user_category: null, pfc_primary: 'TRAVEL', pfc_detailed: null },
-      { amount: -500, date: '2026-07-20', user_category: null, pfc_primary: 'TRAVEL', pfc_detailed: null }, // refund
+      { id: 'r1', amount: 800, date: '2026-07-04', user_category: null, pfc_primary: 'TRAVEL', pfc_detailed: null },
+      { id: 'r2', amount: -500, date: '2026-07-20', user_category: null, pfc_primary: 'TRAVEL', pfc_detailed: null }, // refund
     ]
-    const map = { ...pfcMap, TRAVEL: 'Travel' }
-    const flows = monthlyFlows(withRefund, map, spendingExclude, incomeExclude, months)
+    const flows = monthlyFlows(withRefund, ctx(), months)
     // net Travel spend = 800 - 500 = 300; income unaffected
     expect(flows.find((f) => f.key === '2026-07')).toMatchObject({ spending: 300, income: 0 })
   })
 
   it('still counts a genuine paycheck (inflow in an income category) as income', () => {
     const paycheck: FlowTxn[] = [
-      { amount: -2000, date: '2026-07-05', user_category: null, pfc_primary: 'INCOME', pfc_detailed: null },
+      { id: 'p1', amount: -2000, date: '2026-07-05', user_category: null, pfc_primary: 'INCOME', pfc_detailed: null },
     ]
-    const flows = monthlyFlows(paycheck, pfcMap, spendingExclude, incomeExclude, months)
+    const flows = monthlyFlows(paycheck, ctx(), months)
     expect(flows.find((f) => f.key === '2026-07')).toMatchObject({ spending: 0, income: 2000 })
   })
 
@@ -167,6 +174,7 @@ describe('monthlyFlows', () => {
   it('honors a user override on a credit-card payment', () => {
     const overridden: FlowTxn[] = [
       {
+        id: 'o1',
         amount: 900,
         date: '2026-07-10',
         user_category: 'Food & Drink',
@@ -174,7 +182,87 @@ describe('monthlyFlows', () => {
         pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT',
       },
     ]
-    const flows = monthlyFlows(overridden, pfcMap, spendingExclude, incomeExclude, months)
+    const flows = monthlyFlows(overridden, ctx(), months)
     expect(flows.find((f) => f.key === '2026-07')).toMatchObject({ spending: 900 })
+  })
+
+  it('counts only the unsplit remainder of a reimbursable outflow', () => {
+    const flows = monthlyFlows(
+      [
+        {
+          id: 'rental',
+          amount: 1000,
+          date: '2026-07-04',
+          user_category: null,
+          pfc_primary: 'TRAVEL',
+          pfc_detailed: null,
+        },
+      ],
+      ctx({ rental: 750 }),
+      months
+    )
+    expect(flows[1].spending).toBeCloseTo(250)
+  })
+
+  // The cross-month case #27 exists to fix: fronting money in July and being repaid in August must
+  // leave BOTH months undistorted — no July spike, and no negative August spending. The repay leg is
+  // deliberately an INCOME-category inflow (not a transfer): the spec's own motivating scenario is
+  // "$500 dinner, $400 back from work", and a TRANSFER_IN repayment would be skipped by
+  // `ctx.transfers.has(cat)` in lib/dashboard.ts before spendableAmount ever ran, making the
+  // "repayment is not income" assertion pass for a reason this feature had nothing to do with.
+  it('leaves both months clean across a cross-month reimbursement', () => {
+    const flows = monthlyFlows(
+      [
+        {
+          id: 'flight',
+          amount: 500,
+          date: '2026-06-04',
+          user_category: null,
+          pfc_primary: 'TRAVEL',
+          pfc_detailed: null,
+        },
+        {
+          id: 'repay',
+          amount: -500,
+          date: '2026-07-03',
+          user_category: null,
+          pfc_primary: 'INCOME',
+          pfc_detailed: null,
+        },
+      ],
+      ctx({ flight: 500, repay: 500 }),
+      months
+    )
+    expect(flows[0].spending).toBe(0) // June: not a $500 spike
+    expect(flows[1].spending).toBe(0) // July: not -$500
+    expect(flows[1].income).toBe(0) // and the repayment is not income
+  })
+
+  // The test above is only meaningful if removing the tag flips it: an INCOME-category repayment
+  // that is NOT tagged to a claim must count as ordinary income, same as any other paycheck.
+  it('counts an untagged repayment landing in an income category as ordinary income', () => {
+    const flows = monthlyFlows(
+      [
+        {
+          id: 'flight',
+          amount: 500,
+          date: '2026-06-04',
+          user_category: null,
+          pfc_primary: 'TRAVEL',
+          pfc_detailed: null,
+        },
+        {
+          id: 'repay',
+          amount: -500,
+          date: '2026-07-03',
+          user_category: null,
+          pfc_primary: 'INCOME',
+          pfc_detailed: null,
+        },
+      ],
+      ctx({ flight: 500 }), // repay is untagged this time
+      months
+    )
+    expect(flows[1].income).toBe(500)
   })
 })
