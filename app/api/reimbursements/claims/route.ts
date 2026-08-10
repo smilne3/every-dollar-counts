@@ -128,14 +128,18 @@ async function writeOff(
   // so the write-off allocates only what's backed by a live transaction.
   const { data: txns } = await supabase
     .from('transactions')
-    .select('id, amount, user_category, pfc_primary')
+    .select('id, amount, date, user_category, pfc_primary')
     .eq('removed', false)
     .in('id', ids.length ? ids : ['00000000-0000-0000-0000-000000000000'])
 
   const amountById: Record<string, number> = {}
   const categoryById: Record<string, string> = {}
+  // Expense DATES, not amounts: allocateWriteOff settles repayments against the oldest expenses
+  // first, so it needs to know which expense came first.
+  const dateById: Record<string, string> = {}
   for (const t of txns ?? []) {
     amountById[t.id as string] = Number(t.amount)
+    dateById[t.id as string] = t.date as string
     categoryById[t.id as string] = effectiveCategory(
       { user_category: t.user_category as string | null, pfc_primary: t.pfc_primary as string | null },
       pfcMap
@@ -148,6 +152,7 @@ async function writeOff(
     (splits ?? []) as Split[],
     categoryById,
     amountById,
+    dateById,
     date
   )
 

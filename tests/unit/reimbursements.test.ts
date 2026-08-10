@@ -214,6 +214,7 @@ describe('allocateWriteOff', () => {
       splits,
       { dinner: 'Food & Drink', repay: 'Transfer In' },
       { dinner: 900, repay: -300 },
+      { dinner: '2026-10-01', repay: '2026-10-20' },
       '2026-11-03'
     )
     expect(r).toHaveLength(1)
@@ -223,7 +224,7 @@ describe('allocateWriteOff', () => {
     expect(r[0].claim_id).toBe('c1')
   })
 
-  it('allocates pro-rata across the categories the expenses came from', () => {
+  it('writes off each category in full when nothing came back', () => {
     const splits: Split[] = [
       { transaction_id: 'hotel', claim_id: 'c1', owed_by: 'Sam', amount: 750 },
       { transaction_id: 'dinner', claim_id: 'c1', owed_by: 'Sam', amount: 250 },
@@ -233,15 +234,19 @@ describe('allocateWriteOff', () => {
       splits,
       { hotel: 'Travel', dinner: 'Food & Drink' },
       { hotel: 1000, dinner: 300 },
+      { hotel: '2026-10-01', dinner: '2026-10-02' },
       '2026-11-03'
     )
     const byCat = Object.fromEntries(r.map((w) => [w.category, w.amount]))
-    // $1,000 owed, nothing returned: Travel 75%, Food & Drink 25%.
+    // Nothing repaid, so nothing is settled: both categories are written off whole.
     expect(byCat['Travel']).toBeCloseTo(750)
     expect(byCat['Food & Drink']).toBeCloseTo(250)
   })
 
-  it('allocates a partial repayment pro-rata too', () => {
+  // FIFO, not pro-rata: the $400 that came back settles the OLDEST expense first, so the hotel is
+  // paid down to $350 and the (later) dinner is still owed in full. Pro-rata would have said
+  // Travel 450 / Food & Drink 150 — the same total, attributed to the wrong month's money.
+  it('settles the oldest expense first, then the next', () => {
     const splits: Split[] = [
       { transaction_id: 'hotel', claim_id: 'c1', owed_by: 'Sam', amount: 750 },
       { transaction_id: 'dinner', claim_id: 'c1', owed_by: 'Sam', amount: 250 },
@@ -252,13 +257,52 @@ describe('allocateWriteOff', () => {
       splits,
       { hotel: 'Travel', dinner: 'Food & Drink', repay: 'Transfer In' },
       { hotel: 1000, dinner: 300, repay: -400 },
+      { hotel: '2026-10-01', dinner: '2026-10-15', repay: '2026-10-28' },
       '2026-11-03'
     )
     const byCat = Object.fromEntries(r.map((w) => [w.category, w.amount]))
-    // $600 unreturned, split 75/25.
-    expect(byCat['Travel']).toBeCloseTo(450)
-    expect(byCat['Food & Drink']).toBeCloseTo(150)
+    expect(byCat['Travel']).toBeCloseTo(350) // 750 - 400 settled
+    expect(byCat['Food & Drink']).toBeCloseTo(250) // untouched, it is newer
     expect(r.reduce((s, w) => s + w.amount, 0)).toBeCloseTo(600)
+  })
+
+  // The motivating case for FIFO (#41 makes it normal): a claim pinned BECAUSE it is used
+  // constantly accumulates months of fully-repaid history. 12 months of dinners — $2,000, Food &
+  // Drink, every cent of it back — then one $300 flight that never comes back.
+  // Pro-rata by lifetime owed booked $260.87 of Food & Drink into the current month, money that had
+  // already been repaid. FIFO settles the dinners with the repayments that actually paid for them
+  // and leaves the flight, which is the only thing that was ever given up on.
+  it('leaves a long repaid history alone and writes off only the unrepaid recent expense', () => {
+    const splits: Split[] = []
+    const categoryById: Record<string, string> = {}
+    const amountById: Record<string, number> = {}
+    const dateById: Record<string, string> = {}
+    for (let m = 1; m <= 12; m++) {
+      const month = String(m).padStart(2, '0')
+      const dinner = `dinner-${month}`
+      splits.push({ transaction_id: dinner, claim_id: 'c1', owed_by: 'Dan', amount: 2000 / 12 })
+      categoryById[dinner] = 'Food & Drink'
+      amountById[dinner] = 2000 / 12
+      dateById[dinner] = `2026-${month}-05`
+
+      const repay = `repay-${month}`
+      splits.push({ transaction_id: repay, claim_id: 'c1', owed_by: 'Dan', amount: 2000 / 12 })
+      categoryById[repay] = 'Transfer In'
+      amountById[repay] = -2000 / 12
+      dateById[repay] = `2026-${month}-20`
+    }
+    // The one that never came back, and the most recent expense on the claim.
+    splits.push({ transaction_id: 'flight', claim_id: 'c1', owed_by: 'Dan', amount: 300 })
+    categoryById['flight'] = 'Travel'
+    amountById['flight'] = 300
+    dateById['flight'] = '2026-12-08'
+
+    const r = allocateWriteOff(open, splits, categoryById, amountById, dateById, '2027-01-04')
+    expect(r).toHaveLength(1)
+    expect(r[0].category).toBe('Travel')
+    expect(r[0].amount).toBeCloseTo(300)
+    // Not a $0.00 line, and not $260.87 either: Food & Drink must not appear at all.
+    expect(r.map((w) => w.category)).not.toContain('Food & Drink')
   })
 
   it('merges two expenses in the same category into one row', () => {
@@ -271,6 +315,7 @@ describe('allocateWriteOff', () => {
       splits,
       { lunch: 'Food & Drink', dinner: 'Food & Drink' },
       { lunch: 120, dinner: 350 },
+      { lunch: '2026-10-01', dinner: '2026-10-02' },
       '2026-11-03'
     )
     expect(r).toHaveLength(1)
@@ -288,23 +333,63 @@ describe('allocateWriteOff', () => {
         splits,
         { dinner: 'Food & Drink', repay: 'Transfer In' },
         { dinner: 300, repay: -250 },
+        { dinner: '2026-10-01', repay: '2026-10-20' },
         '2026-11-03'
       )
     ).toEqual([])
   })
 
   it('writes off nothing for a claim with no splits', () => {
-    expect(allocateWriteOff(open, [], {}, {}, '2026-11-03')).toEqual([])
+    expect(allocateWriteOff(open, [], {}, {}, {}, '2026-11-03')).toEqual([])
   })
 
-  // Rounding must not lose or invent a cent: three equal shares of $100.01 do not divide evenly, so
-  // this pins the residual-cent behaviour. The rows must sum to the outstanding amount EXACTLY.
+  // A category settled to exactly nothing must not be emitted: a $0.00 write-off is spending of
+  // nothing, and it renders as a junk "Write-off · $0.00" line in the transactions drill-down.
+  it('emits no zero-amount row for a category the repayments fully settled', () => {
+    const splits: Split[] = [
+      { transaction_id: 'hotel', claim_id: 'c1', owed_by: 'Sam', amount: 500 },
+      { transaction_id: 'dinner', claim_id: 'c1', owed_by: 'Sam', amount: 200 },
+      { transaction_id: 'repay', claim_id: 'c1', owed_by: 'Sam', amount: 500 },
+    ]
+    const r = allocateWriteOff(
+      open,
+      splits,
+      { hotel: 'Travel', dinner: 'Food & Drink', repay: 'Transfer In' },
+      { hotel: 1000, dinner: 300, repay: -500 },
+      { hotel: '2026-10-01', dinner: '2026-10-15', repay: '2026-10-28' },
+      '2026-11-03'
+    )
+    expect(r).toHaveLength(1)
+    expect(r[0].category).toBe('Food & Drink')
+    expect(r.every((w) => w.amount > 0)).toBe(true)
+  })
+
+  // The result must not depend on the order the splits came back from the database — that query has
+  // no ORDER BY. Same-day expenses tie-break on transaction id, so 'a' settles before 'b' either way.
+  it('is deterministic when two expenses share a date, whatever order they arrive in', () => {
+    const a: Split = { transaction_id: 'a', claim_id: 'c1', owed_by: null, amount: 100 }
+    const b: Split = { transaction_id: 'b', claim_id: 'c1', owed_by: null, amount: 100 }
+    const repay: Split = { transaction_id: 'repay', claim_id: 'c1', owed_by: null, amount: 100 }
+    const cats = { a: 'Travel', b: 'Food & Drink', repay: 'Transfer In' }
+    const amounts = { a: 100, b: 100, repay: -100 }
+    const dates = { a: '2026-10-01', b: '2026-10-01', repay: '2026-10-20' }
+
+    const forwards = allocateWriteOff(open, [a, b, repay], cats, amounts, dates, '2026-11-03')
+    const backwards = allocateWriteOff(open, [repay, b, a], cats, amounts, dates, '2026-11-03')
+    expect(forwards).toEqual(backwards)
+    expect(forwards).toHaveLength(1)
+    expect(forwards[0].category).toBe('Food & Drink') // 'a' settled first, so 'b' is what is left
+  })
+
+  // Rounding must not lose or invent a cent. $199.99 back against three $100 expenses settles the
+  // first outright and all but a penny of the second, leaving $0.01 + $100.00 = $100.01 across two
+  // categories. The rows must sum to the outstanding amount EXACTLY.
   it('makes the rows sum to the outstanding amount despite rounding', () => {
     const splits: Split[] = [
       { transaction_id: 'a', claim_id: 'c1', owed_by: null, amount: 100 },
       { transaction_id: 'b', claim_id: 'c1', owed_by: null, amount: 100 },
       { transaction_id: 'c', claim_id: 'c1', owed_by: null, amount: 100 },
-      // $199.99 came back, leaving $100.01 outstanding across three equal categories.
+      // $199.99 came back, leaving $100.01 outstanding.
       { transaction_id: 'repay', claim_id: 'c1', owed_by: null, amount: 199.99 },
     ]
     const r = allocateWriteOff(
@@ -312,10 +397,14 @@ describe('allocateWriteOff', () => {
       splits,
       { a: 'Travel', b: 'Food & Drink', c: 'Entertainment', repay: 'Transfer In' },
       { a: 100, b: 100, c: 100, repay: -199.99 },
+      { a: '2026-10-01', b: '2026-10-02', c: '2026-10-03', repay: '2026-10-20' },
       '2026-11-03'
     )
-    expect(r).toHaveLength(3)
-    // 33.34 + 33.34 + 33.33 — the last row absorbs the residual cent.
+    // Travel was settled outright, so it is not a row at all.
+    expect(r).toHaveLength(2)
+    expect(r.map((w) => w.category)).toEqual(['Food & Drink', 'Entertainment'])
+    // 0.01 + 100.00 — the last row absorbs the residual, to the cent.
+    expect(r[0].amount).toBeCloseTo(0.01, 2)
     expect(r.reduce((s, w) => s + w.amount, 0)).toBeCloseTo(100.01, 2)
   })
 })

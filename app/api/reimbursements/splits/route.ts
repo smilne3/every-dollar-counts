@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { claimTotals, type Claim, type Split } from '@/lib/reimbursements'
-import { validateSplit, validateSplitDeletion } from '@/lib/split-validation'
+import { isCreditCardPayment } from '@/lib/categories'
+import { validateSplit, validateSplitDeletion, validateSplitTarget } from '@/lib/split-validation'
 
 async function household(supabase: Awaited<ReturnType<typeof createClient>>) {
   const {
@@ -28,7 +29,8 @@ export async function POST(req: Request) {
 
   const { data: txn } = await supabase
     .from('transactions')
-    .select('id, amount, removed')
+    // `pfc_detailed` and `user_category` are here only to evaluate isCreditCardPayment below.
+    .select('id, amount, removed, pfc_detailed, user_category')
     .eq('id', transactionId)
     .maybeSingle()
   if (!txn) return NextResponse.json({ error: 'transaction not found' }, { status: 404 })
@@ -39,6 +41,16 @@ export async function POST(req: Request) {
   if (txn.removed) {
     return NextResponse.json({ error: 'that transaction was removed' }, { status: 400 })
   }
+  // A credit-card payment is excluded from spending and income, so a split on it would reduce
+  // nothing — while a later write-off would freeze its full amount as invented spending. See
+  // validateSplitTarget for why this can only be caught here.
+  const target = validateSplitTarget({
+    isCardPayment: isCreditCardPayment({
+      pfc_detailed: (txn.pfc_detailed as string | null) ?? null,
+      user_category: (txn.user_category as string | null) ?? null,
+    }),
+  })
+  if (!target.ok) return NextResponse.json({ error: target.error }, { status: 400 })
 
   const { data: claim } = await supabase
     .from('reimbursement_claims')
