@@ -9,7 +9,7 @@ export default async function ReimbursementsPage() {
 
   const { data: claimRows } = await supabase
     .from('reimbursement_claims')
-    .select('id, name, written_off_on')
+    .select('id, name, written_off_on, pinned')
     .order('created_at', { ascending: false })
   const { data: splitRows } = await supabase
     .from('reimbursement_splits')
@@ -35,7 +35,7 @@ export default async function ReimbursementsPage() {
   }))
   const today = new Date()
 
-  const claims: ClaimRow[] = ((claimRows ?? []) as Claim[]).map((c) => {
+  const claims: ClaimRow[] = ((claimRows ?? []) as (Claim & { pinned: boolean | null })[]).map((c) => {
     const mine = splits.filter((s) => s.claim_id === c.id)
     const totals = claimTotals(c, mine, amountById)
     // How long the money has been out, to tell a slow payer from a new one.
@@ -49,7 +49,7 @@ export default async function ReimbursementsPage() {
       oldest && totals.outstanding > 0
         ? Math.floor((today.getTime() - new Date(oldest).getTime()) / 86_400_000)
         : null
-    return { ...c, totals, oldestUnpaidDays }
+    return { ...c, pinned: !!c.pinned, totals, oldestUnpaidDays }
   })
 
   // Open claims first, biggest outstanding at the top; settled and written-off sink to the bottom.
@@ -71,8 +71,8 @@ export default async function ReimbursementsPage() {
         title="Reimbursements"
         subtitle={
           outstanding > 0
-            ? `You're owed ${money(outstanding)}.`
-            : 'Money other people owe you, and what has come back.'
+            ? `You're owed ${money(outstanding)}. Pin a claim to mark expenses reimbursable in one tap.`
+            : 'Money other people owe you, and what has come back. Pin a claim to mark expenses reimbursable in one tap.'
         }
       />
       <ClaimList claims={claims} />

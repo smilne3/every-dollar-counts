@@ -12,6 +12,7 @@ export type ClaimRow = {
   id: string
   name: string
   written_off_on: string | null
+  pinned: boolean
   oldestUnpaidDays: number | null
   totals: ClaimTotals
 }
@@ -49,6 +50,26 @@ export function ClaimList({ claims }: { claims: ClaimRow[] }) {
         return
       }
       setConfirming(null)
+      router.refresh()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function togglePin(claim: ClaimRow) {
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/reimbursements/claims', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: claim.id, pinned: !claim.pinned }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        setError(body.error ?? 'That could not be saved.')
+        return
+      }
       router.refresh()
     } finally {
       setBusy(false)
@@ -124,6 +145,20 @@ export function ClaimList({ claims }: { claims: ClaimRow[] }) {
             )}
 
             <div className="mt-4 flex gap-2">
+              {/* The server refuses to pin a written-off claim (400), so the toggle never appears on
+                  one — offering an action the API would reject fails silently from the user's
+                  perspective. Unpinning stays available on every other state. */}
+              {!c.totals.writtenOff && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  aria-label={c.pinned ? `Unpin ${c.name}` : `Pin ${c.name} for one-tap`}
+                  disabled={busy}
+                  onClick={() => togglePin(c)}
+                >
+                  {c.pinned ? 'Unpin' : 'Pin for one-tap'}
+                </Button>
+              )}
               {!c.totals.writtenOff && !c.totals.settled && (
                 <Button
                   type="button"
