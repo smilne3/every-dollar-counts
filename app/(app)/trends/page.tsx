@@ -1,8 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { spendByCategory, spendThisVsLast, monthKey } from '@/lib/budget'
 import { type Category } from '@/lib/categories'
-import { buildSpendContext } from '@/lib/spend-context'
-import { writeOffsAsTxns, type Split, type WriteOff } from '@/lib/reimbursements'
+import { buildSpendContext, withWriteOffs } from '@/lib/spend-context'
+import { type Split, type WriteOff } from '@/lib/reimbursements'
 import { SpendByCategoryChart } from '@/components/SpendByCategoryChart'
 import { MonthOverMonthChart } from '@/components/MonthOverMonthChart'
 import { Card } from '@/components/ui/Card'
@@ -36,9 +36,16 @@ export default async function TrendsPage() {
     .select('claim_id, category, amount, date')
     .gte('date', `${lastM}-01`)
 
-  const ctx = buildSpendContext({ categories, splits: (splitRows ?? []) as Split[] })
-  // A written-off claim is spending in the month it was written off, so it joins the list here.
-  const list = [...(txns ?? []), ...writeOffsAsTxns((writeOffRows ?? []) as WriteOff[])]
+  // The write-offs are fetched for this page's own two-month window (above) and travel in the
+  // context, so this surface cannot compute spending while forgetting them.
+  const ctx = buildSpendContext({
+    categories,
+    splits: (splitRows ?? []) as Split[],
+    writeOffs: (writeOffRows ?? []) as WriteOff[],
+  })
+  // A written-off claim is spending in the month it was written off, so it joins the list here —
+  // before the month filtering below, exactly like a real transaction.
+  const list = withWriteOffs(txns ?? [], ctx)
 
   const byCat = spendByCategory(
     list.filter((t) => monthKey(t.date) === thisM),

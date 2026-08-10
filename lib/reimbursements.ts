@@ -92,7 +92,9 @@ export type ClaimTotals = {
   byPerson: PersonTotal[] // biggest outstanding first
 }
 
-const UNATTRIBUTED = 'Unattributed'
+// The bucket a split with no `owed_by` lands in. Exported so the display layer can recognise it
+// without re-typing the string — a per-person list whose only row is this one has nothing to say.
+export const UNATTRIBUTED = 'Unattributed'
 
 // Totals for ONE claim. `splits` must be that claim's splits; `amountById` maps transaction id to
 // its signed amount, which is how a split's direction is read: a split on an outflow is money owed
@@ -138,8 +140,14 @@ export function claimTotals(
 }
 
 // Freeze a claim's unreturned amount into spending rows, dated the day the user gave up.
-// Allocated pro-rata across the categories the expenses came from, so budgets and the per-category
-// breakdown stay coherent for a claim that spanned Travel and Food & Drink.
+//
+// REPAYMENTS SETTLE THE OLDEST EXPENSES FIRST (FIFO), and what is left unsettled is what gets
+// written off, grouped by the category each unsettled expense came from. The obvious alternative —
+// splitting `outstanding` pro-rata by LIFETIME owed per category — is wrong for a claim that is used
+// for months and partly repaid: 12 months of fully-repaid dinners ($2,000, Food & Drink) plus one
+// unrepaid $300 flight (Travel) would book $260.87 into Food & Drink, a category whose every expense
+// has already come back. The money actually lost was the flight. FIFO says so.
+//
 // FROZEN, not derived: if this were recomputed on read, later editing a split would rewrite a month
 // that had already closed — the retroactive rewrite the design explicitly rules out.
 export function allocateWriteOff(
@@ -147,37 +155,63 @@ export function allocateWriteOff(
   splits: Split[],
   categoryById: Record<string, string>,
   amountById: Record<string, number>,
+  dateById: Record<string, string>,
   onDate: string
 ): WriteOff[] {
-  const { owed, outstanding } = claimTotals(claim, splits, amountById)
+  const { owed, returned, outstanding } = claimTotals(claim, splits, amountById)
   if (outstanding <= 0 || owed <= 0) return []
 
-  // Owed per category, from the expense splits only (repayments carry the payer's category, which
-  // has nothing to do with what was bought).
-  const owedByCategory = new Map<string, number>()
-  for (const s of splits) {
-    const txnAmount = amountById[s.transaction_id]
-    if (txnAmount === undefined || txnAmount < 0) continue // unknown, or a repayment
+  // The expense splits only (a repayment carries the payer's category and date, neither of which has
+  // anything to do with what was bought), oldest first. Ties break on transaction id so the result
+  // can never depend on the order the splits happened to come back from the database.
+  const expenses = splits
+    .filter((s) => {
+      const txnAmount = amountById[s.transaction_id]
+      return txnAmount !== undefined && txnAmount >= 0 // known, and not a repayment
+    })
+    .sort((a, b) => {
+      const da = dateById[a.transaction_id] ?? ''
+      const db = dateById[b.transaction_id] ?? ''
+      if (da !== db) return da < db ? -1 : 1
+      return a.transaction_id < b.transaction_id ? -1 : a.transaction_id > b.transaction_id ? 1 : 0
+    })
+
+  // Walk the expenses oldest-first, consuming everything that came back. Each expense is fully
+  // settled before the next one is touched, so the unsettled tail is the RECENT money — which is
+  // what a claim you keep reusing actually still owes you.
+  let toSettle = returned
+  const unsettledByCategory = new Map<string, number>()
+  for (const s of expenses) {
+    const settled = Math.min(s.amount, toSettle)
+    toSettle -= settled
+    const left = s.amount - settled
+    if (left <= 0) continue
+    // No effective category means the transaction fell out of the lookup entirely; it can't be
+    // attributed, so it drops through to the remainder the last row absorbs rather than guessing.
     const cat = categoryById[s.transaction_id]
     if (!cat) continue
-    owedByCategory.set(cat, (owedByCategory.get(cat) ?? 0) + s.amount)
+    unsettledByCategory.set(cat, (unsettledByCategory.get(cat) ?? 0) + left)
   }
-  if (owedByCategory.size === 0) return []
 
-  const cats = [...owedByCategory.entries()]
+  // A category whose expenses were all repaid contributes nothing and must NOT become a row: a
+  // $0.00 write-off is real spending of nothing, and renders as a junk "Write-off · $0.00" line in
+  // the transactions drill-down.
+  const cats = [...unsettledByCategory.entries()].filter(([, left]) => round2(left) > 0)
+  if (cats.length === 0) return []
+
   const rows: WriteOff[] = []
   let allocated = 0
-  cats.forEach(([category, catOwed], i) => {
+  cats.forEach(([category, left], i) => {
     const isLast = i === cats.length - 1
     // The last row takes the remainder so the rows sum EXACTLY to `outstanding` — rounding each
     // share independently would lose or invent a cent.
-    const amount = isLast
-      ? round2(outstanding - allocated)
-      : round2((catOwed / owed) * outstanding)
+    const amount = isLast ? round2(outstanding - allocated) : round2(left)
     allocated += amount
     rows.push({ claim_id: claim.id, category, amount, date: onDate })
   })
-  return rows
+  // Only the remainder row can still land on zero (sub-cent residuals cancelling). Dropping a row
+  // that is exactly 0 cannot change what the rows sum to, so the exact-sum guarantee survives it.
+  return rows.filter((r) => r.amount !== 0)
 }
 
 function round2(n: number): number {

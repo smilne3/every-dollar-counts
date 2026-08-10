@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { money } from '@/lib/format'
 import { CategoryPicker } from './CategoryPicker'
 import { SplitEditor } from './SplitEditor'
+import { ReimbursableButton } from './ReimbursableButton'
+import type { PinnedClaim } from '@/lib/fast-path'
 
 type Txn = {
   id: string
@@ -11,6 +13,10 @@ type Txn = {
   name: string | null
   merchant_name: string | null
   amount: number
+  // Not displayed — these two are what identify a credit-card payment, which the splits API refuses,
+  // so the one-tap control must not be offered on one. Both are already selected by the page.
+  user_category: string | null
+  pfc_detailed: string | null
 }
 
 type ExistingSplit = { id: string; claim_id: string; owed_by: string | null; amount: number }
@@ -22,6 +28,7 @@ export function TransactionRow({
   splits,
   claims,
   knownPeople,
+  pinned,
 }: {
   t: Txn
   categoryName: string
@@ -29,6 +36,7 @@ export function TransactionRow({
   splits: ExistingSplit[]
   claims: { id: string; name: string }[]
   knownPeople: string[]
+  pinned: PinnedClaim[]
 }) {
   const [open, setOpen] = useState(false)
   // Plaid: amount > 0 means money OUT. Show spending as negative.
@@ -65,15 +73,24 @@ export function TransactionRow({
           )}
         </td>
         <td className="px-4 py-3 text-right">
-          <button
-            type="button"
-            onClick={() => setOpen((o) => !o)}
-            aria-expanded={open}
-            aria-label={`Split ${label ?? 'transaction'}`}
-            className="text-xs font-medium text-emerald hover:text-emerald-600"
-          >
-            {assigned > 0 ? 'Splits' : 'Split'}
-          </button>
+          <div className="flex flex-col items-end gap-1">
+            <ReimbursableButton
+              transactionId={t.id}
+              txn={t}
+              splits={splits}
+              pinned={pinned}
+              label={label ?? 'transaction'}
+            />
+            <button
+              type="button"
+              onClick={() => setOpen((o) => !o)}
+              aria-expanded={open}
+              aria-label={`Split ${label ?? 'transaction'}`}
+              className="text-xs font-medium text-emerald hover:text-emerald-600"
+            >
+              {assigned > 0 ? 'Splits' : 'Split'}
+            </button>
+          </div>
         </td>
       </tr>
       {open && (

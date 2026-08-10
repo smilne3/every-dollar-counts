@@ -6,12 +6,34 @@ import { money } from '@/lib/format'
 import { Card } from './ui/Card'
 import { Button } from './ui/Button'
 import { ConfirmDialog } from './ui/ConfirmDialog'
-import type { ClaimTotals } from '@/lib/reimbursements'
+import { UNATTRIBUTED, type ClaimTotals } from '@/lib/reimbursements'
+
+// The per-person list answers exactly one question: WHO DO I STILL NEED TO CHASE? Where it cannot
+// answer that, it is suppressed — because a per-person list that isn't answering it is a list that
+// argues with the header two lines above it.
+//
+//   Settled or written off -> hidden. There is nobody left to chase, and the rows can still carry an
+//     outstanding balance the claim total has already netted away: tag $500 of dinners with the
+//     one-tap control (no person, so "Unattributed") and tag the employer's repayment "Acme AP", and
+//     the claim is square while the rows read "Unattributed $500.00 outstanding" — printed directly
+//     under the word "Settled". Both lines are true; together they are nonsense.
+//   Only "Unattributed" -> hidden. Every split arrived without a person (the one-tap control never
+//     asks for one), so the list is a single row restating the claim total in different words.
+//
+// Anything else is genuine per-person information — at least one named person, and a header that
+// agrees there is money out — and renders. This is a DISPLAY rule only: claimTotals still computes
+// every bucket, and splits still keep owed_by null, which is what keeps employer names out of the
+// person autocomplete.
+export function showsPersonBreakdown(totals: ClaimTotals): boolean {
+  if (totals.writtenOff || totals.settled) return false
+  return totals.byPerson.some((p) => p.owedBy !== UNATTRIBUTED)
+}
 
 export type ClaimRow = {
   id: string
   name: string
   written_off_on: string | null
+  pinned: boolean
   oldestUnpaidDays: number | null
   totals: ClaimTotals
 }
@@ -49,6 +71,26 @@ export function ClaimList({ claims }: { claims: ClaimRow[] }) {
         return
       }
       setConfirming(null)
+      router.refresh()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function togglePin(claim: ClaimRow) {
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/reimbursements/claims', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: claim.id, pinned: !claim.pinned }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        setError(body.error ?? 'That could not be saved.')
+        return
+      }
       router.refresh()
     } finally {
       setBusy(false)
@@ -108,7 +150,7 @@ export function ClaimList({ claims }: { claims: ClaimRow[] }) {
               <div className="h-full bg-emerald" style={{ width: `${Math.min(100, pct)}%` }} />
             </div>
 
-            {c.totals.byPerson.length > 0 && (
+            {showsPersonBreakdown(c.totals) && (
               <ul className="mt-4 space-y-1 text-sm">
                 {c.totals.byPerson.map((p) => (
                   <li key={p.owedBy} className="flex items-center justify-between">
@@ -124,6 +166,22 @@ export function ClaimList({ claims }: { claims: ClaimRow[] }) {
             )}
 
             <div className="mt-4 flex gap-2">
+              {/* The server refuses to PIN a written-off claim (400), so offering that action would
+                  fail silently from the user's perspective — but it deliberately still allows
+                  UNPINNING one (the guard is scoped to `if (patch.pinned)`), so a claim that was
+                  pinned before it got written off doesn't get stranded pinned forever. Keep the
+                  toggle visible whenever it's already pinned, even if written off. */}
+              {(c.pinned || !c.totals.writtenOff) && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  aria-label={c.pinned ? `Unpin ${c.name}` : `Pin ${c.name} for one-tap`}
+                  disabled={busy}
+                  onClick={() => togglePin(c)}
+                >
+                  {c.pinned ? 'Unpin' : 'Pin for one-tap'}
+                </Button>
+              )}
               {!c.totals.writtenOff && !c.totals.settled && (
                 <Button
                   type="button"

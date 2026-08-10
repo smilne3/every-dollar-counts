@@ -71,14 +71,28 @@ export default async function TransactionsPage({
 
   const { data: claimRows } = await supabase
     .from('reimbursement_claims')
-    .select('id, name')
+    .select('id, name, written_off_on, pinned')
     .is('written_off_on', null)
     .order('created_at', { ascending: false })
-  const claims = (claimRows ?? []) as { id: string; name: string }[]
+  const claims = (claimRows ?? []).map((c) => ({ id: c.id as string, name: c.name as string }))
+  const pinned = (claimRows ?? [])
+    .filter((c) => c.pinned)
+    .map((c) => ({
+      id: c.id as string,
+      name: c.name as string,
+      written_off_on: c.written_off_on as string | null,
+    }))
 
+  // ORDERED, because the order is load-bearing downstream: it is the order the split editor lists a
+  // transaction's splits in, and the order its claim prefill reads from. Unordered, PostgREST may
+  // return the same rows differently between loads, so what the user sees (and what the editor
+  // pre-fills) could change under them without anything having changed. `created_at` is the order
+  // the user made them in; `id` breaks ties so it is total.
   const { data: splitRows } = await supabase
     .from('reimbursement_splits')
     .select('id, transaction_id, claim_id, owed_by, amount')
+    .order('created_at', { ascending: true })
+    .order('id', { ascending: true })
   const splitsByTxn: Record<string, { id: string; claim_id: string; owed_by: string | null; amount: number }[]> = {}
   for (const s of splitRows ?? []) {
     const key = s.transaction_id as string
@@ -94,9 +108,31 @@ export default async function TransactionsPage({
     ...new Set((splitRows ?? []).map((s) => (s.owed_by as string | null)?.trim()).filter(Boolean)),
   ] as string[]
 
+  // Computed once so the write-offs query below uses the exact same date window as the transactions
+  // query's SQL date filter.
+  let monthStart: string | null = null
+  let monthEnd: string | null = null
+  if (month) {
+    const [y, m] = month.split('-').map(Number)
+    monthStart = `${month}-01`
+    const nextY = m === 12 ? y + 1 : y
+    const nextM = m === 12 ? 1 : m + 1
+    monthEnd = `${nextY}-${String(nextM).padStart(2, '0')}-01`
+  }
+
+  let woQuery = supabase.from('reimbursement_write_offs').select('claim_id, category, amount, date')
+  if (month) woQuery = woQuery.gte('date', monthStart!).lt('date', monthEnd!)
+  const { data: writeOffRows } = await woQuery
+
   // The fifth money surface (design spec §6/§7): the same SpendContext the other four build, reusing
-  // the splits already fetched above for the split editor rather than querying twice.
-  const ctx = buildSpendContext({ categories, splits: (splitRows ?? []) as Split[] })
+  // the splits already fetched above for the split editor rather than querying twice. The write-offs
+  // ride along in the context like everywhere else, for this page's own date window — which view
+  // shapes actually RENDER them is a separate decision, made once below.
+  const ctx = buildSpendContext({
+    categories,
+    splits: (splitRows ?? []) as Split[],
+    writeOffs: (writeOffRows ?? []) as WriteOff[],
+  })
 
   // Only needed to name the account in the filter chip when drilling in from a Net Worth / Cash row.
   let accountName: string | null = null
@@ -107,18 +143,6 @@ export default async function TransactionsPage({
       .eq('account_id', account)
       .maybeSingle()
     accountName = acct?.name ?? null
-  }
-
-  // Computed once so the write-offs query below (when it runs) uses the exact same date window as
-  // the transactions query's SQL date filter.
-  let monthStart: string | null = null
-  let monthEnd: string | null = null
-  if (month) {
-    const [y, m] = month.split('-').map(Number)
-    monthStart = `${month}-01`
-    const nextY = m === 12 ? y + 1 : y
-    const nextM = m === 12 ? 1 : m + 1
-    monthEnd = `${nextY}-${String(nextM).padStart(2, '0')}-01`
   }
 
   const PER_PAGE = 200
@@ -143,23 +167,29 @@ export default async function TransactionsPage({
   const { data: txns, count } = await query
   const totalMatching = count ?? 0
 
-  // Write-offs join the list the same way as the other four money surfaces (budgets/trends/
-  // dashboard/breakdown): concatenated in before filtering, so a category or flow drill-down never
-  // contradicts the aggregate figure it was linked from (a written-off claim's spending would
-  // otherwise exist only as a number on another page, with no row here to show for it).
+  // WHICH VIEW SHAPES SHOW WRITE-OFF ROWS — the rule, stated once rather than falling out of the
+  // filters. A write-off row appears exactly where this page has to reconcile with a money figure
+  // computed on another surface, and nowhere else. This page has five shapes:
   //
-  // They are synthetic — no account_id, nothing to match a merchant search — so they are excluded
-  // from an account-filtered view (they don't belong to any one account) and from a search. They
-  // never enter the plain SQL-paginated browse at all: mixing synthetic rows into that path would
-  // desync `count` and the shownFrom/shownTo range math against real SQL pagination they aren't
-  // part of. The in-memory-filtered views are already single-page, so none of that math applies.
+  //   category / flow drill-down (`inMemoryFiltered`)  YES. These are the views a dashboard tile or
+  //     a breakdown row links into, and those aggregates count write-offs — omitting the rows here
+  //     would leave a figure with no rows to show for it. They filter in memory over a single page,
+  //     so a synthetic row costs none of the pagination math below.
+  //   account-filtered                                  NO. A write-off has no account_id; it is
+  //     spending that belongs to a claim, not to any one account.
+  //   search (`q`)                                      NO. It has no merchant or name to match, so
+  //     it would be the one unfiltered row in a filtered result.
+  //   plain browse, and month browse (`?month=` alone)  NO. Both are SQL-paginated, and `count` /
+  //     the "Showing X–Y of N" range are facts about the transactions table that synthetic rows are
+  //     not part of: mixing them in makes the range lie, and page 2 would repeat them. This is the
+  //     ledger view — deliberately the user's bank statement and nothing else. Nothing in the app
+  //     links to a month-only URL (every aggregate drills in carrying a category or a flow), so no
+  //     reported figure is left unreconciled by that choice.
   const includeWriteOffs = inMemoryFiltered && !account && !safe
   let writeOffDisplay: ({ isWriteOff: true; claimName: string } & WriteOffRow)[] = []
   if (includeWriteOffs) {
-    let woQuery = supabase.from('reimbursement_write_offs').select('claim_id, category, amount, date')
-    if (month) woQuery = woQuery.gte('date', monthStart!).lt('date', monthEnd!)
-    const { data: writeOffRows } = await woQuery
-    const rows = (writeOffRows ?? []) as WriteOff[]
+    // Straight from the context — same rows, same date window as every other money surface's.
+    const rows = ctx.writeOffs
 
     const claimIds = [...new Set(rows.map((w) => w.claim_id))]
     const claimNameById: Record<string, string> = {}
@@ -341,6 +371,7 @@ export default async function TransactionsPage({
                       splits={splitsByTxn[t.id] ?? []}
                       claims={claims}
                       knownPeople={knownPeople}
+                      pinned={pinned}
                     />
                   )
                 )}

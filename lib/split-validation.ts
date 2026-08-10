@@ -36,6 +36,28 @@ export function validateSplit(input: {
   return { ok: true }
 }
 
+// Some transactions cannot carry a split at all, whatever the amount. Checked before the amount
+// rules, since no amount makes an ineligible transaction eligible.
+//
+// A credit-card payment is an internal transfer, not spending: the purchases it covers were already
+// counted on the day each was made, which is why it is excluded from both spending and income
+// (#31). Splitting one reduces nothing — and if the claim is later written off, the frozen row
+// carries a `user_category`, the very field `isCreditCardPayment` treats as a deliberate user
+// override, so the row can never be recognised as a card payment again. The full amount would land
+// as brand-new spending in a category the user never spent in, on top of the purchases it paid for.
+// The only place that can be stopped is here, at creation, while the transaction's Plaid detail is
+// still attached to it.
+export function validateSplitTarget(input: { isCardPayment: boolean }): SplitValidation {
+  if (input.isCardPayment) {
+    return {
+      ok: false,
+      error:
+        "That's a credit-card payment. The purchases it paid off were already counted as spending on the days you made them, so splitting the payment would count that money twice. Split the individual purchases instead.",
+    }
+  }
+  return { ok: true }
+}
+
 // Deleting a split can break invariants that only exist across the claim's OTHER rows, so this is
 // evaluated against the totals the claim would have with the split already gone:
 //   - A written-off claim's outstanding was frozen into reimbursement_write_offs at write-off time.
