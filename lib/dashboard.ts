@@ -1,8 +1,11 @@
 import { effectiveCategory } from './effective-category'
 import { isCreditCardPayment } from './categories'
 import { monthKey } from './budget'
+import { spendableAmount } from './reimbursements'
+import type { SpendContext } from './spend-context'
 
 export type FlowTxn = {
+  id: string
   amount: number
   date: string
   user_category: string | null
@@ -74,18 +77,19 @@ export function lastNMonths(now: Date, n: number): { key: string; label: string 
 
 // Money out (spending) and money in (income) per month.
 // Plaid convention: amount > 0 = money OUT, amount < 0 = money IN.
-// - spending excludes `spendingExclude` (income + transfers) so transfers/paychecks
+// - spending excludes `ctx.nonSpending` (income + transfers) so transfers/paychecks
 //   never count as spending.
-// - income excludes `incomeExclude` (transfers only) so paychecks still count as
+// - income excludes `ctx.transfers` (transfers only) so paychecks still count as
 //   income but moving money between your own accounts does not.
 // - a refund is an inflow (amount < 0) in a SPENDING category (e.g. a Travel refund). It nets
 //   DOWN that category's spending rather than counting as income — otherwise every merchant
 //   refund inflates income and leaves the original purchase counted at full price.
+// - a reimbursable transaction (#27) is netted through `spendableAmount` BEFORE any of the above
+//   branching, so a fully-reimbursed outflow nets to 0 and falls through both branches, and a
+//   tagged repayment inflow nets to 0 rather than reading as income or as a refund.
 export function monthlyFlows(
   txns: FlowTxn[],
-  pfcMap: Record<string, string>,
-  spendingExclude: Set<string>,
-  incomeExclude: Set<string>,
+  ctx: SpendContext,
   months: { key: string; label: string }[]
 ): { key: string; label: string; spending: number; income: number }[] {
   const acc: Record<string, { spending: number; income: number }> = {}
@@ -96,19 +100,20 @@ export function monthlyFlows(
     if (!bucket) continue
     // A credit-card payment is an internal transfer — skip both legs (out of checking, into card).
     if (isCreditCardPayment(t)) continue
-    const cat = effectiveCategory(t, pfcMap)
-    // Transfers (in incomeExclude) are neither spending nor income.
-    if (incomeExclude.has(cat)) continue
-    // Income categories are in spendingExclude but not incomeExclude (transfers are already gone).
-    const isIncomeCategory = spendingExclude.has(cat)
-    if (t.amount > 0) {
+    const cat = effectiveCategory(t, ctx.pfcMap)
+    // Transfers are neither spending nor income.
+    if (ctx.transfers.has(cat)) continue
+    // Income categories are in nonSpending but not transfers (transfers are already gone).
+    const isIncomeCategory = ctx.nonSpending.has(cat)
+    const amt = spendableAmount(t, ctx.reimbursedByTxn)
+    if (amt > 0) {
       // Money out: spending, unless it's an income category (rare; e.g. a clawback).
-      if (!isIncomeCategory) bucket.spending += t.amount
-    } else if (t.amount < 0) {
+      if (!isIncomeCategory) bucket.spending += amt
+    } else if (amt < 0) {
       // Money in: real income for an income category; otherwise a refund that nets down spending
-      // (amount is negative, so += reduces the category's spending).
-      if (isIncomeCategory) bucket.income += -t.amount
-      else bucket.spending += t.amount
+      // (amt is negative, so += reduces the category's spending).
+      if (isIncomeCategory) bucket.income += -amt
+      else bucket.spending += amt
     }
   }
   return months.map((m) => ({ ...m, ...acc[m.key] }))

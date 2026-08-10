@@ -10,7 +10,7 @@ import { StatCard } from '@/components/ui/StatCard'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { money } from '@/lib/format'
 import { effectiveCategory } from '@/lib/effective-category'
-import { pfcToName, nonSpendingNames, transferNames, type Category } from '@/lib/categories'
+import { pfcToName, type Category } from '@/lib/categories'
 import {
   netWorth,
   cashOnHand,
@@ -22,6 +22,8 @@ import {
 import { listItemsForHousehold } from '@/lib/plaid-items'
 import { listManualAssets } from '@/lib/manual-assets'
 import { budgetedSpend, spendByCategory, monthKey, type Txn } from '@/lib/budget'
+import { buildSpendContext, withWriteOffs } from '@/lib/spend-context'
+import { claimTotals, type Claim, type Split, type WriteOff } from '@/lib/reimbursements'
 
 function greeting(hour: number): string {
   if (hour < 12) return 'Good morning'
@@ -88,18 +90,66 @@ export default async function DashboardPage({
     .order('sort_order')
   const categories = (catsData ?? []) as Category[]
   const pfcMap = pfcToName(categories)
-  const nonSpending = nonSpendingNames(categories)
-  const transfers = transferNames(categories)
 
   const months = lastNMonths(now, 6)
   const sixStart = `${months[0].key}-01`
 
   const { data: flowTxns } = await supabase
     .from('transactions')
-    .select('amount, date, user_category, pfc_primary, pfc_detailed')
+    .select('id, amount, date, user_category, pfc_primary, pfc_detailed')
     .eq('removed', false)
     .gte('date', sixStart)
-  const flows = monthlyFlows((flowTxns ?? []) as FlowTxn[], pfcMap, nonSpending, transfers, months)
+
+  const { data: splitRows } = await supabase
+    .from('reimbursement_splits')
+    .select('transaction_id, claim_id, owed_by, amount')
+  const { data: writeOffRows } = await supabase
+    .from('reimbursement_write_offs')
+    .select('claim_id, category, amount, date')
+    .gte('date', sixStart)
+
+  const { data: openClaims } = await supabase
+    .from('reimbursement_claims')
+    .select('id, name, written_off_on')
+    .is('written_off_on', null)
+
+  // A split can reference a transaction older than the six-month window fetched above for
+  // `flowTxns`, so look up the amounts for exactly the referenced ids rather than reusing that list.
+  // `removed` is excluded so a soft-deleted (Plaid repost) transaction's split falls out of
+  // amountByIdForClaims — claimTotals then skips it via its txnAmount-undefined guard, instead of
+  // counting a claim against a transaction that no longer renders anywhere in the app.
+  const splitTxnIds = [...new Set(((splitRows ?? []) as Split[]).map((s) => s.transaction_id))]
+  const { data: splitTxns } = await supabase
+    .from('transactions')
+    .select('id, amount')
+    .eq('removed', false)
+    .in('id', splitTxnIds.length ? splitTxnIds : ['00000000-0000-0000-0000-000000000000'])
+  const amountByIdForClaims: Record<string, number> = {}
+  for (const t of splitTxns ?? []) amountByIdForClaims[t.id as string] = Number(t.amount)
+
+  // Net worth deliberately does NOT include this (§3.4) — it stays real account balances plus
+  // manually-entered assets. Outstanding reimbursements are money owed to you, not money you have.
+  const owedToYou = ((openClaims ?? []) as Claim[]).reduce((sum, c) => {
+    const { outstanding } = claimTotals(
+      c,
+      ((splitRows ?? []) as Split[]).filter((s) => s.claim_id === c.id),
+      amountByIdForClaims
+    )
+    return sum + Math.max(0, outstanding)
+  }, 0)
+
+  // The write-offs are fetched for this page's own six-month window (above) and travel in the
+  // context, so this surface cannot compute spending while forgetting them.
+  const ctx = buildSpendContext({
+    categories,
+    splits: (splitRows ?? []) as Split[],
+    writeOffs: (writeOffRows ?? []) as WriteOff[],
+  })
+  // A written-off claim is spending in the month it was written off, so it joins the list here —
+  // before the month bucketing below, exactly like a real transaction.
+  const allRows = withWriteOffs((flowTxns ?? []) as Txn[], ctx)
+
+  const flows = monthlyFlows(allRows as FlowTxn[], ctx, months)
   const thisMonth = flows[flows.length - 1]
   const spent = thisMonth.spending
   const income = thisMonth.income
@@ -113,8 +163,8 @@ export default async function DashboardPage({
 
   // Only spend in budgeted categories counts against the budget total — see budgetedSpend.
   const thisMonthKey = months[months.length - 1].key
-  const monthTxns = ((flowTxns ?? []) as Txn[]).filter((t) => monthKey(t.date) === thisMonthKey)
-  const trackedSpend = budgetedSpend(spendByCategory(monthTxns, pfcMap, nonSpending), limits)
+  const monthTxns = allRows.filter((t) => monthKey(t.date) === thisMonthKey)
+  const trackedSpend = budgetedSpend(spendByCategory(monthTxns, ctx), limits)
 
   const { data: recentTxns } = await supabase
     .from('transactions')
@@ -224,6 +274,17 @@ export default async function DashboardPage({
           }
         />
       </div>
+
+      {owedToYou > 0 && (
+        <Link
+          href="/reimbursements"
+          aria-label={`Owed to you: ${money(owedToYou, currency)}`}
+          className="flex items-center justify-between rounded-lg border border-line px-4 py-3 text-sm hover:bg-surface-2"
+        >
+          <span className="text-muted">Owed to you</span>
+          <span className="font-medium tabular-nums text-ink">{money(owedToYou, currency)}</span>
+        </Link>
+      )}
 
       {/* grid-cols-1 (= minmax(0,1fr)), not a bare `grid`: an implicit auto track sizes to
           max-content, so the chart's intrinsic width scrolls the whole page sideways on a

@@ -72,7 +72,7 @@ Never prefix a secret with `NEXT_PUBLIC_`; that ships it to the browser. `npm ru
 
 In the Supabase dashboard, open the **SQL Editor** and run each file from `db/migrations/` in order — paste a file's contents, click **Run**, replace with the next file, repeat:
 
-`001 → 002 → 003 → 004 → 006 → 007 → 008 → 009 → 010` (there is no 005 — the gap is historical, you're not missing a file).
+`001 → 002 → 003 → 004 → 006 → 007 → 008 → 009 → 010 → 011 → 012 → 013` (there is no 005 — the gap is historical, you're not missing a file).
 
 Two warning dialogs will pop up along the way; both are expected:
 

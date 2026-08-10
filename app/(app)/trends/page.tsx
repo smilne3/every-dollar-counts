@@ -1,6 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { spendByCategory, spendThisVsLast, monthKey } from '@/lib/budget'
-import { pfcToName, nonSpendingNames, type Category } from '@/lib/categories'
+import { type Category } from '@/lib/categories'
+import { buildSpendContext, withWriteOffs } from '@/lib/spend-context'
+import { type Split, type WriteOff } from '@/lib/reimbursements'
 import { SpendByCategoryChart } from '@/components/SpendByCategoryChart'
 import { MonthOverMonthChart } from '@/components/MonthOverMonthChart'
 import { Card } from '@/components/ui/Card'
@@ -19,20 +21,35 @@ export default async function TrendsPage() {
     .select('id, name, pfc_primary, sort_order')
     .order('sort_order')
   const categories = (cats ?? []) as Category[]
-  const pfcMap = pfcToName(categories)
-  const nonSpending = nonSpendingNames(categories)
 
   const { data: txns } = await supabase
     .from('transactions')
-    .select('amount, date, user_category, pfc_primary, pfc_detailed')
+    .select('id, amount, date, user_category, pfc_primary, pfc_detailed')
     .eq('removed', false)
     .gte('date', `${lastM}-01`)
-  const list = txns ?? []
+
+  const { data: splitRows } = await supabase
+    .from('reimbursement_splits')
+    .select('transaction_id, claim_id, owed_by, amount')
+  const { data: writeOffRows } = await supabase
+    .from('reimbursement_write_offs')
+    .select('claim_id, category, amount, date')
+    .gte('date', `${lastM}-01`)
+
+  // The write-offs are fetched for this page's own two-month window (above) and travel in the
+  // context, so this surface cannot compute spending while forgetting them.
+  const ctx = buildSpendContext({
+    categories,
+    splits: (splitRows ?? []) as Split[],
+    writeOffs: (writeOffRows ?? []) as WriteOff[],
+  })
+  // A written-off claim is spending in the month it was written off, so it joins the list here —
+  // before the month filtering below, exactly like a real transaction.
+  const list = withWriteOffs(txns ?? [], ctx)
 
   const byCat = spendByCategory(
     list.filter((t) => monthKey(t.date) === thisM),
-    pfcMap,
-    nonSpending
+    ctx
   )
   const spendData = Object.entries(byCat)
     .map(([category, amount]) => ({ category, amount }))
@@ -44,8 +61,7 @@ export default async function TrendsPage() {
     list,
     thisM,
     lastM,
-    pfcMap,
-    nonSpending,
+    ctx,
     throughDay
   )
   const names = Array.from(new Set([...Object.keys(thisMonth), ...Object.keys(lastMonth)]))

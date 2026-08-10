@@ -11,6 +11,7 @@ import {
   TrendsIcon,
   TargetIcon,
   SettingsIcon,
+  HandCoinsIcon,
 } from '@/components/ui/icons'
 
 type NavItem = {
@@ -24,6 +25,7 @@ const NAV: NavItem[] = [
   { href: '/dashboard', label: 'Overview', short: 'Home', Icon: HomeIcon },
   { href: '/transactions', label: 'Transactions', short: 'Activity', Icon: TransactionsIcon },
   { href: '/budgets', label: 'Budgets', short: 'Budgets', Icon: WalletIcon },
+  { href: '/reimbursements', label: 'Reimbursements', short: 'Owed', Icon: HandCoinsIcon },
   { href: '/trends', label: 'Trends', short: 'Trends', Icon: TrendsIcon },
   { href: '/goals', label: 'Goals', short: 'Goals', Icon: TargetIcon },
   { href: '/settings', label: 'Settings', short: 'Settings', Icon: SettingsIcon },
