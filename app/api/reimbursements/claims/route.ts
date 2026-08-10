@@ -28,7 +28,7 @@ export async function GET() {
 
   const { data: claims } = await supabase
     .from('reimbursement_claims')
-    .select('id, name, written_off_on')
+    .select('id, name, written_off_on, pinned')
     .order('created_at', { ascending: false })
   const { data: splits } = await supabase
     .from('reimbursement_splits')
@@ -166,26 +166,53 @@ async function writeOff(
   }
   const { error: markError } = await supabase
     .from('reimbursement_claims')
-    .update({ written_off_on: date })
+    // Unpin as part of writing off: the splits API refuses a written-off claim, so leaving it pinned
+    // would keep offering a fast-path action that fails on every tap.
+    .update({ written_off_on: date, pinned: false })
     .eq('id', id)
   if (markError) return NextResponse.json({ error: markError.message }, { status: 400 })
 
   return NextResponse.json({ ok: true, written: rows })
 }
 
+// Rename and/or pin. Both are independent optional fields so the two operations share one route
+// without either becoming mandatory — the pin toggle sends only `pinned`, the rename only `name`.
 export async function PATCH(req: Request) {
-  const { id, name } = await req.json()
-  const clean = (name ?? '').trim()
-  if (!id || !clean) return NextResponse.json({ error: 'id and name required' }, { status: 400 })
+  const { id, name, pinned } = await req.json()
+  if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
+
+  const patch: { name?: string; pinned?: boolean } = {}
+  if (name !== undefined) {
+    const clean = String(name).trim()
+    if (!clean) return NextResponse.json({ error: 'name cannot be empty' }, { status: 400 })
+    patch.name = clean
+  }
+  if (pinned !== undefined) patch.pinned = !!pinned
+  if (Object.keys(patch).length === 0) {
+    return NextResponse.json({ error: 'nothing to update' }, { status: 400 })
+  }
+
   const supabase = await createClient()
   const {
     data: { user },
   } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
-  const { error } = await supabase
-    .from('reimbursement_claims')
-    .update({ name: clean })
-    .eq('id', id)
+
+  // A written-off claim is closed for good and the splits API refuses to file against it, so
+  // pinning one would surface an action the server rejects on every tap.
+  if (patch.pinned) {
+    const { data: claim } = await supabase
+      .from('reimbursement_claims')
+      .select('written_off_on')
+      .eq('id', id)
+      .maybeSingle()
+    if (!claim) return NextResponse.json({ error: 'not found' }, { status: 404 })
+    if (claim.written_off_on) {
+      return NextResponse.json({ error: 'a written-off claim cannot be pinned' }, { status: 400 })
+    }
+  }
+
+  const { error } = await supabase.from('reimbursement_claims').update(patch).eq('id', id)
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
   return NextResponse.json({ ok: true })
 }
