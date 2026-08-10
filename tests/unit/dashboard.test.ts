@@ -74,6 +74,9 @@ describe('monthlyFlows', () => {
     nonSpending: new Set(['Income', 'Transfer In']),
     transfers: new Set(['Transfer In']),
     reimbursedByTxn,
+    // monthlyFlows never reads the write-offs — a surface concatenates them onto its transaction
+    // list before calling (see withWriteOffs), so they arrive as ordinary rows.
+    writeOffs: [],
   })
   const months = [
     { key: '2026-06', label: 'Jun' },

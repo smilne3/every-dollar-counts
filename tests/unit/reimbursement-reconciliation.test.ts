@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { spendByCategory, type Txn } from '@/lib/budget'
 import { monthlyFlows, type FlowTxn } from '@/lib/dashboard'
-import { buildSpendContext } from '@/lib/spend-context'
-import { writeOffsAsTxns, type Split, type WriteOff } from '@/lib/reimbursements'
+import { buildSpendContext, withWriteOffs } from '@/lib/spend-context'
+import { type Split, type WriteOff } from '@/lib/reimbursements'
 import type { Category } from '@/lib/categories'
 
 const categories: Category[] = [
@@ -42,8 +42,10 @@ const writeOffs: WriteOff[] = [
 ]
 
 describe('reimbursement reconciliation', () => {
-  const ctx = buildSpendContext({ categories, splits })
-  const all = [...txns, ...writeOffsAsTxns(writeOffs)]
+  // Write-offs now ride in the context and join the list through withWriteOffs — the same path the
+  // five money surfaces take, so this reconciliation exercises what they actually run.
+  const ctx = buildSpendContext({ categories, splits, writeOffs })
+  const all = withWriteOffs(txns, ctx) as Txn[]
 
   // total spending == Σ outflows − Σ reimbursable splits + Σ write-offs, with refunds still netting.
   it('spendByCategory totals reconcile with the inputs', () => {
@@ -70,7 +72,7 @@ describe('reimbursement reconciliation', () => {
   // With no splits and no write-offs, every number must match the pre-#27 behaviour exactly: both
   // inflows in spending categories net down like refunds, which is the #8 behaviour we must preserve.
   it('is a no-op when nothing is reimbursable', () => {
-    const plain = buildSpendContext({ categories, splits: [] })
+    const plain = buildSpendContext({ categories, splits: [], writeOffs: [] })
     const total = Object.values(spendByCategory(txns, plain)).reduce((s, v) => s + v, 0)
     expect(total).toBeCloseTo(920 - 50 - 400) // 470 — e now nets Travel down, as a refund would
     const flows = monthlyFlows(txns as FlowTxn[], plain, [{ key: '2026-07', label: 'Jul' }])

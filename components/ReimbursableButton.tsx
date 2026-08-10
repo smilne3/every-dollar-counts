@@ -2,17 +2,50 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { money } from '@/lib/format'
 import { fastPathState, type FastPathEntry, type FastPathSplit, type PinnedClaim } from '@/lib/fast-path'
+
+// One place decides what a tap says it will do and what it announces, so the single-claim button and
+// the dropdown rows can never drift apart. `solo` is the wording when this is the only entry (the
+// control names itself); `text` is the wording inside the dropdown (the control is already named).
+//
+// The third case is the multi-split one: several splits already sit under this claim on this row, so
+// the tap adds the remainder rather than undoing anything. It must never render as a bare "✓" —
+// that is what invited the tap that used to delete a person's share.
+function entryCopy(e: FastPathEntry, label: string) {
+  if (e.action === 'undo') {
+    return {
+      solo: 'Reimbursable ✓',
+      text: `${e.claimName} ✓`,
+      aria: `Remove ${e.claimName} from ${label}`,
+    }
+  }
+  if (e.applied) {
+    const rest = money(e.amount)
+    return {
+      solo: `Reimbursable · ${e.claimName} + ${rest}`,
+      text: `${e.claimName} + ${rest}`,
+      aria: `Add the remaining ${rest} of ${label} to ${e.claimName}`,
+    }
+  }
+  return {
+    solo: `Reimbursable · ${e.claimName}`,
+    text: e.claimName,
+    aria: `Mark ${label} reimbursable to ${e.claimName}`,
+  }
+}
 
 export function ReimbursableButton({
   transactionId,
-  amount,
+  txn,
   splits,
   pinned,
   label,
 }: {
   transactionId: string
-  amount: number
+  // The whole shape fastPathState needs: `pfc_detailed`/`user_category` are what identify a
+  // credit-card payment, which the splits API refuses and this control therefore never offers.
+  txn: { amount: number; pfc_detailed: string | null; user_category: string | null }
   splits: FastPathSplit[]
   pinned: PinnedClaim[]
   label: string
@@ -21,15 +54,16 @@ export function ReimbursableButton({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const state = fastPathState({ amount }, splits, pinned)
+  const state = fastPathState(txn, splits, pinned)
   if (!state.show) return null
 
   async function apply(entry: FastPathEntry) {
     setBusy(true)
     setError(null)
     try {
-      // Applied entries undo; the rest assign whatever is still unsplit.
-      const res = entry.applied
+      // The entry's own action decides — NOT whether the claim is applied. A claim with several
+      // splits on this transaction is applied but has no single split to undo, so it assigns.
+      const res = entry.action === 'undo'
         ? await fetch('/api/reimbursements/splits', {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json' },
@@ -67,16 +101,10 @@ export function ReimbursableButton({
           type="button"
           onClick={() => apply(state.entries[0])}
           disabled={busy}
-          aria-label={
-            state.entries[0].applied
-              ? `Remove ${state.entries[0].claimName} from ${label}`
-              : `Mark ${label} reimbursable to ${state.entries[0].claimName}`
-          }
+          aria-label={entryCopy(state.entries[0], label).aria}
           className={linkClass}
         >
-          {state.entries[0].applied
-            ? `Reimbursable ✓`
-            : `Reimbursable · ${state.entries[0].claimName}`}
+          {entryCopy(state.entries[0], label).solo}
         </button>
       ) : (
         // A native disclosure rather than a positioned popover: it works inside a table cell with no
@@ -95,14 +123,10 @@ export function ReimbursableButton({
                 type="button"
                 onClick={() => apply(e)}
                 disabled={busy}
-                aria-label={
-                  e.applied
-                    ? `Remove ${e.claimName} from ${label}`
-                    : `Mark ${label} reimbursable to ${e.claimName}`
-                }
+                aria-label={entryCopy(e, label).aria}
                 className={linkClass}
               >
-                {e.applied ? `${e.claimName} ✓` : e.claimName}
+                {entryCopy(e, label).text}
               </button>
             ))}
           </div>

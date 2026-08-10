@@ -2,8 +2,8 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { spendByCategory } from '@/lib/budget'
 import { spendingCategoryNames, type Category } from '@/lib/categories'
-import { buildSpendContext } from '@/lib/spend-context'
-import { writeOffsAsTxns, type Split, type WriteOff } from '@/lib/reimbursements'
+import { buildSpendContext, withWriteOffs } from '@/lib/spend-context'
+import { type Split, type WriteOff } from '@/lib/reimbursements'
 import { BudgetEditor } from '@/components/BudgetEditor'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { buttonClass } from '@/components/ui/Button'
@@ -41,10 +41,15 @@ export default async function BudgetsPage() {
 
   const { data: budgets } = await supabase.from('budgets').select('category, monthly_limit')
 
-  const ctx = buildSpendContext({ categories, splits: (splitRows ?? []) as Split[] })
+  // The write-offs are fetched for this page's own month window (above) and travel in the context,
+  // so this surface cannot compute spending while forgetting them.
+  const ctx = buildSpendContext({
+    categories,
+    splits: (splitRows ?? []) as Split[],
+    writeOffs: (writeOffRows ?? []) as WriteOff[],
+  })
   // A written-off claim is spending in the month it was written off, so it joins the list here.
-  const withWriteOffs = [...(txns ?? []), ...writeOffsAsTxns((writeOffRows ?? []) as WriteOff[])]
-  const spend = spendByCategory(withWriteOffs, ctx)
+  const spend = spendByCategory(withWriteOffs(txns ?? [], ctx), ctx)
   const initialLimits: Record<string, number> = {}
   for (const b of budgets ?? []) initialLimits[b.category] = Number(b.monthly_limit)
 

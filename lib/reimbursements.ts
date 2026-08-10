@@ -92,7 +92,9 @@ export type ClaimTotals = {
   byPerson: PersonTotal[] // biggest outstanding first
 }
 
-const UNATTRIBUTED = 'Unattributed'
+// The bucket a split with no `owed_by` lands in. Exported so the display layer can recognise it
+// without re-typing the string — a per-person list whose only row is this one has nothing to say.
+export const UNATTRIBUTED = 'Unattributed'
 
 // Totals for ONE claim. `splits` must be that claim's splits; `amountById` maps transaction id to
 // its signed amount, which is how a split's direction is read: a split on an outflow is money owed

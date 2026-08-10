@@ -22,8 +22,8 @@ import {
 import { listItemsForHousehold } from '@/lib/plaid-items'
 import { listManualAssets } from '@/lib/manual-assets'
 import { budgetedSpend, spendByCategory, monthKey, type Txn } from '@/lib/budget'
-import { buildSpendContext } from '@/lib/spend-context'
-import { claimTotals, writeOffsAsTxns, type Claim, type Split, type WriteOff } from '@/lib/reimbursements'
+import { buildSpendContext, withWriteOffs } from '@/lib/spend-context'
+import { claimTotals, type Claim, type Split, type WriteOff } from '@/lib/reimbursements'
 
 function greeting(hour: number): string {
   if (hour < 12) return 'Good morning'
@@ -138,14 +138,18 @@ export default async function DashboardPage({
     return sum + Math.max(0, outstanding)
   }, 0)
 
-  const ctx = buildSpendContext({ categories, splits: (splitRows ?? []) as Split[] })
-  // A written-off claim is spending in the month it was written off, so it joins the list here.
-  const withWriteOffs = [
-    ...((flowTxns ?? []) as Txn[]),
-    ...writeOffsAsTxns((writeOffRows ?? []) as WriteOff[]),
-  ]
+  // The write-offs are fetched for this page's own six-month window (above) and travel in the
+  // context, so this surface cannot compute spending while forgetting them.
+  const ctx = buildSpendContext({
+    categories,
+    splits: (splitRows ?? []) as Split[],
+    writeOffs: (writeOffRows ?? []) as WriteOff[],
+  })
+  // A written-off claim is spending in the month it was written off, so it joins the list here —
+  // before the month bucketing below, exactly like a real transaction.
+  const allRows = withWriteOffs((flowTxns ?? []) as Txn[], ctx)
 
-  const flows = monthlyFlows(withWriteOffs as FlowTxn[], ctx, months)
+  const flows = monthlyFlows(allRows as FlowTxn[], ctx, months)
   const thisMonth = flows[flows.length - 1]
   const spent = thisMonth.spending
   const income = thisMonth.income
@@ -159,7 +163,7 @@ export default async function DashboardPage({
 
   // Only spend in budgeted categories counts against the budget total — see budgetedSpend.
   const thisMonthKey = months[months.length - 1].key
-  const monthTxns = withWriteOffs.filter((t) => monthKey(t.date) === thisMonthKey)
+  const monthTxns = allRows.filter((t) => monthKey(t.date) === thisMonthKey)
   const trackedSpend = budgetedSpend(spendByCategory(monthTxns, ctx), limits)
 
   const { data: recentTxns } = await supabase

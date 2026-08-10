@@ -15,8 +15,8 @@ import {
 import { listManualAssets } from '@/lib/manual-assets'
 import { spendByCategory, monthKey, type Txn } from '@/lib/budget'
 import { type Category } from '@/lib/categories'
-import { buildSpendContext } from '@/lib/spend-context'
-import { writeOffsAsTxns, type Split, type WriteOff } from '@/lib/reimbursements'
+import { buildSpendContext, withWriteOffs } from '@/lib/spend-context'
+import { type Split, type WriteOff } from '@/lib/reimbursements'
 
 const TITLES: Record<string, { title: string; subtitle: string }> = {
   'net-worth': { title: 'Net worth', subtitle: 'Everything you own, minus what you owe' },
@@ -116,13 +116,17 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
       .select('claim_id, category, amount, date')
       .gte('date', `${thisKey}-01`)
 
-    const ctx = buildSpendContext({ categories, splits: (splitRows ?? []) as Split[] })
-    // A written-off claim is spending in the month it was written off, so it joins the list here.
-    const withWriteOffs = [
-      ...((flowTxns ?? []) as Txn[]),
-      ...writeOffsAsTxns((writeOffRows ?? []) as WriteOff[]),
-    ]
-    const monthTxns = withWriteOffs.filter((t) => monthKey(t.date) === thisKey)
+    // The write-offs are fetched for this page's own date window (above) and travel in the context,
+    // so this surface cannot compute spending while forgetting them.
+    const ctx = buildSpendContext({
+      categories,
+      splits: (splitRows ?? []) as Split[],
+      writeOffs: (writeOffRows ?? []) as WriteOff[],
+    })
+    // A written-off claim is spending in the month it was written off, so it joins the list here —
+    // before the month filter below, exactly like a real transaction.
+    const allRows = withWriteOffs((flowTxns ?? []) as Txn[], ctx)
+    const monthTxns = allRows.filter((t) => monthKey(t.date) === thisKey)
 
     if (metric === 'spent') {
       const byCat = spendByCategory(monthTxns, ctx)
@@ -137,7 +141,7 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
       total = { label: 'Total spent', amount: spent, currency }
     } else {
       // saved
-      const flows = monthlyFlows(withWriteOffs as FlowTxn[], ctx, months)
+      const flows = monthlyFlows(allRows as FlowTxn[], ctx, months)
       const m = flows[flows.length - 1]
       rows = [
         {

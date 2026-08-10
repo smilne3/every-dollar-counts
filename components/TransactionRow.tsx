@@ -13,6 +13,10 @@ type Txn = {
   name: string | null
   merchant_name: string | null
   amount: number
+  // Not displayed — these two are what identify a credit-card payment, which the splits API refuses,
+  // so the one-tap control must not be offered on one. Both are already selected by the page.
+  user_category: string | null
+  pfc_detailed: string | null
 }
 
 type ExistingSplit = { id: string; claim_id: string; owed_by: string | null; amount: number }
@@ -72,7 +76,7 @@ export function TransactionRow({
           <div className="flex flex-col items-end gap-1">
             <ReimbursableButton
               transactionId={t.id}
-              amount={t.amount}
+              txn={t}
               splits={splits}
               pinned={pinned}
               label={label ?? 'transaction'}

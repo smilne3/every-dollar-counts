@@ -6,7 +6,28 @@ import { money } from '@/lib/format'
 import { Card } from './ui/Card'
 import { Button } from './ui/Button'
 import { ConfirmDialog } from './ui/ConfirmDialog'
-import type { ClaimTotals } from '@/lib/reimbursements'
+import { UNATTRIBUTED, type ClaimTotals } from '@/lib/reimbursements'
+
+// The per-person list answers exactly one question: WHO DO I STILL NEED TO CHASE? Where it cannot
+// answer that, it is suppressed — because a per-person list that isn't answering it is a list that
+// argues with the header two lines above it.
+//
+//   Settled or written off -> hidden. There is nobody left to chase, and the rows can still carry an
+//     outstanding balance the claim total has already netted away: tag $500 of dinners with the
+//     one-tap control (no person, so "Unattributed") and tag the employer's repayment "Acme AP", and
+//     the claim is square while the rows read "Unattributed $500.00 outstanding" — printed directly
+//     under the word "Settled". Both lines are true; together they are nonsense.
+//   Only "Unattributed" -> hidden. Every split arrived without a person (the one-tap control never
+//     asks for one), so the list is a single row restating the claim total in different words.
+//
+// Anything else is genuine per-person information — at least one named person, and a header that
+// agrees there is money out — and renders. This is a DISPLAY rule only: claimTotals still computes
+// every bucket, and splits still keep owed_by null, which is what keeps employer names out of the
+// person autocomplete.
+export function showsPersonBreakdown(totals: ClaimTotals): boolean {
+  if (totals.writtenOff || totals.settled) return false
+  return totals.byPerson.some((p) => p.owedBy !== UNATTRIBUTED)
+}
 
 export type ClaimRow = {
   id: string
@@ -129,7 +150,7 @@ export function ClaimList({ claims }: { claims: ClaimRow[] }) {
               <div className="h-full bg-emerald" style={{ width: `${Math.min(100, pct)}%` }} />
             </div>
 
-            {c.totals.byPerson.length > 0 && (
+            {showsPersonBreakdown(c.totals) && (
               <ul className="mt-4 space-y-1 text-sm">
                 {c.totals.byPerson.map((p) => (
                   <li key={p.owedBy} className="flex items-center justify-between">

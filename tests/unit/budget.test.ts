@@ -21,6 +21,9 @@ const ctx = (
   nonSpending,
   transfers: new Set(['Transfer In', 'Transfer Out']),
   reimbursedByTxn: {},
+  // These functions never read the write-offs — a surface concatenates them onto its transaction
+  // list before calling (see withWriteOffs), so they arrive as ordinary rows.
+  writeOffs: [],
   ...over,
 })
 
