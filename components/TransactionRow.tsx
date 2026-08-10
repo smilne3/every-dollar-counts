@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { money } from '@/lib/format'
 import { CategoryPicker } from './CategoryPicker'
 import { SplitEditor } from './SplitEditor'
+import { ReimbursableButton } from './ReimbursableButton'
+import type { PinnedClaim } from '@/lib/fast-path'
 
 type Txn = {
   id: string
@@ -22,6 +24,7 @@ export function TransactionRow({
   splits,
   claims,
   knownPeople,
+  pinned,
 }: {
   t: Txn
   categoryName: string
@@ -29,6 +32,7 @@ export function TransactionRow({
   splits: ExistingSplit[]
   claims: { id: string; name: string }[]
   knownPeople: string[]
+  pinned: PinnedClaim[]
 }) {
   const [open, setOpen] = useState(false)
   // Plaid: amount > 0 means money OUT. Show spending as negative.
@@ -65,15 +69,24 @@ export function TransactionRow({
           )}
         </td>
         <td className="px-4 py-3 text-right">
-          <button
-            type="button"
-            onClick={() => setOpen((o) => !o)}
-            aria-expanded={open}
-            aria-label={`Split ${label ?? 'transaction'}`}
-            className="text-xs font-medium text-emerald hover:text-emerald-600"
-          >
-            {assigned > 0 ? 'Splits' : 'Split'}
-          </button>
+          <div className="flex flex-col items-end gap-1">
+            <ReimbursableButton
+              transactionId={t.id}
+              amount={t.amount}
+              splits={splits}
+              pinned={pinned}
+              label={label ?? 'transaction'}
+            />
+            <button
+              type="button"
+              onClick={() => setOpen((o) => !o)}
+              aria-expanded={open}
+              aria-label={`Split ${label ?? 'transaction'}`}
+              className="text-xs font-medium text-emerald hover:text-emerald-600"
+            >
+              {assigned > 0 ? 'Splits' : 'Split'}
+            </button>
+          </div>
         </td>
       </tr>
       {open && (

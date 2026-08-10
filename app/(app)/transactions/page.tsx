@@ -71,10 +71,17 @@ export default async function TransactionsPage({
 
   const { data: claimRows } = await supabase
     .from('reimbursement_claims')
-    .select('id, name')
+    .select('id, name, written_off_on, pinned')
     .is('written_off_on', null)
     .order('created_at', { ascending: false })
-  const claims = (claimRows ?? []) as { id: string; name: string }[]
+  const claims = (claimRows ?? []).map((c) => ({ id: c.id as string, name: c.name as string }))
+  const pinned = (claimRows ?? [])
+    .filter((c) => c.pinned)
+    .map((c) => ({
+      id: c.id as string,
+      name: c.name as string,
+      written_off_on: c.written_off_on as string | null,
+    }))
 
   const { data: splitRows } = await supabase
     .from('reimbursement_splits')
@@ -341,6 +348,7 @@ export default async function TransactionsPage({
                       splits={splitsByTxn[t.id] ?? []}
                       claims={claims}
                       knownPeople={knownPeople}
+                      pinned={pinned}
                     />
                   )
                 )}
