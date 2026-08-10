@@ -7,6 +7,9 @@
 alter table reimbursement_claims
   add column if not exists pinned boolean not null default false;
 
--- Partial index: the fast path only ever asks for pinned claims, and there will be very few.
+-- Partial index: reserved for a future SQL-side `.eq('pinned', true)` filter, which would only ever
+-- want pinned claims and there will be very few. Not used by any current query — the fast path today
+-- selects all open claims and filters `pinned` in JavaScript (app/(app)/transactions/page.tsx), which
+-- carries no `pinned` predicate for a partial index to serve.
 create index if not exists reimbursement_claims_pinned_idx
   on reimbursement_claims (household_id) where pinned;

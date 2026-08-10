@@ -57,9 +57,15 @@ describe('fastPathState', () => {
     expect(fastPathState({ amount: 78 }, [], []).show).toBe(false)
   })
 
-  // A repayment is not reimbursable; it gets tagged through the split editor instead.
-  it('hides on an inflow', () => {
-    expect(fastPathState({ amount: -250 }, [], [acme]).show).toBe(false)
+  // A repayment is not reimbursable; it gets tagged through the split editor instead. This must be a
+  // repayment that ALREADY carries a split against a pinned claim (a normal state reachable through
+  // the split editor) — with no splits, remaining clamps to 0 and show comes out false through the
+  // arithmetic alone, which would pass even if the inflow guard were deleted. With the split present,
+  // removing the guard would render `Reimbursable ✓` on this row and let a tap delete the repayment's
+  // split.
+  it('hides on an inflow even when it already carries a split against a pinned claim', () => {
+    const r = fastPathState({ amount: -250 }, [split('s9', 'c-acme', 250)], [acme])
+    expect(r.show).toBe(false)
   })
 
   it('hides on a zero-amount transaction', () => {
@@ -90,5 +96,16 @@ describe('fastPathState', () => {
     const r = fastPathState({ amount: 50 }, [split('s1', 'c-friend', 999)], [acme])
     expect(r.remaining).toBe(0)
     expect(r.show).toBe(false)
+  })
+
+  // §8: "remainder is zero; the control renders that claim's ✓ entry so it can be undone, and offers
+  // nothing to add." A second pinned claim with nothing left to assign must not appear as a dead,
+  // always-400 entry alongside it.
+  it('offers only the applied entry when a second pinned claim has no remainder left to assign', () => {
+    const r = fastPathState({ amount: 78 }, [split('s1', 'c-acme', 78)], [acme, globex])
+    expect(r.show).toBe(true)
+    expect(r.remaining).toBe(0)
+    expect(r.entries).toHaveLength(1)
+    expect(r.entries[0]).toMatchObject({ claimId: 'c-acme', applied: true, splitId: 's1' })
   })
 })

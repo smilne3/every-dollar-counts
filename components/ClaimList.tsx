@@ -145,10 +145,12 @@ export function ClaimList({ claims }: { claims: ClaimRow[] }) {
             )}
 
             <div className="mt-4 flex gap-2">
-              {/* The server refuses to pin a written-off claim (400), so the toggle never appears on
-                  one — offering an action the API would reject fails silently from the user's
-                  perspective. Unpinning stays available on every other state. */}
-              {!c.totals.writtenOff && (
+              {/* The server refuses to PIN a written-off claim (400), so offering that action would
+                  fail silently from the user's perspective — but it deliberately still allows
+                  UNPINNING one (the guard is scoped to `if (patch.pinned)`), so a claim that was
+                  pinned before it got written off doesn't get stranded pinned forever. Keep the
+                  toggle visible whenever it's already pinned, even if written off. */}
+              {(c.pinned || !c.totals.writtenOff) && (
                 <Button
                   type="button"
                   variant="secondary"

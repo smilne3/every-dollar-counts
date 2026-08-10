@@ -82,7 +82,12 @@ export function ReimbursableButton({
         // A native disclosure rather than a positioned popover: it works inside a table cell with no
         // layout maths, and is keyboard-accessible for free.
         <details className="text-right">
-          <summary className={`${linkClass} cursor-pointer list-none`}>Reimbursable ▾</summary>
+          <summary
+            className={`${linkClass} cursor-pointer list-none`}
+            aria-label={`Reimbursable options for ${label}`}
+          >
+            Reimbursable ▾
+          </summary>
           <div className="mt-1 flex flex-col items-end gap-1">
             {state.entries.map((e) => (
               <button

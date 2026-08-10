@@ -57,6 +57,11 @@ export function fastPathState(
         amount: existing ? 0 : remaining,
       }
     })
+    // An entry that isn't applied and has nothing left to assign (amount 0) would only ever be
+    // rejected by the splits API ("Split amount must be greater than zero") — the user never typed
+    // an amount, so that message isn't actionable. Only offer it if it's applied (so it can be
+    // undone) or there's still a remainder to give it.
+    .filter((e) => e.applied || remaining > 0)
 
   // Show only if there's something to do: an applied claim to undo, or room left to assign.
   // Fully split to claims that aren't pinned leaves neither, so the control disappears entirely.
