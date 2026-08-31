@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { fastPathState, type PinnedClaim, type FastPathSplit } from '@/lib/fast-path'
+import {
+  fastPathState,
+  DEFAULT_CLAIM_NAME,
+  nextFreeClaimName,
+  type PinnedClaim,
+  type FastPathSplit,
+} from '@/lib/fast-path'
 
 const claim = (id: string, name: string, written_off_on: string | null = null): PinnedClaim => ({
   id,
@@ -56,8 +62,11 @@ describe('fastPathState', () => {
     expect(r.show).toBe(false)
   })
 
-  it('hides when nothing is pinned', () => {
-    expect(fastPathState(txn(78), [], []).show).toBe(false)
+  // Was 'hides when nothing is pinned'. It no longer does, and that reversal IS the feature: making
+  // a transaction reimbursable must not require inventing a claim first. The default-entry case is
+  // covered in full by the 'with nothing pinned' block at the bottom of this file.
+  it('offers the default claim when nothing is pinned instead of hiding', () => {
+    expect(fastPathState(txn(78), [], []).show).toBe(true)
   })
 
   // A repayment is not reimbursable; it gets tagged through the split editor instead. This must be a
@@ -191,5 +200,77 @@ describe('fastPathState', () => {
     )
     expect(r.show).toBe(true)
     expect(r.entries[0].amount).toBeCloseTo(900)
+  })
+})
+
+// The on-ramp. Marking something reimbursable must not require first inventing and pinning a claim:
+// with nothing pinned the control still offers itself, and the claim is created on the first tap.
+// `claimId: null` is what tells the caller "create the default claim, then assign to it".
+describe('fastPathState with nothing pinned', () => {
+  it('offers a default entry on an untouched outflow', () => {
+    const r = fastPathState(txn(78), [], [])
+    expect(r.show).toBe(true)
+    expect(r.entries).toHaveLength(1)
+    expect(r.entries[0]).toMatchObject({
+      claimId: null,
+      claimName: DEFAULT_CLAIM_NAME,
+      applied: false,
+      action: 'assign',
+      splitId: null,
+    })
+    expect(r.entries[0].amount).toBeCloseTo(78)
+  })
+
+  it('offers only the unsplit remainder', () => {
+    const r = fastPathState(txn(78), [split('s1', 'c-friend', 30)], [])
+    expect(r.entries[0].amount).toBeCloseTo(48)
+  })
+
+  // The existing guards are not weakened by the default entry: each of these is a row the splits API
+  // would refuse, so offering a one-tap control would only ever produce an error.
+  it('stays hidden on a credit-card payment', () => {
+    const cardPayment = { amount: 300, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', user_category: null }
+    expect(fastPathState(cardPayment, [], []).show).toBe(false)
+  })
+
+  it('stays hidden on an inflow', () => {
+    expect(fastPathState(txn(-260), [], []).show).toBe(false)
+  })
+
+  it('stays hidden when the transaction is already fully split', () => {
+    expect(fastPathState(txn(78), [split('s1', 'c-friend', 78)], []).show).toBe(false)
+  })
+
+  // A pinned claim is a deliberate choice; it wins over the generic default rather than being
+  // shown alongside it.
+  it('defers to pinned claims when there are any', () => {
+    const r = fastPathState(txn(78), [], [acme])
+    expect(r.entries).toHaveLength(1)
+    expect(r.entries[0].claimId).toBe('c-acme')
+  })
+})
+
+// Writing a claim off FREEZES it — the row survives as a record of spending that already counted, and
+// `unique (household_id, name)` means its name is consumed forever. Without this, writing off "Work"
+// would permanently brick the one-tap control: every later tap would try to create a name that can
+// never be created again, and there would be no way back except the split editor.
+describe('nextFreeClaimName', () => {
+  it('takes the plain name when nothing has claimed it', () => {
+    expect(nextFreeClaimName('Work', [])).toBe('Work')
+    expect(nextFreeClaimName('Work', ['Bourbon trail'])).toBe('Work')
+  })
+
+  it('steps past a name that is already taken', () => {
+    expect(nextFreeClaimName('Work', ['Work'])).toBe('Work (2)')
+    expect(nextFreeClaimName('Work', ['Work', 'Work (2)'])).toBe('Work (3)')
+  })
+
+  it('fills a gap rather than always counting to the end', () => {
+    expect(nextFreeClaimName('Work', ['Work', 'Work (3)'])).toBe('Work (2)')
+  })
+
+  // Names are compared the way the unique constraint sees them, not the way they were typed.
+  it('ignores case and surrounding whitespace when deciding what is taken', () => {
+    expect(nextFreeClaimName('Work', ['  work  '])).toBe('Work (2)')
   })
 })

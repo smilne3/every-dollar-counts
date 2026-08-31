@@ -18,11 +18,25 @@ describe('netWorth', () => {
       { type: 'loan', current_balance: 10000 },
     ]
     // assets 10100 - liabilities 10500
-    expect(netWorth(accounts)).toBe(-400)
+    expect(netWorth(accounts, 0)).toBe(-400)
   })
 
   it('treats null balances and unknown types as zero/ignored', () => {
-    expect(netWorth([{ type: 'depository', current_balance: null }, { type: null, current_balance: 999 }])).toBe(0)
+    expect(netWorth([{ type: 'depository', current_balance: null }, { type: null, current_balance: 999 }], 0)).toBe(0)
+  })
+
+  // A reimbursable expense takes the cash out today but is money that comes back, so it must not
+  // read as a loss. The receivable offsets the cash that left.
+  it('counts outstanding reimbursements as a receivable', () => {
+    const accounts = [{ type: 'depository', current_balance: 8000 }]
+    expect(netWorth(accounts, 500)).toBe(8500)
+  })
+
+  // The offset is the whole point: spending $500 you will get back leaves net worth where it was.
+  it('leaves net worth flat when cash out equals what is owed back', () => {
+    const before = netWorth([{ type: 'depository', current_balance: 8000 }], 0)
+    const after = netWorth([{ type: 'depository', current_balance: 7500 }], 500)
+    expect(after).toBe(before)
   })
 })
 

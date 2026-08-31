@@ -5,6 +5,7 @@ import {
   writeOffsAsTxns,
   claimTotals,
   allocateWriteOff,
+  receivableTotal,
   type Split,
   type Claim,
 } from '@/lib/reimbursements'
@@ -406,5 +407,42 @@ describe('allocateWriteOff', () => {
     // 0.01 + 100.00 — the last row absorbs the residual, to the cent.
     expect(r[0].amount).toBeCloseTo(0.01, 2)
     expect(r.reduce((s, w) => s + w.amount, 0)).toBeCloseTo(100.01, 2)
+  })
+})
+
+// What net worth counts as money owed back to you. Open claims only: a written-off claim is one you
+// gave up on, and its unreturned amount has already become spending in the write-off month, so
+// counting it here too would both overstate net worth and double-count the same dollars.
+describe('receivableTotal', () => {
+  const open: Claim = { id: 'claim-1', name: 'Work', written_off_on: null }
+
+  it('counts what an open claim is still owed', () => {
+    expect(receivableTotal([open], [split('t1', 500)], { t1: 500 })).toBeCloseTo(500)
+  })
+
+  it('nets a repayment against what is owed', () => {
+    const splits = [split('t1', 500), split('t2', 200)]
+    expect(receivableTotal([open], splits, { t1: 500, t2: -200 })).toBeCloseTo(300)
+  })
+
+  it('counts nothing for a written-off claim', () => {
+    const writtenOff: Claim = { id: 'claim-1', name: 'Work', written_off_on: '2026-08-01' }
+    expect(receivableTotal([writtenOff], [split('t1', 500)], { t1: 500 })).toBe(0)
+  })
+
+  it('counts nothing for a fully repaid claim', () => {
+    const splits = [split('t1', 500), split('t2', 500)]
+    expect(receivableTotal([open], splits, { t1: 500, t2: -500 })).toBe(0)
+  })
+
+  // An over-repaid claim is a surplus inflow, not a debt you owe the other person. Clamping keeps a
+  // stray overpayment from quietly REDUCING net worth.
+  it('never returns a negative for an over-repaid claim', () => {
+    const splits = [split('t1', 500), split('t2', 600)]
+    expect(receivableTotal([open], splits, { t1: 500, t2: -600 })).toBe(0)
+  })
+
+  it('is zero when there are no claims', () => {
+    expect(receivableTotal([], [], {})).toBe(0)
   })
 })

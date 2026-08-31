@@ -30,8 +30,13 @@ export function sumManualAssets(assets: { value: number | null }[]): number {
   return assets.reduce((s, a) => s + (a.value ?? 0), 0)
 }
 
-// Net worth = assets - liabilities across all connected accounts.
-export function netWorth(accounts: Acct[]): number {
+// Net worth = assets - liabilities across all connected accounts, plus what you are owed back.
+//
+// `receivable` is REQUIRED rather than defaulted: every surface that shows net worth has to state
+// what it counts as owed to you, so a page that forgets is a type error rather than a screen quietly
+// disagreeing with the dashboard about the same household. Pass 0 to count only real balances.
+// See receivableTotal() in lib/reimbursements.ts for what belongs in it.
+export function netWorth(accounts: Acct[], receivable: number): number {
   let assets = 0
   let liabilities = 0
   for (const a of accounts) {
@@ -39,7 +44,7 @@ export function netWorth(accounts: Acct[]): number {
     if (ASSET_TYPES.has(a.type ?? '')) assets += bal
     else if (LIABILITY_TYPES.has(a.type ?? '')) liabilities += bal
   }
-  return assets - liabilities
+  return assets - liabilities + receivable
 }
 
 // Cash on hand = balances in spendable (depository) accounts.

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { pfcToName, type Category } from '@/lib/categories'
 import { effectiveCategory } from '@/lib/effective-category'
+import { nextFreeClaimName } from '@/lib/fast-path'
 import {
   claimTotals,
   allocateWriteOff,
@@ -80,21 +81,59 @@ export async function POST(req: Request) {
     return writeOff(supabase, hid, body.id)
   }
 
-  const name = (body.name ?? '').trim()
+  let name = (body.name ?? '').trim()
   if (!name) return NextResponse.json({ error: 'name required' }, { status: 400 })
+
+  // The one-tap control asks for `pinned` because a default claim that is not pinned is a dead end:
+  // it would never come back through `pinned`, so the row could never show the box as ticked and the
+  // user could never untick it. Only ever set TRUE from here — a create must not silently unpin a
+  // claim the user pinned deliberately.
+  const wantsPinned = body.pinned === true
 
   // Idempotent on name: typing an existing claim's name in the editor reuses it rather than failing
   // on the unique constraint.
   const { data: existing } = await supabase
     .from('reimbursement_claims')
-    .select('id')
+    .select('id, pinned, written_off_on')
     .eq('name', name)
     .maybeSingle()
-  if (existing) return NextResponse.json({ id: existing.id })
+  if (existing?.written_off_on) {
+    // A written-off claim is a frozen record; reusing it would reopen spending that already counted,
+    // and the splits API refuses it anyway.
+    //
+    // Someone who TYPED this name in the split editor is told, because they can pick another. The
+    // one-tap control never typed a name, so telling it to pick another is telling it nothing: it
+    // would fail on every future tap, since `unique (household_id, name)` holds the written-off
+    // claim's name forever. It takes the next free variant instead.
+    if (!wantsPinned) {
+      return NextResponse.json({ error: 'that claim was written off' }, { status: 400 })
+    }
+    // Bounded to the candidates that could collide, so this cannot be truncated into reusing a name.
+    const { data: siblings, error: siblingError } = await supabase
+      .from('reimbursement_claims')
+      .select('name')
+      .ilike('name', `${name}%`)
+    if (siblingError) {
+      return NextResponse.json({ error: 'could not read your claims' }, { status: 500 })
+    }
+    name = nextFreeClaimName(
+      name,
+      (siblings ?? []).map((c) => c.name as string)
+    )
+  } else if (existing) {
+    if (wantsPinned && !existing.pinned) {
+      const { error: pinError } = await supabase
+        .from('reimbursement_claims')
+        .update({ pinned: true })
+        .eq('id', existing.id)
+      if (pinError) return NextResponse.json({ error: pinError.message }, { status: 400 })
+    }
+    return NextResponse.json({ id: existing.id })
+  }
 
   const { data, error } = await supabase
     .from('reimbursement_claims')
-    .insert({ household_id: hid, name })
+    .insert({ household_id: hid, name, pinned: wantsPinned })
     .select('id')
     .single()
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })

@@ -214,6 +214,36 @@ export function allocateWriteOff(
   return rows.filter((r) => r.amount !== 0)
 }
 
+// What net worth counts as money owed back to you: the unreturned total of every OPEN claim.
+//
+// Reimbursable money leaves your account today and comes back later, so the cash side of net worth
+// dips the moment you pay. This is the offsetting receivable that keeps the two halves of the same
+// transaction on the same page — spend $500 you will be paid back and net worth does not move.
+//
+// Written-off claims are excluded, and that exclusion is load-bearing twice over: a written-off
+// claim is one you gave up on (so it is no longer owed), and its unreturned amount has ALREADY been
+// frozen as spending in the write-off month. Counting it here as well would both overstate net worth
+// and count the same dollars a second time. Writing a claim off is therefore the single moment a
+// receivable that never arrived corrects itself.
+//
+// Clamped per claim rather than in aggregate: an over-repaid claim is a surplus inflow, not a debt
+// you owe the other person, and must not quietly cancel out what a different claim is still owed.
+export function receivableTotal(
+  claims: Claim[],
+  splits: Split[],
+  amountById: Record<string, number>
+): number {
+  return claims.reduce((sum, c) => {
+    if (c.written_off_on) return sum
+    const { outstanding } = claimTotals(
+      c,
+      splits.filter((s) => s.claim_id === c.id),
+      amountById
+    )
+    return sum + Math.max(0, outstanding)
+  }, 0)
+}
+
 function round2(n: number): number {
   return Math.round(n * 100) / 100
 }

@@ -4,6 +4,30 @@
 
 import { isCreditCardPayment } from './categories'
 
+// The claim a transaction lands in when the user just says "this is reimbursable" without naming
+// anything. Reimbursable spending is overwhelmingly work expenses, so the default is named for that
+// case; anything else is still a claim the user creates by name in the split editor.
+export const DEFAULT_CLAIM_NAME = 'Work'
+
+// The first name in the `base`, `base (2)`, `base (3)` … series that no existing claim is using.
+//
+// Writing a claim off FREEZES it: the row survives as the record of spending that already counted,
+// and `unique (household_id, name)` then holds its name forever. The one-tap control has no other
+// name to fall back on — the user never typed one — so writing off "Work" would otherwise brick it
+// permanently, every later tap failing to create a name that can never exist again.
+//
+// Bounded by construction: among the first `taken.length + 1` candidates, at most `taken.length` can
+// be spoken for, so one is always free and the loop always returns.
+export function nextFreeClaimName(base: string, taken: string[]): string {
+  const norm = (n: string) => n.trim().toLowerCase()
+  const used = new Set(taken.map(norm))
+  if (!used.has(norm(base))) return base
+  for (let n = 2; ; n++) {
+    const candidate = `${base} (${n})`
+    if (!used.has(norm(candidate))) return candidate
+  }
+}
+
 export type PinnedClaim = {
   id: string
   name: string
@@ -22,7 +46,9 @@ export type FastPathSplit = {
 export type FastPathAction = 'assign' | 'undo'
 
 export type FastPathEntry = {
-  claimId: string
+  // null means THE DEFAULT CLAIM, which does not exist yet — the caller creates and pins it on the
+  // first tap. Every later tap finds it in `pinned` and takes the ordinary path below.
+  claimId: string | null
   claimName: string
   applied: boolean // this claim already has at least one split on this transaction
   splitCount: number // how many it has — more than one is the multi-split case
@@ -97,6 +123,32 @@ export function fastPathState(
     // that message isn't actionable. Keep an entry only if it can be undone in one tap, or there is
     // still a remainder for it to take.
     .filter((e) => e.action === 'undo' || remaining > 0)
+
+  // THE ON-RAMP. With no pinned claim to offer, the control used to disappear entirely — so saying
+  // "this is reimbursable" first required going to the split editor and inventing a claim, which is
+  // the concept backwards: reimbursable is the plain fact about the transaction, and which claim it
+  // belongs to is the detail. Offer the default claim instead. It is deliberately the LAST resort:
+  // a pinned claim is a choice the user actually made, so anything above wins over this.
+  //
+  // `remaining > 0` is the same condition every other entry is held to — there is no such thing as a
+  // one-tap action that assigns nothing, and the splits API would refuse it anyway.
+  if (!entries.length && remaining > 0) {
+    return {
+      show: true,
+      remaining,
+      entries: [
+        {
+          claimId: null,
+          claimName: DEFAULT_CLAIM_NAME,
+          applied: false,
+          splitCount: 0,
+          action: 'assign',
+          splitId: null,
+          amount: remaining,
+        },
+      ],
+    }
+  }
 
   // Every surviving entry is a real action (an undo, or an assign with money to assign), so having
   // any at all is exactly the condition for showing the control. Fully split to claims that aren't

@@ -63,6 +63,25 @@ export function ReimbursableButton({
     try {
       // The entry's own action decides — NOT whether the claim is applied. A claim with several
       // splits on this transaction is applied but has no single split to undo, so it assigns.
+      let claimId = entry.claimId
+      if (entry.action === 'assign' && claimId === null) {
+        // First tap in a household with nothing pinned. Create the default claim and pin it in the
+        // same call: the create is idempotent on name, so a repeat tap (or a second row tapped
+        // before this page refreshes) reuses the same claim rather than racing a duplicate. Pinning
+        // is what puts every LATER tap on the ordinary path, where it can be unticked again.
+        const created = await fetch('/api/reimbursements/claims', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: entry.claimName, pinned: true }),
+        })
+        const createdBody = await created.json().catch(() => ({}))
+        if (!created.ok || !createdBody.id) {
+          setError(createdBody.error ?? 'That could not be saved.')
+          return
+        }
+        claimId = createdBody.id
+      }
+
       const res = entry.action === 'undo'
         ? await fetch('/api/reimbursements/splits', {
             method: 'DELETE',
@@ -74,7 +93,7 @@ export function ReimbursableButton({
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               transactionId,
-              claimId: entry.claimId,
+              claimId,
               owedBy: null,
               amount: entry.amount,
             }),
@@ -94,9 +113,38 @@ export function ReimbursableButton({
 
   const linkClass = 'text-xs font-medium text-emerald hover:text-emerald-600 disabled:opacity-50'
 
+  // A tick box only makes sense where the state is genuinely binary: either this row is reimbursable
+  // and one tap undoes that, or it is not and one tap makes it so. The multi-split case ("already
+  // partly tagged, tapping adds the remainder") is NOT binary — a box that stayed ticked while money
+  // was still untagged would be lying, so it keeps the wording that says what the tap will do.
+  const binary = state.entries.length === 1 && (state.entries[0].action === 'undo' || !state.entries[0].applied)
+  // The box still says WHERE the money goes when that was a real choice. A household with one pinned
+  // claim ("Dan's work") deliberately named it, and a bare "Reimbursable" would hide which of two
+  // employers a tap files the expense under. Only the default claim — which the user never named —
+  // goes unmentioned.
+  const boxText =
+    state.entries[0].claimId === null
+      ? 'Reimbursable'
+      : `Reimbursable · ${state.entries[0].claimName}`
+
   return (
     <div className="flex flex-col items-end gap-1">
-      {state.entries.length === 1 ? (
+      {binary ? (
+        <label className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-emerald hover:text-emerald-600">
+          <input
+            type="checkbox"
+            checked={state.entries[0].action === 'undo'}
+            onChange={() => apply(state.entries[0])}
+            disabled={busy}
+            // The visible text repeats down the column, so the accessible name carries the merchant
+            // — otherwise a screen reader hears "Reimbursable" forty times with nothing to tell the
+            // rows apart. Checked/unchecked conveys the state, so the name does not restate it.
+            aria-label={`${boxText} — ${label}`}
+            className="h-3.5 w-3.5 accent-emerald disabled:opacity-50"
+          />
+          {boxText}
+        </label>
+      ) : state.entries.length === 1 ? (
         <button
           type="button"
           onClick={() => apply(state.entries[0])}
@@ -119,7 +167,7 @@ export function ReimbursableButton({
           <div className="mt-1 flex flex-col items-end gap-1">
             {state.entries.map((e) => (
               <button
-                key={e.claimId}
+                key={e.claimId ?? 'default'}
                 type="button"
                 onClick={() => apply(e)}
                 disabled={busy}
