@@ -72,30 +72,33 @@ export function TransactionRow({
             </span>
           )}
         </td>
+        {/* Its own column, under a "Reimbursable" header: the word used to be printed in every
+            cell, which is the header's job. Split keeps the next column — it is a different action,
+            and heading this one "Reimbursable" would have mislabelled it. */}
         <td className="px-4 py-3 text-right">
-          <div className="flex flex-col items-end gap-1">
-            <ReimbursableButton
-              transactionId={t.id}
-              txn={t}
-              splits={splits}
-              pinned={pinned}
-              label={label ?? 'transaction'}
-            />
-            <button
-              type="button"
-              onClick={() => setOpen((o) => !o)}
-              aria-expanded={open}
-              aria-label={`Split ${label ?? 'transaction'}`}
-              className="text-xs font-medium text-emerald hover:text-emerald-600"
-            >
-              {assigned > 0 ? 'Splits' : 'Split'}
-            </button>
-          </div>
+          <ReimbursableButton
+            transactionId={t.id}
+            txn={t}
+            splits={splits}
+            pinned={pinned}
+            label={label ?? 'transaction'}
+          />
+        </td>
+        <td className="px-4 py-3 text-right">
+          <button
+            type="button"
+            onClick={() => setOpen((o) => !o)}
+            aria-expanded={open}
+            aria-label={`Split ${label ?? 'transaction'}`}
+            className="text-xs font-medium text-emerald hover:text-emerald-600"
+          >
+            {assigned > 0 ? 'Splits' : 'Split'}
+          </button>
         </td>
       </tr>
       {open && (
         <tr className="border-b border-line">
-          <td colSpan={5} className="px-4 pb-4">
+          <td colSpan={6} className="px-4 pb-4">
             <SplitEditor
               transactionId={t.id}
               amount={t.amount}

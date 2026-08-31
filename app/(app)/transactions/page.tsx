@@ -340,6 +340,9 @@ export default async function TransactionsPage({
                     Amount
                   </th>
                   <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-faint">
+                    Reimbursable
+                  </th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-faint">
                     <span className="sr-only">Split</span>
                   </th>
                 </tr>
@@ -360,6 +363,7 @@ export default async function TransactionsPage({
                       <td className="px-4 py-3 text-right font-medium tabular-nums text-ink">
                         {money(-t.amount)}
                       </td>
+                      <td className="px-4 py-3" />
                       <td className="px-4 py-3" />
                     </tr>
                   ) : (

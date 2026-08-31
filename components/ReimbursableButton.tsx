@@ -5,17 +5,20 @@ import { useRouter } from 'next/navigation'
 import { money } from '@/lib/format'
 import { fastPathState, type FastPathEntry, type FastPathSplit, type PinnedClaim } from '@/lib/fast-path'
 
-// One place decides what a tap says it will do and what it announces, so the single-claim button and
-// the dropdown rows can never drift apart. `solo` is the wording when this is the only entry (the
-// control names itself); `text` is the wording inside the dropdown (the control is already named).
+// One place decides what a tap says it will do and what it announces, so the single-claim control and
+// the dropdown rows can never drift apart.
 //
-// The third case is the multi-split one: several splits already sit under this claim on this row, so
+// There used to be a second wording here — one for when the control had to name itself ("Reimbursable
+// · Dan's work") and one for inside the dropdown, where it was already named. The column header names
+// it permanently now, so every cell is the already-named case and only `text` survives. A cell that
+// prints the word again is repeating its own header forty times down the page.
+//
+// The middle case is the multi-split one: several splits already sit under this claim on this row, so
 // the tap adds the remainder rather than undoing anything. It must never render as a bare "✓" —
 // that is what invited the tap that used to delete a person's share.
 function entryCopy(e: FastPathEntry, label: string) {
   if (e.action === 'undo') {
     return {
-      solo: 'Reimbursable ✓',
       text: `${e.claimName} ✓`,
       aria: `Remove ${e.claimName} from ${label}`,
     }
@@ -23,13 +26,11 @@ function entryCopy(e: FastPathEntry, label: string) {
   if (e.applied) {
     const rest = money(e.amount)
     return {
-      solo: `Reimbursable · ${e.claimName} + ${rest}`,
       text: `${e.claimName} + ${rest}`,
       aria: `Add the remaining ${rest} of ${label} to ${e.claimName}`,
     }
   }
   return {
-    solo: `Reimbursable · ${e.claimName}`,
     text: e.claimName,
     aria: `Mark ${label} reimbursable to ${e.claimName}`,
   }
@@ -118,14 +119,11 @@ export function ReimbursableButton({
   // partly tagged, tapping adds the remainder") is NOT binary — a box that stayed ticked while money
   // was still untagged would be lying, so it keeps the wording that says what the tap will do.
   const binary = state.entries.length === 1 && (state.entries[0].action === 'undo' || !state.entries[0].applied)
-  // The box still says WHERE the money goes when that was a real choice. A household with one pinned
-  // claim ("Dan's work") deliberately named it, and a bare "Reimbursable" would hide which of two
-  // employers a tap files the expense under. Only the default claim — which the user never named —
-  // goes unmentioned.
-  const boxText =
-    state.entries[0].claimId === null
-      ? 'Reimbursable'
-      : `Reimbursable · ${state.entries[0].claimName}`
+  // The cell still says WHERE the money goes when that was a real choice: a household running
+  // "Dan's work" and "Sarah's work" pinned those names deliberately, and a lone tick box would hide
+  // which employer a tap files the expense under. The DEFAULT claim gets no text at all — the user
+  // never named it, and the column header above has already said what the box means.
+  const boxText = state.entries[0].claimId === null ? '' : state.entries[0].claimName
 
   return (
     <div className="flex flex-col items-end gap-1">
@@ -136,10 +134,13 @@ export function ReimbursableButton({
             checked={state.entries[0].action === 'undo'}
             onChange={() => apply(state.entries[0])}
             disabled={busy}
-            // The visible text repeats down the column, so the accessible name carries the merchant
-            // — otherwise a screen reader hears "Reimbursable" forty times with nothing to tell the
-            // rows apart. Checked/unchecked conveys the state, so the name does not restate it.
-            aria-label={`${boxText} — ${label}`}
+            // The column header is announced when navigating the table, but NOT when focus lands on
+            // the input — without this a screen reader hears "checkbox" down forty rows with nothing
+            // to tell them apart. Checked/unchecked conveys the state, so the name does not restate
+            // it, and the claim name is included only when there is a claim worth naming.
+            aria-label={
+              boxText ? `Reimbursable to ${boxText} — ${label}` : `Reimbursable — ${label}`
+            }
             className="h-3.5 w-3.5 accent-emerald disabled:opacity-50"
           />
           {boxText}
@@ -152,7 +153,7 @@ export function ReimbursableButton({
           aria-label={entryCopy(state.entries[0], label).aria}
           className={linkClass}
         >
-          {entryCopy(state.entries[0], label).solo}
+          {entryCopy(state.entries[0], label).text}
         </button>
       ) : (
         // A native disclosure rather than a positioned popover: it works inside a table cell with no
@@ -162,7 +163,7 @@ export function ReimbursableButton({
             className={`${linkClass} cursor-pointer list-none`}
             aria-label={`Reimbursable options for ${label}`}
           >
-            Reimbursable ▾
+            Choose ▾
           </summary>
           <div className="mt-1 flex flex-col items-end gap-1">
             {state.entries.map((e) => (
