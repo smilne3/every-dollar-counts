@@ -9,6 +9,15 @@ export type Split = {
   amount: number
 }
 
+// A transaction as the reimbursable math sees it. `reimbursable_amount` is how much of this
+// transaction is coming back — always a positive magnitude, never signed. Direction is read from
+// `amount` (Plaid: amount > 0 is money out), so there is no second field that could disagree with it.
+export type ReimbursableTxn = {
+  id: string
+  amount: number
+  reimbursable_amount: number | null
+}
+
 export type Claim = {
   id: string
   name: string
@@ -39,6 +48,33 @@ export function reimbursedByTxn(splits: Split[]): Record<string, number> {
     out[s.transaction_id] = (out[s.transaction_id] ?? 0) + s.amount
   }
   return out
+}
+
+// Transaction id -> reimbursable amount, for spendableAmount.
+//
+// Unmarked rows are OMITTED rather than stored as 0: spendableAmount returns a transaction untouched
+// when it finds no entry, which is what makes an empty map a provable no-op for every caller.
+export function reimbursableByTxn(txns: ReimbursableTxn[]): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const t of txns) {
+    const r = Number(t.reimbursable_amount ?? 0)
+    if (r > 0) out[t.id] = r
+  }
+  return out
+}
+
+// What the household is owed: marked money that went out, less marked money that has come back.
+//
+// Clamped per the whole total at zero. An over-repayment is a surplus inflow, not a debt you owe the
+// other party, and must never reduce net worth.
+export function owedToYou(txns: ReimbursableTxn[]): number {
+  let owed = 0
+  for (const t of txns) {
+    const r = Number(t.reimbursable_amount ?? 0)
+    if (r <= 0) continue
+    owed += t.amount > 0 ? r : -r
+  }
+  return Math.max(0, owed)
 }
 
 // THE rule, in one expression: splits pull a transaction's contribution toward zero, in whichever

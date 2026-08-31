@@ -408,3 +408,55 @@ describe('allocateWriteOff', () => {
     expect(r.reduce((s, w) => s + w.amount, 0)).toBeCloseTo(100.01, 2)
   })
 })
+
+// New task 2 tests for reimbursableByTxn and owedToYou
+
+import { reimbursableByTxn, owedToYou, type ReimbursableTxn } from '@/lib/reimbursements'
+
+const txn = (id: string, amount: number, reimbursable_amount: number | null = null): ReimbursableTxn => ({
+  id,
+  amount,
+  reimbursable_amount,
+})
+
+describe('reimbursableByTxn', () => {
+  it('maps marked transactions to their amount', () => {
+    expect(reimbursableByTxn([txn('t1', 500, 500), txn('t2', 40)])).toEqual({ t1: 500 })
+  })
+
+  // An unmarked map must be a provable no-op for spendableAmount, which is what lets every money
+  // surface run the same code path whether or not anything is marked.
+  it('omits unmarked transactions entirely rather than storing zero', () => {
+    expect(reimbursableByTxn([txn('t1', 40)])).toEqual({})
+  })
+
+  it('reads a numeric column that arrives as a string', () => {
+    const fromDb = { id: 't1', amount: 500, reimbursable_amount: '250.50' as unknown as number }
+    expect(reimbursableByTxn([fromDb])).toEqual({ t1: 250.5 })
+  })
+})
+
+describe('owedToYou', () => {
+  it('counts a marked outflow as money owed to you', () => {
+    expect(owedToYou([txn('t1', 500, 500)])).toBeCloseTo(500)
+  })
+
+  // The sign of the TRANSACTION carries direction; reimbursable_amount is always a magnitude.
+  it('subtracts a marked inflow, because that money already came back', () => {
+    expect(owedToYou([txn('t1', 500, 500), txn('t2', -200, 200)])).toBeCloseTo(300)
+  })
+
+  it('counts only the marked portion of a partly-marked expense', () => {
+    expect(owedToYou([txn('t1', 1000, 750)])).toBeCloseTo(750)
+  })
+
+  it('ignores unmarked transactions', () => {
+    expect(owedToYou([txn('t1', 500), txn('t2', -2772.63)])).toBe(0)
+  })
+
+  // An over-repayment is a surplus inflow, not a debt you owe your employer. Without the clamp a
+  // stray overpayment would quietly REDUCE net worth.
+  it('never returns a negative when more came back than went out', () => {
+    expect(owedToYou([txn('t1', 500, 500), txn('t2', -600, 600)])).toBe(0)
+  })
+})
