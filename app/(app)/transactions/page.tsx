@@ -324,7 +324,22 @@ export default async function TransactionsPage({
       ) : (
         <Card className="overflow-hidden p-0">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            {/* table-fixed, so the columns get the widths below instead of Merchant absorbing all
+                the slack and pushing Amount / Reimbursable / Split past the right edge. Category is
+                the one column left to flex: its <select> sizes to its own content, so the spare
+                width lands as quiet space before the right-aligned block rather than stretching
+                anything. */}
+            <table className="w-full table-fixed text-sm">
+              <colgroup>
+                <col className="w-32" />
+                <col className="w-52" />
+                <col />
+                {/* Wide enough for the "your share -$1,234.56" sub-line, which a ticked row always
+                    carries — sized to the sub-line rather than to the amount above it. */}
+                <col className="w-40" />
+                <col className="w-36" />
+                <col className="w-20" />
+              </colgroup>
               <thead>
                 <tr className="border-b border-line text-left">
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-faint">
@@ -343,7 +358,7 @@ export default async function TransactionsPage({
                     Reimbursable
                   </th>
                   <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-faint">
-                    <span className="sr-only">Split</span>
+                    Split
                   </th>
                 </tr>
               </thead>
@@ -357,7 +372,9 @@ export default async function TransactionsPage({
                       <td className="px-4 py-3 whitespace-nowrap text-sm text-muted">{t.date}</td>
                       <td className="px-4 py-3 font-medium text-ink">
                         Write-off
-                        <span className="block text-xs font-normal text-faint">{t.claimName}</span>
+                        <span className="block truncate text-xs font-normal text-faint">
+                          {t.claimName}
+                        </span>
                       </td>
                       <td className="px-4 py-3 text-sm text-muted">{t.user_category}</td>
                       <td className="px-4 py-3 text-right font-medium tabular-nums text-ink">

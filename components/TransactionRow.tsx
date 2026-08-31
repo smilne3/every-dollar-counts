@@ -51,7 +51,11 @@ export function TransactionRow({
     <>
       <tr className="border-b border-line transition-colors hover:bg-surface-2">
         <td className="px-4 py-3 whitespace-nowrap text-sm text-muted">{t.date}</td>
-        <td className="px-4 py-3 font-medium text-ink">{label}</td>
+        {/* Truncated rather than wrapped: a fixed column would otherwise give one long merchant a
+            two-line row and leave the table's rhythm uneven. `title` keeps the full name reachable. */}
+        <td className="truncate px-4 py-3 font-medium text-ink" title={label ?? undefined}>
+          {label}
+        </td>
         <td className="px-4 py-3">
           <CategoryPicker
             transactionId={t.id}
