@@ -18,7 +18,7 @@
 - **Never reintroduce #31 or #8:** credit-card payments must stay excluded from spending and income; refunds must net against their category rather than counting as income.
 - **TDD is mandatory:** write the failing test, watch it fail, then implement. A test that passes the moment you write it has proven nothing.
 - Verification commands: `npx vitest run`, `npx tsc --noEmit`, `npx eslint`, `npm run build`.
-- The app currently has **212 passing tests**; no existing assertion may be weakened to make new code pass.
+- The app has **192 passing tests at this branch's base**; no existing assertion may be weakened to make new code pass. (Not 212 — that was the count on PR #47's branch, which was CLOSED UNMERGED. This branch is off `main`. Task 2 took it to 200.)
 
 ---
 
