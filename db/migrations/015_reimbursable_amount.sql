@@ -9,7 +9,8 @@
 do $$
 begin
   if exists (select 1 from reimbursement_splits limit 1)
-     or exists (select 1 from reimbursement_write_offs limit 1) then
+     or exists (select 1 from reimbursement_write_offs limit 1)
+     or exists (select 1 from reimbursement_claims limit 1) then
     raise exception
       'reimbursement data exists — this migration assumes a fresh start, see spec section 4.1';
   end if;
