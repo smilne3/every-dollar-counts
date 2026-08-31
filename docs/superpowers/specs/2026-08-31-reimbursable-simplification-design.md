@@ -3,7 +3,7 @@
 - **Repo:** `smilne3/every-dollar-counts`
 - **Date:** 2026-08-31
 - **Replaces:** #27 (reimbursable transactions, PR #40) and the fast path (PR #41). Closes PR #47.
-- **Status:** Draft design, awaiting review
+- **Status:** Approved design, ready for implementation plan
 - **One line:** Reimbursable becomes an *amount* on the transaction — a tick box for the whole charge, a note-bearing partial for the rest — which deletes claims, the person axis, write-offs, the chasing page and all three tables, while keeping net worth flat.
 
 ---
@@ -111,15 +111,31 @@ One consequence of the CHECK worth stating: if Plaid *modifies* a transaction's 
 
 No new RLS policy is needed — `transactions` already carries household-scoped policies.
 
-### 4.1 Migrating existing data
+### 4.1 No migration — starting fresh
 
-Production data must be inspected before anything is dropped.
+The feature shipped a week ago and **has not been used**: no claims, no splits, no write-offs worth
+preserving. The tables are dropped outright and the columns start empty. There is deliberately no
+conversion step, no reporting step, and no `owed_by` → note mapping to write.
 
-1. **Split transactions, full or partial** → `reimbursable_amount = sum of that transaction's splits`. Both cases are now representable, so this is a faithful conversion rather than a rounding. Any `owed_by` values collapse into `reimbursable_note`.
-2. **Write-offs** → these are frozen spending rows that currently appear in past months. Dropping the table removes that spending from history, changing months already closed. If any exist, the user decides whether to accept the change; there is no automatic conversion, because the new model has nowhere to put them.
-3. **Repayment splits on inflows** → convert identically; the sign of the transaction carries the direction, as before.
+One cheap guard survives that decision, because the cost of the assumption being wrong is silent
+loss of real money records:
 
-The migration **reports before it drops**, and the drop is a separate step taken after the report is read.
+```sql
+do $$
+begin
+  if exists (select 1 from reimbursement_splits limit 1)
+     or exists (select 1 from reimbursement_write_offs limit 1) then
+    raise exception
+      'reimbursement data exists — this migration assumes a fresh start, see spec §4.1';
+  end if;
+end $$;
+```
+
+It costs three lines and turns a silent deletion into a loud stop. If it ever fires, the conversion
+described in the previous draft of this spec is the starting point.
+
+Because there is no data, the CHECK constraint in §4 can be created alongside the columns rather
+than sequenced after a backfill.
 
 ## 5. What gets deleted
 
@@ -147,20 +163,26 @@ The migration **reports before it drops**, and the drop is a separate step taken
 
 ## 7. Open questions
 
-1. **A reimbursable expense that is never paid back.** `owedToYou` sits there forever, overstating net worth. Clearing the amount fixes it, but restores that spending to its original month — which may already be closed. See §8 for the recommendation.
+None. All three raised in review are settled:
 
-*(Resolved during review: partly-reimbursable transactions are supported via the partial amount, so they are no longer a migration hazard; Split survives, behind an overflow menu, as an amount plus a note with no per-person lines.)*
+- **Partly-reimbursable transactions** — supported directly by the partial amount.
+- **Split** — survives, behind an overflow menu, as an amount plus a note. No per-person lines.
+- **An expense never paid back** — see §8.
 
-## 8. Recommendation on the open question
+## 8. Decision: giving up on an expense restores it to its original month
 
-Clearing the amount should simply restore the spending to **its original month**, and the closed-month change should be accepted.
+Clearing the amount restores that spending to **the month it happened in**, even if that month has
+already been reviewed. Accepted explicitly by the household: *"None of our expenses are so big that
+$75 really makes a big difference."*
 
-The deleted write-off machinery booked that spending in the *write-off* month specifically to avoid changing a closed one. But if the money never came back, the truth is that it was spent when it was spent. The old behaviour bought immutability at the cost of putting the expense in a month it did not happen in — a reasonable trade for an app with an accountant attached, and the wrong one for two people looking at their own budget.
-
-The cost is real and should be stated: a budget for a closed month can move when you give up on an old expense. Given how rarely that happens, and that the alternative is resurrecting the machinery this spec exists to delete, accepting it is the better trade.
+The deleted write-off machinery booked the spending in the *write-off* month instead, specifically
+to keep closed months immutable. That bought immutability at the cost of putting an expense in a
+month it did not happen in — the right trade for a business with an accountant attached, and the
+wrong one for two people reading their own budget. If the money never came back, it was spent when
+it was spent.
 
 ## 9. Risks
 
 - **This deletes ~2,000 lines of money code that is currently correct**, including fixes for six defects four reviewers found pre-merge. The new model must not silently reintroduce them — particularly #31 (credit-card payments) and #8 (refunds as income), both of which are about a transaction being counted in the wrong direction. The direction guards in §6 exist for this.
 - **Open issues #44 and #46** describe cascade-delete and unchecked-read paths that make a claim silently read as settled. Both become moot once claims cease to exist, and the cascade concern disappears entirely because the data now lives on the transaction rather than in a table hanging off it. Confirm and close them explicitly rather than leaving them to rot. **#45** (route-handler tests for write-off guards) is moot once write-offs are deleted.
-- **The CHECK constraint is new enforcement on an existing table.** It must be added after the migration populates the column, or the migration fails against its own data.
+- **The tick box makes marking easy, which changes which cases are common.** Layout and performance assumptions made when splits were rare (per-row sub-lines, unbounded reads) should be re-checked against a world where many rows are marked.
