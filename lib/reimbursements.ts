@@ -18,6 +18,9 @@ export type ReimbursableTxn = {
   reimbursable_amount: number | null
 }
 
+export type DatedReimbursableTxn = ReimbursableTxn & { date: string }
+export type UnreimbursedRow = { id: string; date: string; remaining: number }
+
 export type Claim = {
   id: string
   name: string
@@ -248,6 +251,37 @@ export function allocateWriteOff(
   // Only the remainder row can still land on zero (sub-cent residuals cancelling). Dropping a row
   // that is exactly 0 cannot change what the rows sum to, so the exact-sum guarantee survives it.
   return rows.filter((r) => r.amount !== 0)
+}
+
+// The expense report: marked expenses the marked deposits have not covered yet.
+//
+// Allocation is FIFO on AMOUNTS, never on dates. A date rule loses money — submit a report on the
+// 15th, get paid on the 20th, and an expense on the 17th sits BEFORE the last deposit and reads as
+// already-paid despite never having been claimed. Matching on amounts removes timing from the
+// problem, which matters because this household submits on no fixed rhythm.
+//
+// Pure and stateless: nothing is stored, so it recomputes correctly no matter what order rows are
+// marked in, and there is no settled-flag that could drift from the numbers it summarises.
+export function unreimbursedExpenses(txns: DatedReimbursableTxn[]): UnreimbursedRow[] {
+  const expenses = txns
+    .filter((t) => t.amount > 0 && Number(t.reimbursable_amount ?? 0) > 0)
+    .sort((a, b) => a.date.localeCompare(b.date))
+
+  let pool = txns
+    .filter((t) => t.amount < 0)
+    .reduce((s, t) => s + Number(t.reimbursable_amount ?? 0), 0)
+
+  const out: UnreimbursedRow[] = []
+  for (const e of expenses) {
+    const marked = Number(e.reimbursable_amount)
+    const covered = Math.min(pool, marked)
+    pool -= covered
+    const remaining = round2(marked - covered)
+    // Only a fully-covered expense should vanish. `> 0` rather than `!== 0` drops sub-cent residues
+    // from repeated rounding, which would otherwise render as a junk "$0.00 outstanding" row.
+    if (remaining > 0) out.push({ id: e.id, date: e.date, remaining })
+  }
+  return out
 }
 
 function round2(n: number): number {

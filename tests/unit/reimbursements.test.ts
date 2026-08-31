@@ -460,3 +460,80 @@ describe('owedToYou', () => {
     expect(owedToYou([txn('t1', 500, 500), txn('t2', -600, 600)])).toBe(0)
   })
 })
+
+// Task 3: FIFO allocation for the expense-report view
+import { unreimbursedExpenses, type DatedReimbursableTxn } from '@/lib/reimbursements'
+
+const exp = (id: string, date: string, amount: number, marked: number): DatedReimbursableTxn => ({
+  id,
+  date,
+  amount,
+  reimbursable_amount: marked,
+})
+const dep = (id: string, date: string, amount: number, marked: number): DatedReimbursableTxn => ({
+  id,
+  date,
+  amount: -amount,
+  reimbursable_amount: marked,
+})
+
+describe('unreimbursedExpenses', () => {
+  it('lists a marked expense with nothing paid back', () => {
+    expect(unreimbursedExpenses([exp('t1', '2026-08-01', 105, 105)])).toEqual([
+      { id: 't1', date: '2026-08-01', remaining: 105 },
+    ])
+  })
+
+  // FIFO: deposits settle the OLDEST outstanding expenses first. This is what makes the view correct
+  // without knowing which deposit paid which expense — the whole reason the model has no claims.
+  it('settles the oldest expenses first', () => {
+    const rows = unreimbursedExpenses([
+      exp('t1', '2026-08-01', 100, 100),
+      exp('t2', '2026-08-10', 105, 105),
+      dep('d1', '2026-08-18', 100, 100),
+    ])
+    expect(rows).toEqual([{ id: 't2', date: '2026-08-10', remaining: 105 }])
+  })
+
+  it('reports the remainder of a partly-covered expense', () => {
+    const rows = unreimbursedExpenses([
+      exp('t1', '2026-08-01', 100, 100),
+      dep('d1', '2026-08-18', 60, 60),
+    ])
+    expect(rows).toEqual([{ id: 't1', date: '2026-08-01', remaining: 40 }])
+  })
+
+  it('leaves nothing outstanding when the deposits cover everything', () => {
+    expect(
+      unreimbursedExpenses([exp('t1', '2026-08-01', 100, 100), dep('d1', '2026-08-18', 150, 150)])
+    ).toEqual([])
+  })
+
+  // Timing is exactly what this must NOT depend on: submitted on the 15th, paid on the 20th, with an
+  // expense on the 17th that was never claimed. A date rule drops that expense; FIFO on amounts keeps it.
+  it('keeps an expense dated between a submission and its deposit', () => {
+    const rows = unreimbursedExpenses([
+      exp('t1', '2026-08-10', 100, 100),
+      exp('t2', '2026-08-17', 45, 45),
+      dep('d1', '2026-08-20', 100, 100),
+    ])
+    expect(rows).toEqual([{ id: 't2', date: '2026-08-17', remaining: 45 }])
+  })
+
+  it('ignores unmarked transactions in both directions', () => {
+    const rows = unreimbursedExpenses([
+      exp('t1', '2026-08-01', 100, 100),
+      { id: 'salary', date: '2026-08-29', amount: -2772.63, reimbursable_amount: null },
+      { id: 'coffee', date: '2026-08-02', amount: 17.16, reimbursable_amount: null },
+    ])
+    expect(rows).toEqual([{ id: 't1', date: '2026-08-01', remaining: 100 }])
+  })
+
+  it('does not leave a sub-cent residue as an outstanding row', () => {
+    const rows = unreimbursedExpenses([
+      exp('t1', '2026-08-01', 33.33, 33.33),
+      dep('d1', '2026-08-18', 33.33, 33.33),
+    ])
+    expect(rows).toEqual([])
+  })
+})
