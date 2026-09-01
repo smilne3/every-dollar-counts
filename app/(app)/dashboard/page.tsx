@@ -23,7 +23,7 @@ import { listItemsForHousehold } from '@/lib/plaid-items'
 import { listManualAssets } from '@/lib/manual-assets'
 import { budgetedSpend, spendByCategory, monthKey, type Txn } from '@/lib/budget'
 import { buildSpendContext } from '@/lib/spend-context'
-import { claimTotals, type Claim, type Split } from '@/lib/reimbursements'
+import { fetchReceivable } from '@/lib/receivable'
 
 function greeting(hour: number): string {
   if (hour < 12) return 'Good morning'
@@ -100,41 +100,11 @@ export default async function DashboardPage({
     .eq('removed', false)
     .gte('date', sixStart)
 
-  // Still fetched for the "owed to you" widget below (claimTotals over open claims) — that
-  // computation is untouched by this refactor, so its own data path stays as-is.
-  const { data: splitRows } = await supabase
-    .from('reimbursement_splits')
-    .select('transaction_id, claim_id, owed_by, amount')
-
-  const { data: openClaims } = await supabase
-    .from('reimbursement_claims')
-    .select('id, name, written_off_on')
-    .is('written_off_on', null)
-
-  // A split can reference a transaction older than the six-month window fetched above for
-  // `flowTxns`, so look up the amounts for exactly the referenced ids rather than reusing that list.
-  // `removed` is excluded so a soft-deleted (Plaid repost) transaction's split falls out of
-  // amountByIdForClaims — claimTotals then skips it via its txnAmount-undefined guard, instead of
-  // counting a claim against a transaction that no longer renders anywhere in the app.
-  const splitTxnIds = [...new Set(((splitRows ?? []) as Split[]).map((s) => s.transaction_id))]
-  const { data: splitTxns } = await supabase
-    .from('transactions')
-    .select('id, amount')
-    .eq('removed', false)
-    .in('id', splitTxnIds.length ? splitTxnIds : ['00000000-0000-0000-0000-000000000000'])
-  const amountByIdForClaims: Record<string, number> = {}
-  for (const t of splitTxns ?? []) amountByIdForClaims[t.id as string] = Number(t.amount)
-
-  // Net worth deliberately does NOT include this (§3.4) — it stays real account balances plus
-  // manually-entered assets. Outstanding reimbursements are money owed to you, not money you have.
-  const owedToYou = ((openClaims ?? []) as Claim[]).reduce((sum, c) => {
-    const { outstanding } = claimTotals(
-      c,
-      ((splitRows ?? []) as Split[]).filter((s) => s.claim_id === c.id),
-      amountByIdForClaims
-    )
-    return sum + Math.max(0, outstanding)
-  }, 0)
+  // Net worth DOES include this. A reimbursable expense takes the cash out of the account today and
+  // brings it back later, so counting only the cash side would report money you are going to get
+  // back as money you have lost. Fetched once here so it stays the single source of truth this tile
+  // and its drill-down both point at — see fetchReceivable() in lib/receivable.ts.
+  const owedToYou = await fetchReceivable()
 
   // The reimbursable map is built straight from this page's own transaction rows — see
   // buildSpendContext.
@@ -172,7 +142,7 @@ export default async function DashboardPage({
     amount: t.amount as number,
   }))
 
-  const worth = netWorth(accounts) + sumManualAssets(manualAssets)
+  const worth = netWorth(accounts, owedToYou) + sumManualAssets(manualAssets)
   const cash = cashOnHand(accounts)
   const depCount = accounts.filter((a) => a.type === 'depository').length
 

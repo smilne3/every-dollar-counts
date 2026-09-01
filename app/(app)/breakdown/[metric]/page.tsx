@@ -16,6 +16,7 @@ import { listManualAssets } from '@/lib/manual-assets'
 import { spendByCategory, monthKey, type Txn } from '@/lib/budget'
 import { type Category } from '@/lib/categories'
 import { buildSpendContext } from '@/lib/spend-context'
+import { fetchReceivable } from '@/lib/receivable'
 
 const TITLES: Record<string, { title: string; subtitle: string }> = {
   'net-worth': { title: 'Net worth', subtitle: 'Everything you own, minus what you owe' },
@@ -67,15 +68,36 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
       currency,
       owed: false,
     }))
-    // Assets (accounts + manual) first, then liabilities.
+    // Money owed back is an asset: the cash has left the account but is coming back, so net worth
+    // counts it (see fetchReceivable). It has no single transaction behind it, so it drills through
+    // to the reimbursements page instead of a transaction list.
+    const receivable = await fetchReceivable()
+    const receivableRows: BreakdownRow[] =
+      receivable > 0
+        ? [
+            {
+              key: 'receivable',
+              label: 'Owed to you',
+              sub: 'Outstanding reimbursements',
+              amount: receivable,
+              currency,
+              owed: false,
+              href: '/reimbursements',
+            },
+          ]
+        : []
+    // Assets (accounts + manual + owed to you) first, then liabilities.
     rows = [
       ...accountRows.filter((r) => !r.owed),
       ...manualRows,
+      ...receivableRows,
       ...accountRows.filter((r) => r.owed),
     ]
     total = {
       label: 'Net worth',
-      amount: netWorth(accounts) + sumManualAssets(manualAssets),
+      // Must stay the same expression as the dashboard tile's, receivable included — a drill-down
+      // whose rows do not add up to the number that was clicked is the bug this page exists to catch.
+      amount: netWorth(accounts, receivable) + sumManualAssets(manualAssets),
       currency,
     }
   } else if (metric === 'cash') {
