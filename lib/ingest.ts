@@ -83,21 +83,23 @@ export async function syncAndStore(item: {
   // Lower the mark to what the transaction is now worth, then let the upsert proceed.
   if (modified.length) {
     const ids = modified.map((t) => t.transaction_id)
-    const { data: marked } = await supabaseAdmin
+    const { data: marked, error: clampSelectErr } = await supabaseAdmin
       .from('transactions')
       .select('plaid_transaction_id, reimbursable_amount')
       .in('plaid_transaction_id', ids)
       .not('reimbursable_amount', 'is', null)
+    if (clampSelectErr) throw new Error(`reimbursable-amount clamp select failed: ${clampSelectErr.message}`)
 
     for (const row of marked ?? []) {
       const incoming = modified.find((t) => t.transaction_id === row.plaid_transaction_id)
       if (!incoming) continue
       const clamped = clampReimbursable(Number(row.reimbursable_amount), incoming.amount)
       if (clamped !== Number(row.reimbursable_amount)) {
-        await supabaseAdmin
+        const { error: clampUpdateErr } = await supabaseAdmin
           .from('transactions')
           .update({ reimbursable_amount: clamped })
           .eq('plaid_transaction_id', row.plaid_transaction_id)
+        if (clampUpdateErr) throw new Error(`reimbursable-amount clamp update failed: ${clampUpdateErr.message}`)
       }
     }
   }
