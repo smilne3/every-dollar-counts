@@ -591,6 +591,146 @@ git commit -m "refactor: receivable comes from marked transactions, and fails lo
 
 ---
 
+### Task 6b: Wire the receivable into net worth (ADDED MID-EXECUTION)
+
+> **Why this task exists:** Task 6's review found `fetchReceivable` has ZERO callers, and `netWorth`
+> on this branch is still single-argument. The two-argument signature and the wiring both lived only
+> in PR #47, which was closed unmerged — the plan described a branch that does not exist. Without
+> this task, all twelve tasks complete and net worth still never counts what you are owed, which is
+> the single behaviour the spec's §2 formula promises.
+
+**Files:**
+- Modify: `lib/dashboard.ts`, `app/(app)/dashboard/page.tsx`, `app/(app)/breakdown/[metric]/page.tsx`
+- Test: `tests/unit/dashboard.test.ts`, `tests/unit/breakdown.test.ts`
+
+**Interfaces:**
+- Consumes: `fetchReceivable(): Promise<number>` from Task 6, `owedToYou` from Task 2.
+- Produces: `netWorth(accounts: Acct[], receivable: number): number`.
+
+**Reference implementation:** this exact work was done on the closed branch and can be read with
+`git show feat/reimbursable-checkbox:lib/dashboard.ts` and the same for the two pages. Read it, but
+port rather than cherry-pick — that branch's version computes the receivable from claims and splits,
+which no longer exist.
+
+- [ ] **Step 1: Write the failing tests**
+
+Add to `tests/unit/dashboard.test.ts`:
+
+```typescript
+  // A reimbursable expense takes the cash out today but is money that comes back, so it must not
+  // read as a loss. The receivable offsets the cash that left.
+  it('counts outstanding reimbursements as a receivable', () => {
+    expect(netWorth([{ type: 'depository', current_balance: 8000 }], 500)).toBe(8500)
+  })
+
+  // The offset is the whole point: spending $500 you will get back leaves net worth where it was.
+  it('leaves net worth flat when cash out equals what is owed back', () => {
+    const before = netWorth([{ type: 'depository', current_balance: 8000 }], 0)
+    const after = netWorth([{ type: 'depository', current_balance: 7500 }], 500)
+    expect(after).toBe(before)
+  })
+```
+
+Add to `tests/unit/breakdown.test.ts`:
+
+```typescript
+// The Net worth tile and its drill-down are computed by two different modules: the tile by netWorth()
+// in lib/dashboard.ts, the rows by groupAccountsByKind() here. They classify account types
+// independently, so nothing but this test stops one of them learning about a new type and the
+// drill-down quietly failing to add up to the number the user clicked.
+describe('net worth reconciliation', () => {
+  const accounts = [
+    acct('a1', 'depository', 8000),
+    acct('a2', 'investment', 2000),
+    acct('a3', 'other', 100),
+    acct('a4', 'credit', 500),
+    acct('a5', 'loan', 10000),
+    acct('a6', null, 999), // unknown type: ignored by BOTH sides, which is itself the invariant
+  ]
+  const manualAssets = [{ value: 400_000 }]
+
+  it('breakdown rows sum to the same total as the net worth tile', () => {
+    const receivable = 500
+    const tile = netWorth(accounts, receivable) + sumManualAssets(manualAssets)
+    const g = groupAccountsByKind(accounts)
+    const rows = g.assetTotal - g.liabilityTotal + sumManualAssets(manualAssets) + receivable
+    expect(rows).toBeCloseTo(tile)
+  })
+})
+```
+
+Import `netWorth` and `sumManualAssets` from `@/lib/dashboard` in `breakdown.test.ts`.
+
+- [ ] **Step 2: Run to verify they fail**
+
+Run: `npx vitest run tests/unit/dashboard.test.ts tests/unit/breakdown.test.ts`
+Expected: FAIL — `netWorth` currently ignores a second argument, so the receivable tests get the
+un-offset number.
+
+- [ ] **Step 3: Make `receivable` a required parameter**
+
+In `lib/dashboard.ts`:
+
+```typescript
+// Net worth = assets - liabilities across all connected accounts, plus what you are owed back.
+//
+// `receivable` is REQUIRED rather than defaulted: every surface that shows net worth has to state
+// what it counts as owed to you, so a page that forgets is a type error rather than a screen quietly
+// disagreeing with the dashboard about the same household. Pass 0 to count only real balances.
+// See fetchReceivable() in lib/receivable.ts for what belongs in it.
+export function netWorth(accounts: Acct[], receivable: number): number {
+```
+
+and return `assets - liabilities + receivable`.
+
+The two existing calls in `tests/unit/dashboard.test.ts` gain an explicit `, 0` — their expected
+values do NOT change.
+
+- [ ] **Step 4: Wire both pages**
+
+`app/(app)/dashboard/page.tsx`: `const owedToYou = await fetchReceivable()` and
+`const worth = netWorth(accounts, owedToYou) + sumManualAssets(manualAssets)`.
+
+`app/(app)/breakdown/[metric]/page.tsx`, in the `net-worth` branch: fetch the receivable, add an
+"Owed to you" row on the asset side linking to `/reimbursements`, and include it in the total so the
+drill-down still reconciles with the tile:
+
+```typescript
+    const receivable = await fetchReceivable()
+    const receivableRows: BreakdownRow[] =
+      receivable > 0
+        ? [
+            {
+              key: 'receivable',
+              label: 'Owed to you',
+              sub: 'Outstanding reimbursements',
+              amount: receivable,
+              currency,
+              owed: false,
+              href: '/reimbursements',
+            },
+          ]
+        : []
+```
+
+Insert `...receivableRows` after the manual-asset rows, and make the total
+`netWorth(accounts, receivable) + sumManualAssets(manualAssets)`.
+
+- [ ] **Step 5: Verify**
+
+Run: `npx tsc --noEmit && npx vitest run && npx eslint && npm run build`
+Expected: all clean. The type error on any un-updated `netWorth` caller is the point of the required
+parameter — fix each one rather than defaulting it.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add lib app tests
+git commit -m "feat: net worth counts what you are owed"
+```
+
+---
+
 ### Task 7: One route to mark a transaction
 
 **Files:**
