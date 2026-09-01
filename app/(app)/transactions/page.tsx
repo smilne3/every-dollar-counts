@@ -6,10 +6,9 @@ import { Button } from '@/components/ui/Button'
 import { SearchIcon } from '@/components/ui/icons'
 import { inputClass } from '@/components/ui/styles'
 import { effectiveCategory } from '@/lib/effective-category'
-import { money } from '@/lib/format'
 import { pfcToName, isCreditCardPayment, type Category } from '@/lib/categories'
 import { buildSpendContext } from '@/lib/spend-context'
-import { spendableAmount, writeOffsAsTxns, type WriteOff } from '@/lib/reimbursements'
+import { spendableAmount } from '@/lib/reimbursements'
 
 type RealRow = {
   id: string
@@ -23,25 +22,6 @@ type RealRow = {
   reimbursable_amount: number | null
   reimbursable_note: string | null
 }
-
-// A write-off's frozen spending, reshaped for this page's own display. `name`/`merchant_name` are
-// cosmetic only — the money math (effectiveCategory, spendableAmount) never looks at them. Never a
-// real row: no account_id, so it is deliberately excluded from any account-filtered view — see
-// `includeWriteOffs` below.
-type WriteOffRow = {
-  id: string
-  name: string
-  merchant_name: string | null
-  amount: number
-  date: string
-  user_category: string
-  pfc_primary: null
-  pfc_detailed: null
-}
-
-type ListRow =
-  | ({ isWriteOff: true; claimName: string } & WriteOffRow)
-  | ({ isWriteOff: false } & RealRow)
 
 export default async function TransactionsPage({
   searchParams,
@@ -71,8 +51,7 @@ export default async function TransactionsPage({
   const pfcMap = pfcToName(categories)
   const categoryOptions = categories.map((c) => c.name)
 
-  // Computed once so the write-offs query below uses the exact same date window as the transactions
-  // query's SQL date filter.
+  // The transactions query's SQL date filter.
   let monthStart: string | null = null
   let monthEnd: string | null = null
   if (month) {
@@ -82,10 +61,6 @@ export default async function TransactionsPage({
     const nextM = m === 12 ? 1 : m + 1
     monthEnd = `${nextY}-${String(nextM).padStart(2, '0')}-01`
   }
-
-  let woQuery = supabase.from('reimbursement_write_offs').select('claim_id, category, amount, date')
-  if (month) woQuery = woQuery.gte('date', monthStart!).lt('date', monthEnd!)
-  const { data: writeOffRows } = await woQuery
 
   // Only needed to name the account in the filter chip when drilling in from a Net Worth / Cash row.
   let accountName: string | null = null
@@ -125,53 +100,7 @@ export default async function TransactionsPage({
   // second query to keep in sync with this page's own filters/pagination.
   const ctx = buildSpendContext({ categories, txns: (txns ?? []) as RealRow[] })
 
-  // WHICH VIEW SHAPES SHOW WRITE-OFF ROWS — the rule, stated once rather than falling out of the
-  // filters. A write-off row appears exactly where this page has to reconcile with a money figure
-  // computed on another surface, and nowhere else. This page has five shapes:
-  //
-  //   category / flow drill-down (`inMemoryFiltered`)  YES. These are the views a dashboard tile or
-  //     a breakdown row links into, and those aggregates count write-offs — omitting the rows here
-  //     would leave a figure with no rows to show for it. They filter in memory over a single page,
-  //     so a synthetic row costs none of the pagination math below.
-  //   account-filtered                                  NO. A write-off has no account_id; it is
-  //     spending that belongs to a claim, not to any one account.
-  //   search (`q`)                                      NO. It has no merchant or name to match, so
-  //     it would be the one unfiltered row in a filtered result.
-  //   plain browse, and month browse (`?month=` alone)  NO. Both are SQL-paginated, and `count` /
-  //     the "Showing X–Y of N" range are facts about the transactions table that synthetic rows are
-  //     not part of: mixing them in makes the range lie, and page 2 would repeat them. This is the
-  //     ledger view — deliberately the user's bank statement and nothing else. Nothing in the app
-  //     links to a month-only URL (every aggregate drills in carrying a category or a flow), so no
-  //     reported figure is left unreconciled by that choice.
-  const includeWriteOffs = inMemoryFiltered && !account && !safe
-  let writeOffDisplay: ({ isWriteOff: true; claimName: string } & WriteOffRow)[] = []
-  if (includeWriteOffs) {
-    // Straight from this page's own write-offs query — same date window as the transactions query.
-    const rows = (writeOffRows ?? []) as WriteOff[]
-
-    const claimIds = [...new Set(rows.map((w) => w.claim_id))]
-    const claimNameById: Record<string, string> = {}
-    if (claimIds.length) {
-      const { data: claimNames } = await supabase
-        .from('reimbursement_claims')
-        .select('id, name')
-        .in('id', claimIds)
-      for (const c of claimNames ?? []) claimNameById[c.id as string] = c.name as string
-    }
-
-    writeOffDisplay = writeOffsAsTxns(rows).map((w, i) => ({
-      ...w,
-      name: 'Write-off',
-      merchant_name: claimNameById[rows[i].claim_id] ?? null,
-      isWriteOff: true as const,
-      claimName: claimNameById[rows[i].claim_id] ?? 'Claim',
-    }))
-  }
-
-  let list: ListRow[] = [
-    ...((txns ?? []) as RealRow[]).map((t) => ({ ...t, isWriteOff: false as const })),
-    ...writeOffDisplay,
-  ]
+  let list: RealRow[] = (txns ?? []) as RealRow[]
 
   // Category and flow are on the transaction's EFFECTIVE category (computed), so filter in memory.
   if (category) {
@@ -193,13 +122,6 @@ export default async function TransactionsPage({
       if (amt === 0) return false
       return flow === 'in' ? isIncomeCat && amt < 0 : !isIncomeCat
     })
-  }
-
-  // Write-offs were appended after the SQL page's date-descending order, so the merged, filtered
-  // list needs re-sorting to stay chronological. Only in-memory-filtered views ever merge them, and
-  // those are already single-page, so this never touches the real SQL pagination below.
-  if (includeWriteOffs) {
-    list = [...list].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
   }
 
   // `totalMatching` (a SQL count) doesn't describe the in-memory-filtered views, so those show a
@@ -314,33 +236,14 @@ export default async function TransactionsPage({
                 </tr>
               </thead>
               <tbody>
-                {list.map((t) =>
-                  t.isWriteOff ? (
-                    // Frozen history (design spec §5): not editable, so no CategoryPicker or Split
-                    // affordance — both would try to mutate a row that doesn't exist in
-                    // `transactions`.
-                    <tr key={t.id} className="border-b border-line">
-                      <td className="px-4 py-3 whitespace-nowrap text-sm text-muted">{t.date}</td>
-                      <td className="px-4 py-3 font-medium text-ink">
-                        Write-off
-                        <span className="block text-xs font-normal text-faint">{t.claimName}</span>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-muted">{t.user_category}</td>
-                      <td className="px-4 py-3 text-right font-medium tabular-nums text-ink">
-                        {money(-t.amount)}
-                      </td>
-                      <td className="px-4 py-3" />
-                      <td className="px-4 py-3" />
-                    </tr>
-                  ) : (
-                    <TransactionRow
-                      key={t.id}
-                      t={t}
-                      categoryName={effectiveCategory(t, pfcMap)}
-                      categoryOptions={categoryOptions}
-                    />
-                  )
-                )}
+                {list.map((t) => (
+                  <TransactionRow
+                    key={t.id}
+                    t={t}
+                    categoryName={effectiveCategory(t, pfcMap)}
+                    categoryOptions={categoryOptions}
+                  />
+                ))}
               </tbody>
             </table>
           </div>
