@@ -286,6 +286,16 @@ export function unreimbursedExpenses(txns: DatedReimbursableTxn[]): Unreimbursed
   return out
 }
 
+// What may actually be stored in `reimbursable_amount`, given the transaction it belongs to.
+//
+// The database CHECK is the real guarantee; this exists so the app never ASKS for something the
+// CHECK will refuse. Clamping turns "you typed more than the transaction is worth" into the obvious
+// answer instead of a 500 from a constraint violation.
+export function clampReimbursable(amount: number | null, txnAmount: number): number | null {
+  if (amount === null || !Number.isFinite(amount) || amount <= 0) return null
+  return Math.min(round2(amount), Math.abs(txnAmount))
+}
+
 function round2(n: number): number {
   return Math.round(n * 100) / 100
 }
