@@ -22,7 +22,13 @@ create table if not exists app_env (
 insert into app_env (id, plaid_env)
 values (
   true,
-  coalesce((select plaid_env from plaid_items order by created_at desc limit 1), 'sandbox')
+  -- nulls last: plaid_items.created_at is nullable (002) and Postgres sorts NULLS FIRST on DESC,
+  -- so a single null-timestamped row would outrank every real bank and decide what this whole
+  -- database claims to be. id desc breaks exact-timestamp ties, so the seed is deterministic.
+  coalesce(
+    (select plaid_env from plaid_items order by created_at desc nulls last, id desc limit 1),
+    'sandbox'
+  )
 )
 on conflict (id) do nothing;
 
