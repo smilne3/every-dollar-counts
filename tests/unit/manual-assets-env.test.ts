@@ -64,4 +64,14 @@ describe('POST /api/manual-assets environment guard', () => {
     expect(res.status).toBe(200)
     expect(upsert).toHaveBeenCalledOnce()
   })
+
+  // The 409/500 split is the whole reason lib/app-env.ts throws two error types. Without this
+  // case the 500 branch ships untested, and a refactor collapsing both into one status would
+  // still go green. Mirrors the equivalent case in tests/unit/exchange-public-token-env.test.ts.
+  it('answers 500, not 409, when app_env simply cannot be read', async () => {
+    assertEnvMatchesDatabase.mockRejectedValue(new Error('could not read app_env: timeout'))
+    const res = await POST(saveRequest())
+    expect(res.status).toBe(500)
+    expect(upsert).not.toHaveBeenCalled()
+  })
 })
