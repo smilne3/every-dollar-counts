@@ -3,9 +3,12 @@ import { supabaseAdmin } from '@/lib/supabase/admin'
 import { plaidClient } from '@/lib/plaid'
 import { syncItem } from '@/lib/sync'
 import { clampReimbursable } from '@/lib/reimbursements'
+import { assertEnvMatchesDatabase } from '@/lib/app-env'
 
 // Fetch a Plaid item's accounts and upsert them (also refreshes cached balances).
 export async function storeAccounts(householdId: string, plaidItemId: string, accessToken: string) {
+  // Before the network call, not after: a wrong-environment write must cost nothing (#23).
+  await assertEnvMatchesDatabase()
   const acc = await plaidClient.accountsGet({ access_token: accessToken })
   const rows = acc.data.accounts.map((a) => ({
     household_id: householdId,
@@ -70,6 +73,9 @@ export async function syncAndStore(item: {
   access_token: string
   cursor?: string | null
 }) {
+  // Backstop. The sync, webhook and reconnect callers already filter items by plaid_env, so this
+  // should be unreachable from them -- it is here so a FUTURE caller cannot reopen #23.
+  await assertEnvMatchesDatabase()
   const { added, modified, removed, next_cursor } = await syncItem(
     item.access_token,
     item.cursor ?? undefined
