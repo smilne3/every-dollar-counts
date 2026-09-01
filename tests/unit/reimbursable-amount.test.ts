@@ -27,4 +27,13 @@ describe('clampReimbursable', () => {
     expect(clampReimbursable(0, 1000)).toBeNull()
     expect(clampReimbursable(-5, 1000)).toBeNull()
   })
+
+  // A transaction's amount can be revised to 0 by Plaid (a voided or corrected transaction, a $0
+  // hold) after it was already marked. Clamping to the transaction's magnitude must not resurface a
+  // storable-looking 0 in that case: `Math.min(105, 0)` is 0, and 0 fails the CHECK's `> 0` just as
+  // surely as a negative amount does. The clamp's job is "return a legally storable value or null,"
+  // so this belongs in the function, not left for every call site to re-discover.
+  it('clears rather than storing zero when the transaction amount is zero', () => {
+    expect(clampReimbursable(105, 0)).toBeNull()
+  })
 })

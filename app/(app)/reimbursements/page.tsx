@@ -7,7 +7,6 @@ import { unreimbursedExpenses, owedToYou, type DatedReimbursableTxn } from '@/li
 type Row = DatedReimbursableTxn & {
   name: string
   merchant_name: string | null
-  user_category: string | null
   reimbursable_note: string | null
 }
 
@@ -28,7 +27,7 @@ export default async function ReimbursementsPage() {
   // FIFO allocation needs the deposits that settled the older ones to be correct about the newer.
   const { data, error } = await supabase
     .from('transactions')
-    .select('id, amount, date, name, merchant_name, user_category, reimbursable_amount, reimbursable_note')
+    .select('id, amount, date, name, merchant_name, reimbursable_amount, reimbursable_note')
     .not('reimbursable_amount', 'is', null)
     .eq('removed', false)
     .order('date', { ascending: false })
@@ -130,6 +129,25 @@ export default async function ReimbursementsPage() {
                 </h3>
               </div>
               <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-line text-left">
+                    <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-faint">
+                      Date
+                    </th>
+                    <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-faint">
+                      Merchant
+                    </th>
+                    <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-faint">
+                      Note
+                    </th>
+                    {/* The FULL marked amount — not the outstanding remainder the visually similar
+                        column in the table above shows. Labelled distinctly so the two quantities
+                        are never mistaken for each other. */}
+                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-faint">
+                      Reimbursed
+                    </th>
+                  </tr>
+                </thead>
                 <tbody>
                   {coveredByMonth.get(key)!.map((t) => (
                     <tr key={t.id} className="border-b border-line last:border-b-0">

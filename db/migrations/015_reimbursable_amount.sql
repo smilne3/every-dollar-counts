@@ -6,13 +6,40 @@
 -- The spec assumes a fresh start: the previous feature shipped but was never used. That assumption
 -- is cheap to hold and expensive to get wrong, so verify it rather than trust it. If this fires,
 -- there is real money data here and the conversion in the spec's earlier draft is the starting point.
+--
+-- Migration 016 drops these same three tables, so re-running this file after 016 must not blow up
+-- with "relation does not exist" — a guard that cannot be re-run is not the idempotent style the
+-- rest of this file uses. Each check is therefore gated on `to_regclass(...) is not null` AND run
+-- through EXECUTE: a plain `to_regclass(...) is not null and exists (select 1 from t ...)` would
+-- still fail, because Postgres resolves every table named in a query during parse/analyze, before
+-- any AND short-circuits at runtime — only dynamic SQL (EXECUTE) defers that resolution until the
+-- branch actually runs. When the tables DO exist, the refusal is unchanged.
 do $$
+declare
+  has_data boolean;
 begin
-  if exists (select 1 from reimbursement_splits limit 1)
-     or exists (select 1 from reimbursement_write_offs limit 1)
-     or exists (select 1 from reimbursement_claims limit 1) then
-    raise exception
-      'reimbursement data exists — this migration assumes a fresh start, see spec section 4.1';
+  if to_regclass('public.reimbursement_splits') is not null then
+    execute 'select exists (select 1 from reimbursement_splits limit 1)' into has_data;
+    if has_data then
+      raise exception
+        'reimbursement data exists — this migration assumes a fresh start, see spec section 4.1';
+    end if;
+  end if;
+
+  if to_regclass('public.reimbursement_write_offs') is not null then
+    execute 'select exists (select 1 from reimbursement_write_offs limit 1)' into has_data;
+    if has_data then
+      raise exception
+        'reimbursement data exists — this migration assumes a fresh start, see spec section 4.1';
+    end if;
+  end if;
+
+  if to_regclass('public.reimbursement_claims') is not null then
+    execute 'select exists (select 1 from reimbursement_claims limit 1)' into has_data;
+    if has_data then
+      raise exception
+        'reimbursement data exists — this migration assumes a fresh start, see spec section 4.1';
+    end if;
   end if;
 end $$;
 

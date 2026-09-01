@@ -3,6 +3,7 @@ import { spendByCategory, type Txn } from '@/lib/budget'
 import { monthlyFlows, type FlowTxn } from '@/lib/dashboard'
 import { buildSpendContext } from '@/lib/spend-context'
 import type { Category } from '@/lib/categories'
+import { owedToYou } from '@/lib/reimbursements'
 
 const categories: Category[] = [
   { id: '1', name: 'Income', pfc_primary: 'INCOME', sort_order: 0 },
@@ -70,5 +71,25 @@ describe('reimbursement reconciliation', () => {
     const flows = monthlyFlows(txns as FlowTxn[], plain, [{ key: '2026-07', label: 'Jul' }])
     expect(flows[0].spending).toBeCloseTo(470)
     expect(flows[0].income).toBeCloseTo(2000)
+  })
+
+  // THE central promise of this feature, asserted directly rather than left to two spending surfaces
+  // agreeing with each other: every dollar that leaves spending because it was marked reimbursable
+  // must reappear as a receivable, or net worth silently moves. spendByCategory and monthlyFlows can
+  // each be internally correct and still leak money between them — that is exactly how #8 (untagged
+  // repayments netting spending down like refunds) and #31 (credit-card payments treated as
+  // reimbursable) reached production despite passing tests. A reviewer checking this once is not a
+  // substitute for a standing invariant: unmarked spending minus marked spending must equal what
+  // owedToYou says the household is owed.
+  it('spending drop from marking equals owedToYou — the feature exists to keep net worth flat', () => {
+    const plain = buildSpendContext({ categories, txns: [] })
+    const marked = buildSpendContext({ categories, txns })
+
+    const unmarkedTotal = Object.values(spendByCategory(txns, plain)).reduce((s, v) => s + v, 0)
+    const markedTotal = Object.values(spendByCategory(txns, marked)).reduce((s, v) => s + v, 0)
+
+    expect(unmarkedTotal).toBeCloseTo(470)
+    expect(markedTotal).toBeCloseTo(170)
+    expect(unmarkedTotal - markedTotal).toBeCloseTo(owedToYou(txns)) // 300
   })
 })

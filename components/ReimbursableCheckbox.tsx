@@ -40,7 +40,10 @@ export function ReimbursableCheckbox({
       const res = await fetch('/api/reimbursable', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transactionId, amount: next, note: note ?? null }),
+        // Clearing the mark clears the memo too: a note left behind on an unmarked transaction is
+        // orphaned data (`reimbursable_note` set with `reimbursable_amount` null) that has no
+        // reason to exist and nowhere it is shown.
+        body: JSON.stringify({ transactionId, amount: next, note: next === null ? null : (note ?? null) }),
       })
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))

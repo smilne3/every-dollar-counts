@@ -97,7 +97,8 @@ export function unreimbursedExpenses(txns: DatedReimbursableTxn[]): Unreimbursed
 // answer instead of a 500 from a constraint violation.
 export function clampReimbursable(amount: number | null, txnAmount: number): number | null {
   if (amount === null || !Number.isFinite(amount) || amount <= 0) return null
-  return Math.min(round2(amount), Math.abs(txnAmount))
+  const c = Math.min(round2(amount), Math.abs(txnAmount))
+  return c > 0 ? c : null
 }
 
 function round2(n: number): number {

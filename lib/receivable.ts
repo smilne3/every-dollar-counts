@@ -16,11 +16,16 @@ export async function fetchReceivable(): Promise<number> {
   // Bounded by the partial index: only marked rows exist in it, and a household has few. `removed`
   // is a soft flag (a Plaid repost), not a delete, so its rows never disappear on their own — a
   // removed transaction's mark must not keep counting as money owed.
+  // Same `.order('date', ...)` as app/(app)/reimbursements/page.tsx's query. Neither query bounds
+  // rows by date — that would corrupt the FIFO allocation in unreimbursedExpenses — so both are
+  // subject to PostgREST's 1000-row cap. Without a matching order, the two queries could truncate to
+  // DIFFERENT 1000 rows past that cap and this dashboard total would disagree with the page's own.
   const { data, error } = await supabase
     .from('transactions')
     .select('id, amount, reimbursable_amount')
     .not('reimbursable_amount', 'is', null)
     .eq('removed', false)
+    .order('date', { ascending: false })
 
   // Fail loudly rather than reporting $0 owed. An unchecked read here is issue #46 in a new costume:
   // "the query failed" and "you are owed nothing" must never render identically.

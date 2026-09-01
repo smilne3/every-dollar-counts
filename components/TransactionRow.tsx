@@ -1,4 +1,5 @@
 import { money } from '@/lib/format'
+import { isCreditCardPayment } from '@/lib/categories'
 import { CategoryPicker } from './CategoryPicker'
 import { ReimbursableCheckbox } from './ReimbursableCheckbox'
 import { RowMenu } from './RowMenu'
@@ -34,6 +35,10 @@ export function TransactionRow({
   // real bank amount so the row still reconciles with the statement.
   const share = Math.max(0, Math.abs(t.amount) - marked)
   const label = t.merchant_name ?? t.name
+  // Guards #31, same as ReimbursableCheckbox: the route refuses credit-card payments, so the partial
+  // editor in the row menu must not be offered on one either — reuse the one predicate rather than
+  // letting a second copy drift from it.
+  const isCC = isCreditCardPayment({ pfc_detailed: t.pfc_detailed, user_category: t.user_category })
 
   return (
     <tr className="border-b border-line transition-colors hover:bg-surface-2">
@@ -78,12 +83,14 @@ export function TransactionRow({
       </td>
       <td className="px-4 py-3 text-right">
         <RowMenu label={label ?? 'transaction'}>
-          <ReimbursableEditor
-            transactionId={t.id}
-            amount={t.amount}
-            reimbursableAmount={t.reimbursable_amount}
-            note={t.reimbursable_note}
-          />
+          {!isCC && (
+            <ReimbursableEditor
+              transactionId={t.id}
+              amount={t.amount}
+              reimbursableAmount={t.reimbursable_amount}
+              note={t.reimbursable_note}
+            />
+          )}
         </RowMenu>
       </td>
     </tr>
