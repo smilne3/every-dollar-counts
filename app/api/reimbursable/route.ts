@@ -13,6 +13,16 @@ export async function PATCH(req: Request) {
 
   const supabase = await createClient()
 
+  // RLS already scopes the select/update below to this household (db/migrations/006_rls_policies.sql),
+  // so an unauthenticated caller cannot read or write another household's row. This check exists for
+  // two reasons anyway: it is the only thing standing between a money-mutating endpoint and relying on
+  // RLS ALONE, and it keeps the response honest — without it an unauthenticated caller gets a
+  // misleading "transaction not found" instead of the 401 every sibling mutating route returns.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+
   const { data: txn, error: readError } = await supabase
     .from('transactions')
     // pfc_detailed and user_category are here only to evaluate isCreditCardPayment below.
