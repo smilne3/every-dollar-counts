@@ -14,6 +14,12 @@ Settings, and webhook paths ignore mismatched-environment banks, but the net-wor
 does not yet. If you ever need to test against sandbox again, do it against a throwaway Supabase
 project, not this one.
 
+As of #23 this rule is enforced in code, not just by discipline: `db/migrations/017_app_env.sql`
+records which environment owns the database, and every write path (linking a bank, syncing
+transactions, and saving a manual asset) asserts a match before writing. A local session pointed at
+the production database now gets a 409 when linking a bank rather than silently writing sandbox
+accounts into real net worth.
+
 ---
 
 ### Before you touch anything
