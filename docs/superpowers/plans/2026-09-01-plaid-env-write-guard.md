@@ -177,7 +177,13 @@ create table if not exists app_env (
 insert into app_env (id, plaid_env)
 values (
   true,
-  coalesce((select plaid_env from plaid_items order by created_at desc limit 1), 'sandbox')
+  -- nulls last: plaid_items.created_at is nullable (002) and Postgres sorts NULLS FIRST on DESC,
+  -- so a single null-timestamped row would outrank every real bank and decide what this whole
+  -- database claims to be. id desc breaks exact-timestamp ties, so the seed is deterministic.
+  coalesce(
+    (select plaid_env from plaid_items order by created_at desc nulls last, id desc limit 1),
+    'sandbox'
+  )
 )
 on conflict (id) do nothing;
 
@@ -208,9 +214,13 @@ Editing an already-applied migration is safe here because only a comment changes
 
 Ask the user to run this **read-only** query in the Supabase SQL Editor and report what it returns:
 
+This must be the **same expression the migration uses**, or it verifies something the migration will not do:
+
 ```sql
-select coalesce((select plaid_env from plaid_items order by created_at desc limit 1), 'sandbox')
-  as will_seed_as;
+select coalesce(
+  (select plaid_env from plaid_items order by created_at desc nulls last, id desc limit 1),
+  'sandbox'
+) as will_seed_as;
 ```
 
 Expected on the production database: `production`.

@@ -57,7 +57,8 @@ Seeded from the newest `plaid_items` row, so production says `production` and a 
 ```sql
 insert into app_env (id, plaid_env)
 values (true, coalesce(
-  (select plaid_env from plaid_items order by created_at desc limit 1),
+  -- nulls last matters: created_at is nullable, and Postgres sorts NULLS FIRST on DESC.
+  (select plaid_env from plaid_items order by created_at desc nulls last, id desc limit 1),
   'sandbox'))
 on conflict (id) do nothing;
 ```
