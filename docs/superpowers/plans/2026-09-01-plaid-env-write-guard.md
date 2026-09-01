@@ -80,15 +80,8 @@ const { data: accounts, error: accErr } = await admin
   .select('id, account_id, name, plaid_item_id')
 if (accErr) die('accounts', accErr)
 
-// Group account_ids by the environment of the bank that owns them.
-const envByAccountId = new Map()
-const orphanAccounts = []
-for (const a of accounts) {
-  const env = envByItem.get(a.plaid_item_id)
-  if (!env) orphanAccounts.push(a)
-  else envByAccountId.set(a.account_id, env)
-}
-
+// An account whose owning bank row is gone cannot be attributed to any environment at all.
+const orphanAccounts = accounts.filter((a) => !envByItem.has(a.plaid_item_id))
 const sandboxAccounts = accounts.filter((a) => envByItem.get(a.plaid_item_id) === 'sandbox')
 
 const { count: sandboxTxnCount, error: txnErr } = await admin
@@ -555,7 +548,19 @@ vi.mock('@/lib/plaid', () => ({
   plaidClient: { itemPublicTokenExchange },
 }))
 
-vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
+// The guard sits AFTER the auth and household checks, so those have to succeed for the test to
+// reach it. Same client shape as tests/unit/manual-assets-env.test.ts.
+const getUser = vi.fn()
+vi.mock('@/lib/supabase/server', () => ({
+  createClient: async () => ({
+    auth: { getUser },
+    from: () => ({
+      select: () => ({
+        limit: () => ({ single: async () => ({ data: { household_id: 'hh-1' } }) }),
+      }),
+    }),
+  }),
+}))
 vi.mock('@/lib/crypto', () => ({ encrypt: (s: string) => s }))
 vi.mock('@/lib/ingest', () => ({ storeAccounts: vi.fn(), syncAndStore: vi.fn() }))
 
@@ -582,6 +587,7 @@ describe('POST /api/plaid/exchange-public-token environment guard', () => {
     insert.mockReset()
     itemPublicTokenExchange.mockReset()
     assertEnvMatchesDatabase.mockReset()
+    getUser.mockResolvedValue({ data: { user: { id: 'user-1' } } })
   })
 
   it('answers 409 when pointed at another environment’s database', async () => {
@@ -619,7 +625,7 @@ Add to the imports:
 import { assertEnvMatchesDatabase, EnvMismatchError } from '@/lib/app-env'
 ```
 
-Then insert this immediately after the existing `public_token` validation (the `if (!public_token)` block near the top of `POST`), **before** anything talks to Plaid or inserts a row:
+Then insert this immediately after `const productList = normalizeProducts(products)` — i.e. after the auth check (`if (!user)`) and the household check (`if (!membership)`), and directly above the `// THE ITEM ALREADY EXISTS AT PLAID` comment block. That position is **after** authentication, so an unauthenticated request is rejected without touching the database, and still **before** the token exchange and the `plaid_items` insert, which is what the guard has to beat:
 
 ```ts
   // Before the token exchange AND before the plaid_items insert. Linking is the only path that
