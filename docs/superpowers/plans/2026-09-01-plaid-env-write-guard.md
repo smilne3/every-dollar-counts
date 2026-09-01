@@ -770,6 +770,16 @@ describe('POST /api/manual-assets environment guard', () => {
     expect(res.status).toBe(200)
     expect(upsert).toHaveBeenCalledOnce()
   })
+
+  // The 409/500 split is the whole reason lib/app-env.ts throws two error types. Without this
+  // case the 500 branch ships untested, and a refactor collapsing both into one status would
+  // still go green. Mirrors the equivalent case in tests/unit/exchange-public-token-env.test.ts.
+  it('answers 500, not 409, when app_env simply cannot be read', async () => {
+    assertEnvMatchesDatabase.mockRejectedValue(new Error('could not read app_env: timeout'))
+    const res = await POST(saveRequest())
+    expect(res.status).toBe(500)
+    expect(upsert).not.toHaveBeenCalled()
+  })
 })
 ```
 
@@ -811,7 +821,7 @@ Then insert immediately after the `if (!m) return ...` household check, before t
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `npx vitest run tests/unit/manual-assets-env.test.ts`
-Expected: PASS, 2 tests.
+Expected: PASS, 3 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -840,7 +850,7 @@ npm run lint
 npm run check:secrets
 ```
 
-Expected: all four green. Baseline was 168 tests in 20 files; this plan adds 15 tests in 4 files, so expect **183 tests in 24 files**. A different total means a test was silently dropped — investigate before continuing.
+Expected: all four green. Baseline was 168 tests in 20 files; this plan adds 16 tests in 4 files, so expect **184 tests in 24 files**. A different total means a test was silently dropped — investigate before continuing.
 
 - [ ] **Step 2: Prove the guard works against the real database**
 

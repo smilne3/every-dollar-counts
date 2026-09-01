@@ -104,6 +104,7 @@ Step one of implementation is therefore a **read-only** check confirming the liv
 | Read of `app_env` fails, then succeeds | Second call retries and succeeds — the failure was not cached |
 | Bank link from a mismatched environment | `409`, and **no `plaid_items` row created** |
 | Manual asset POST from a mismatched environment | `409`, nothing written |
+| Manual asset POST when `app_env` cannot be read | `500` (not `409`), nothing written |
 
 Route coverage follows the pattern established by `tests/unit/reimbursable-route.test.ts`: mock `@/lib/supabase/admin`, build a real `Request`, call the exported handler.
 
