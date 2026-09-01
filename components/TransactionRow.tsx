@@ -1,11 +1,9 @@
-'use client'
-
-import { useState } from 'react'
 import { money } from '@/lib/format'
+import { isCreditCardPayment } from '@/lib/categories'
 import { CategoryPicker } from './CategoryPicker'
-import { SplitEditor } from './SplitEditor'
-import { ReimbursableButton } from './ReimbursableButton'
-import type { PinnedClaim } from '@/lib/fast-path'
+import { ReimbursableCheckbox } from './ReimbursableCheckbox'
+import { RowMenu } from './RowMenu'
+import { ReimbursableEditor } from './ReimbursableEditor'
 
 type Txn = {
   id: string
@@ -13,99 +11,88 @@ type Txn = {
   name: string | null
   merchant_name: string | null
   amount: number
-  // Not displayed — these two are what identify a credit-card payment, which the splits API refuses,
-  // so the one-tap control must not be offered on one. Both are already selected by the page.
+  // What identify a credit-card payment, which the reimbursable route refuses, so the checkbox must
+  // not be offered on one. Both are already selected by the page.
   user_category: string | null
   pfc_detailed: string | null
+  reimbursable_amount: number | null
+  reimbursable_note: string | null
 }
-
-type ExistingSplit = { id: string; claim_id: string; owed_by: string | null; amount: number }
 
 export function TransactionRow({
   t,
   categoryName,
   categoryOptions,
-  splits,
-  claims,
-  knownPeople,
-  pinned,
 }: {
   t: Txn
   categoryName: string
   categoryOptions: string[]
-  splits: ExistingSplit[]
-  claims: { id: string; name: string }[]
-  knownPeople: string[]
-  pinned: PinnedClaim[]
 }) {
-  const [open, setOpen] = useState(false)
   // Plaid: amount > 0 means money OUT. Show spending as negative.
   const display = -t.amount
-  const assigned = splits.reduce((s, x) => s + x.amount, 0)
-  // What this row actually contributes once reimbursables are removed — shown alongside the real
-  // bank amount so the row still reconciles with the statement.
-  const share = Math.max(0, Math.abs(t.amount) - assigned)
+  const marked = Number(t.reimbursable_amount ?? 0)
+  // What this row actually contributes once the reimbursable mark is removed — shown alongside the
+  // real bank amount so the row still reconciles with the statement.
+  const share = Math.max(0, Math.abs(t.amount) - marked)
   const label = t.merchant_name ?? t.name
+  // Guards #31, same as ReimbursableCheckbox: the route refuses credit-card payments, so the partial
+  // editor in the row menu must not be offered on one either — reuse the one predicate rather than
+  // letting a second copy drift from it.
+  const isCC = isCreditCardPayment({ pfc_detailed: t.pfc_detailed, user_category: t.user_category })
 
   return (
-    <>
-      <tr className="border-b border-line transition-colors hover:bg-surface-2">
-        <td className="px-4 py-3 whitespace-nowrap text-sm text-muted">{t.date}</td>
-        <td className="px-4 py-3 font-medium text-ink">{label}</td>
-        <td className="px-4 py-3">
-          <CategoryPicker
-            transactionId={t.id}
-            value={categoryName}
-            options={categoryOptions}
-            label={label ?? undefined}
-          />
-        </td>
-        <td
-          className={`px-4 py-3 text-right font-medium tabular-nums ${display < 0 ? 'text-ink' : 'text-emerald'}`}
-        >
-          {money(display)}
-          {assigned > 0 && (
-            <span className="block text-xs font-normal text-faint">
-              {/* An outflow's share is money out (shown negative); an inflow's untagged remainder is
-                  money in (shown positive) — matching the `display` convention above. */}
-              your share {money(t.amount < 0 ? share : -share)}
-            </span>
-          )}
-        </td>
-        <td className="px-4 py-3 text-right">
-          <div className="flex flex-col items-end gap-1">
-            <ReimbursableButton
-              transactionId={t.id}
-              txn={t}
-              splits={splits}
-              pinned={pinned}
-              label={label ?? 'transaction'}
-            />
-            <button
-              type="button"
-              onClick={() => setOpen((o) => !o)}
-              aria-expanded={open}
-              aria-label={`Split ${label ?? 'transaction'}`}
-              className="text-xs font-medium text-emerald hover:text-emerald-600"
-            >
-              {assigned > 0 ? 'Splits' : 'Split'}
-            </button>
-          </div>
-        </td>
-      </tr>
-      {open && (
-        <tr className="border-b border-line">
-          <td colSpan={5} className="px-4 pb-4">
-            <SplitEditor
+    <tr className="border-b border-line transition-colors hover:bg-surface-2">
+      <td className="px-4 py-3 whitespace-nowrap text-sm text-muted">{t.date}</td>
+      {/* Truncated rather than wrapped: a fixed column would otherwise give one long merchant a
+          two-line row and leave the table's rhythm uneven. `title` keeps the full name reachable. */}
+      <td className="truncate px-4 py-3 font-medium text-ink" title={label ?? undefined}>
+        {label}
+      </td>
+      <td className="px-4 py-3">
+        <CategoryPicker
+          transactionId={t.id}
+          value={categoryName}
+          options={categoryOptions}
+          label={label ?? undefined}
+        />
+      </td>
+      <td
+        className={`px-4 py-3 text-right font-medium tabular-nums ${display < 0 ? 'text-ink' : 'text-emerald'}`}
+      >
+        {money(display)}
+        {marked > 0 && (
+          <span className="block text-xs font-normal text-faint">
+            {/* An outflow's share is money out (shown negative); an inflow's untagged remainder is
+                money in (shown positive) — matching the `display` convention above. */}
+            your share {money(t.amount < 0 ? share : -share)}
+          </span>
+        )}
+      </td>
+      {/* Its own column, under a "Reimbursable" header: the word used to be printed in every cell,
+          which is the header's job. */}
+      <td className="px-4 py-3 text-right">
+        <ReimbursableCheckbox
+          transactionId={t.id}
+          amount={t.amount}
+          reimbursableAmount={t.reimbursable_amount}
+          note={t.reimbursable_note}
+          label={label ?? 'transaction'}
+          pfcDetailed={t.pfc_detailed}
+          userCategory={t.user_category}
+        />
+      </td>
+      <td className="px-4 py-3 text-right">
+        <RowMenu label={label ?? 'transaction'}>
+          {!isCC && (
+            <ReimbursableEditor
               transactionId={t.id}
               amount={t.amount}
-              existingSplits={splits}
-              claims={claims}
-              knownPeople={knownPeople}
+              reimbursableAmount={t.reimbursable_amount}
+              note={t.reimbursable_note}
             />
-          </td>
-        </tr>
-      )}
-    </>
+          )}
+        </RowMenu>
+      </td>
+    </tr>
   )
 }

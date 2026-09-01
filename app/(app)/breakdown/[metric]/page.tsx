@@ -15,8 +15,8 @@ import {
 import { listManualAssets } from '@/lib/manual-assets'
 import { spendByCategory, monthKey, type Txn } from '@/lib/budget'
 import { type Category } from '@/lib/categories'
-import { buildSpendContext, withWriteOffs } from '@/lib/spend-context'
-import { type Split, type WriteOff } from '@/lib/reimbursements'
+import { buildSpendContext } from '@/lib/spend-context'
+import { fetchReceivable } from '@/lib/receivable'
 
 const TITLES: Record<string, { title: string; subtitle: string }> = {
   'net-worth': { title: 'Net worth', subtitle: 'Everything you own, minus what you owe' },
@@ -68,15 +68,36 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
       currency,
       owed: false,
     }))
-    // Assets (accounts + manual) first, then liabilities.
+    // Money owed back is an asset: the cash has left the account but is coming back, so net worth
+    // counts it (see fetchReceivable). It has no single transaction behind it, so it drills through
+    // to the reimbursements page instead of a transaction list.
+    const receivable = await fetchReceivable()
+    const receivableRows: BreakdownRow[] =
+      receivable > 0
+        ? [
+            {
+              key: 'receivable',
+              label: 'Owed to you',
+              sub: 'Outstanding reimbursements',
+              amount: receivable,
+              currency,
+              owed: false,
+              href: '/reimbursements',
+            },
+          ]
+        : []
+    // Assets (accounts + manual + owed to you) first, then liabilities.
     rows = [
       ...accountRows.filter((r) => !r.owed),
       ...manualRows,
+      ...receivableRows,
       ...accountRows.filter((r) => r.owed),
     ]
     total = {
       label: 'Net worth',
-      amount: netWorth(accounts) + sumManualAssets(manualAssets),
+      // Must stay the same expression as the dashboard tile's, receivable included — a drill-down
+      // whose rows do not add up to the number that was clicked is the bug this page exists to catch.
+      amount: netWorth(accounts, receivable) + sumManualAssets(manualAssets),
       currency,
     }
   } else if (metric === 'cash') {
@@ -104,28 +125,14 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
     const thisKey = months[months.length - 1].key
     const { data: flowTxns } = await supabase
       .from('transactions')
-      .select('id, amount, date, user_category, pfc_primary, pfc_detailed')
+      .select('id, amount, date, user_category, pfc_primary, pfc_detailed, reimbursable_amount')
       .eq('removed', false)
       .gte('date', `${thisKey}-01`)
 
-    const { data: splitRows } = await supabase
-      .from('reimbursement_splits')
-      .select('transaction_id, claim_id, owed_by, amount')
-    const { data: writeOffRows } = await supabase
-      .from('reimbursement_write_offs')
-      .select('claim_id, category, amount, date')
-      .gte('date', `${thisKey}-01`)
-
-    // The write-offs are fetched for this page's own date window (above) and travel in the context,
-    // so this surface cannot compute spending while forgetting them.
-    const ctx = buildSpendContext({
-      categories,
-      splits: (splitRows ?? []) as Split[],
-      writeOffs: (writeOffRows ?? []) as WriteOff[],
-    })
-    // A written-off claim is spending in the month it was written off, so it joins the list here —
-    // before the month filter below, exactly like a real transaction.
-    const allRows = withWriteOffs((flowTxns ?? []) as Txn[], ctx)
+    // The reimbursable map is built straight from this page's own transaction rows — see
+    // buildSpendContext.
+    const ctx = buildSpendContext({ categories, txns: (flowTxns ?? []) as Txn[] })
+    const allRows = (flowTxns ?? []) as Txn[]
     const monthTxns = allRows.filter((t) => monthKey(t.date) === thisKey)
 
     if (metric === 'spent') {

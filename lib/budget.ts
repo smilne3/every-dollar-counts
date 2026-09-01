@@ -10,6 +10,7 @@ export type Txn = {
   user_category: string | null
   pfc_primary: string | null
   pfc_detailed: string | null
+  reimbursable_amount: number | null
 }
 
 // 'YYYY-MM' bucket for a 'YYYY-MM-DD' date.

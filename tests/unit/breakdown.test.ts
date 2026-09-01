@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { groupAccountsByKind, sortedSpendRows } from '@/lib/breakdown'
+import { netWorth, sumManualAssets } from '@/lib/dashboard'
 
 const acct = (
   account_id: string,
@@ -32,6 +33,30 @@ describe('groupAccountsByKind', () => {
     expect(r.assetTotal).toBe(0)
     expect(r.liabilityTotal).toBe(0)
     expect(r.assets.map((a) => a.account_id)).toEqual(['a']) // depository with null balance still listed
+  })
+})
+
+// The Net worth tile and its drill-down are computed by two different modules: the tile by netWorth()
+// in lib/dashboard.ts, the rows by groupAccountsByKind() here. They classify account types
+// independently, so nothing but this test stops one of them learning about a new type and the
+// drill-down quietly failing to add up to the number the user clicked.
+describe('net worth reconciliation', () => {
+  const accounts = [
+    acct('a1', 'depository', 8000),
+    acct('a2', 'investment', 2000),
+    acct('a3', 'other', 100),
+    acct('a4', 'credit', 500),
+    acct('a5', 'loan', 10000),
+    acct('a6', null, 999), // unknown type: ignored by BOTH sides, which is itself the invariant
+  ]
+  const manualAssets = [{ value: 400_000 }]
+
+  it('breakdown rows sum to the same total as the net worth tile', () => {
+    const receivable = 500
+    const tile = netWorth(accounts, receivable) + sumManualAssets(manualAssets)
+    const g = groupAccountsByKind(accounts)
+    const rows = g.assetTotal - g.liabilityTotal + sumManualAssets(manualAssets) + receivable
+    expect(rows).toBeCloseTo(tile)
   })
 })
 
