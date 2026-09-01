@@ -47,7 +47,7 @@ The database records its own identity, in a single-row table:
 ```sql
 create table if not exists app_env (
   id boolean primary key default true check (id),  -- only one row can ever exist
-  plaid_env text not null check (plaid_env in ('sandbox','development','production')),
+  plaid_env text not null check (plaid_env in ('sandbox','production')),
   updated_at timestamptz not null default now()
 );
 ```
