@@ -21,6 +21,7 @@ type RealRow = {
   pfc_primary: string | null
   pfc_detailed: string | null
   reimbursable_amount: number | null
+  reimbursable_note: string | null
 }
 
 // A write-off's frozen spending, reshaped for this page's own display. `name`/`merchant_name` are
@@ -70,45 +71,6 @@ export default async function TransactionsPage({
   const pfcMap = pfcToName(categories)
   const categoryOptions = categories.map((c) => c.name)
 
-  const { data: claimRows } = await supabase
-    .from('reimbursement_claims')
-    .select('id, name, written_off_on, pinned')
-    .is('written_off_on', null)
-    .order('created_at', { ascending: false })
-  const claims = (claimRows ?? []).map((c) => ({ id: c.id as string, name: c.name as string }))
-  const pinned = (claimRows ?? [])
-    .filter((c) => c.pinned)
-    .map((c) => ({
-      id: c.id as string,
-      name: c.name as string,
-      written_off_on: c.written_off_on as string | null,
-    }))
-
-  // ORDERED, because the order is load-bearing downstream: it is the order the split editor lists a
-  // transaction's splits in, and the order its claim prefill reads from. Unordered, PostgREST may
-  // return the same rows differently between loads, so what the user sees (and what the editor
-  // pre-fills) could change under them without anything having changed. `created_at` is the order
-  // the user made them in; `id` breaks ties so it is total.
-  const { data: splitRows } = await supabase
-    .from('reimbursement_splits')
-    .select('id, transaction_id, claim_id, owed_by, amount')
-    .order('created_at', { ascending: true })
-    .order('id', { ascending: true })
-  const splitsByTxn: Record<string, { id: string; claim_id: string; owed_by: string | null; amount: number }[]> = {}
-  for (const s of splitRows ?? []) {
-    const key = s.transaction_id as string
-    ;(splitsByTxn[key] ??= []).push({
-      id: s.id as string,
-      claim_id: s.claim_id as string,
-      owed_by: s.owed_by as string | null,
-      amount: Number(s.amount),
-    })
-  }
-  // Autocomplete for the person field, so "Dave" stays one person instead of fragmenting.
-  const knownPeople = [
-    ...new Set((splitRows ?? []).map((s) => (s.owed_by as string | null)?.trim()).filter(Boolean)),
-  ] as string[]
-
   // Computed once so the write-offs query below uses the exact same date window as the transactions
   // query's SQL date filter.
   let monthStart: string | null = null
@@ -145,7 +107,7 @@ export default async function TransactionsPage({
   let query = supabase
     .from('transactions')
     .select(
-      'id, name, merchant_name, amount, date, user_category, pfc_primary, pfc_detailed, account_id, reimbursable_amount',
+      'id, name, merchant_name, amount, date, user_category, pfc_primary, pfc_detailed, account_id, reimbursable_amount, reimbursable_note',
       { count: 'exact' }
     )
     .eq('removed', false)
@@ -320,7 +282,15 @@ export default async function TransactionsPage({
       ) : (
         <Card className="overflow-hidden p-0">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full table-fixed text-sm">
+              <colgroup>
+                <col className="w-32" />
+                <col className="w-52" />
+                <col />
+                <col className="w-40" />
+                <col className="w-36" />
+                <col className="w-20" />
+              </colgroup>
               <thead>
                 <tr className="border-b border-line text-left">
                   <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-faint">
@@ -336,7 +306,10 @@ export default async function TransactionsPage({
                     Amount
                   </th>
                   <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-faint">
-                    <span className="sr-only">Split</span>
+                    Reimbursable
+                  </th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-faint">
+                    <span className="sr-only">More</span>
                   </th>
                 </tr>
               </thead>
@@ -357,6 +330,7 @@ export default async function TransactionsPage({
                         {money(-t.amount)}
                       </td>
                       <td className="px-4 py-3" />
+                      <td className="px-4 py-3" />
                     </tr>
                   ) : (
                     <TransactionRow
@@ -364,10 +338,6 @@ export default async function TransactionsPage({
                       t={t}
                       categoryName={effectiveCategory(t, pfcMap)}
                       categoryOptions={categoryOptions}
-                      splits={splitsByTxn[t.id] ?? []}
-                      claims={claims}
-                      knownPeople={knownPeople}
-                      pinned={pinned}
                     />
                   )
                 )}
