@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { storeAccounts, syncAndStore } from '@/lib/ingest'
 import { shouldSyncTransactions } from '@/lib/sync-policy'
+import { assertEnvMatchesDatabase, EnvMismatchError } from '@/lib/app-env'
 
 // Only the three product strings we support; default to transactions.
 function normalizeProducts(input: unknown): string[] {
@@ -34,6 +35,30 @@ export async function POST(req: Request) {
   if (!membership) return NextResponse.json({ error: 'no household' }, { status: 403 })
   const household_id = membership.household_id
   const productList = normalizeProducts(products)
+
+  // Before the token exchange AND before the plaid_items insert. Linking is the only path that
+  // can put a wrong-environment bank into this database (#23), and a guard that fired later
+  // would leave an orphaned row behind and spend one of ten unrefundable Plaid slots.
+  try {
+    await assertEnvMatchesDatabase()
+  } catch (e) {
+    if (e instanceof EnvMismatchError) {
+      console.error('[plaid] refusing to link across environments', e.message)
+      return NextResponse.json(
+        {
+          error:
+            'This app is pointed at a database from a different Plaid environment, so linking a ' +
+            'bank was refused. Nothing was connected.',
+        },
+        { status: 409 }
+      )
+    }
+    console.error('[plaid] environment guard could not run', e)
+    return NextResponse.json(
+      { error: 'Could not verify which database this is, so nothing was connected.' },
+      { status: 500 }
+    )
+  }
 
   // THE ITEM ALREADY EXISTS AT PLAID by the time this route runs — Link created it the moment the
   // user finished at their bank. Everything below is us catching up. That asymmetry is why every
