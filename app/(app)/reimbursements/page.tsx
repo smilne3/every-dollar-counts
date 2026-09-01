@@ -1,93 +1,154 @@
 import { createClient } from '@/lib/supabase/server'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { ClaimList, type ClaimRow } from '@/components/ClaimList'
-import { claimTotals, type Claim, type Split } from '@/lib/reimbursements'
+import { Card } from '@/components/ui/Card'
 import { money } from '@/lib/format'
+import { unreimbursedExpenses, owedToYou, type DatedReimbursableTxn } from '@/lib/reimbursements'
+
+type Row = DatedReimbursableTxn & {
+  name: string
+  merchant_name: string | null
+  user_category: string | null
+  reimbursable_note: string | null
+}
+
+// 'YYYY-MM' -> 'August 2026'. Built from the key's own numbers (not by re-parsing a 'YYYY-MM-DD'
+// string with `new Date(...)`, which reads as local time and can roll into the wrong month) so a
+// household west of UTC never sees a July expense filed under August.
+function monthLabel(key: string): string {
+  const [year, month] = key.split('-').map(Number)
+  return new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(
+    new Date(Date.UTC(year, month - 1, 1))
+  )
+}
 
 export default async function ReimbursementsPage() {
   const supabase = await createClient()
 
-  const { data: claimRows } = await supabase
-    .from('reimbursement_claims')
-    .select('id, name, written_off_on, pinned')
-    .order('created_at', { ascending: false })
-  const { data: splitRows } = await supabase
-    .from('reimbursement_splits')
-    .select('transaction_id, claim_id, owed_by, amount')
-
-  const splits = ((splitRows ?? []) as unknown as Split[]).map((s) => ({
-    ...s,
-    amount: Number(s.amount),
-  }))
-
-  // BOUNDED to the transactions the splits reference — never the whole table. PostgREST caps a
-  // select at the project's max-rows setting (1000 by default) and truncates SILENTLY, so an
-  // unbounded read stops covering the splits once the household passes that many transactions.
-  // claimTotals then skips every split whose transaction fell outside the returned page, and this
-  // page shows a live $750 claim as "$0 owed / Settled" with the Write off button hidden, while the
-  // dashboard — which looks ids up this way — still shows $750. The sentinel id keeps the list
-  // non-empty: PostgREST rejects an empty `in.()` rather than treating it as "matches nothing".
-  const splitTxnIds = [...new Set(splits.map((s) => s.transaction_id))]
-  // A removed (Plaid-repost) transaction is a soft-deleted row, not a hard delete, so the FK cascade
-  // on reimbursement_splits never fires for it. Excluding it here is what makes its splits fall out
-  // of every total below (claimTotals skips a split whose transaction_id isn't in amountById).
-  // `date` is fetched alongside `amount` for the oldestUnpaidDays computation below.
-  const { data: txns } = await supabase
+  // Every marked row, both directions. No window: an expense from last year is still owed, and the
+  // FIFO allocation needs the deposits that settled the older ones to be correct about the newer.
+  const { data, error } = await supabase
     .from('transactions')
-    .select('id, amount, date')
+    .select('id, amount, date, name, merchant_name, user_category, reimbursable_amount, reimbursable_note')
+    .not('reimbursable_amount', 'is', null)
     .eq('removed', false)
-    .in('id', splitTxnIds.length ? splitTxnIds : ['00000000-0000-0000-0000-000000000000'])
+    .order('date', { ascending: false })
 
-  const amountById: Record<string, number> = {}
-  const dateById: Record<string, string> = {}
-  for (const t of txns ?? []) {
-    amountById[t.id as string] = Number(t.amount)
-    dateById[t.id as string] = t.date as string
-  }
+  // #46's lesson: a failed read must not render as "nothing outstanding".
+  if (error) throw new Error(`could not read reimbursable transactions: ${error.message}`)
 
-  const today = new Date()
+  const rows = (data ?? []) as Row[]
+  const byId = new Map(rows.map((r) => [r.id, r]))
 
-  const claims: ClaimRow[] = ((claimRows ?? []) as (Claim & { pinned: boolean | null })[]).map((c) => {
-    const mine = splits.filter((s) => s.claim_id === c.id)
-    const totals = claimTotals(c, mine, amountById)
-    // How long the money has been out, to tell a slow payer from a new one.
-    const expenseDates = mine
-      .filter((s) => (amountById[s.transaction_id] ?? 0) > 0)
-      .map((s) => dateById[s.transaction_id])
-      .filter(Boolean)
-      .sort()
-    const oldest = expenseDates[0]
-    const oldestUnpaidDays =
-      oldest && totals.outstanding > 0
-        ? Math.floor((today.getTime() - new Date(oldest).getTime()) / 86_400_000)
-        : null
-    return { ...c, pinned: !!c.pinned, totals, oldestUnpaidDays }
-  })
+  // Already oldest-first, which is the order an expense report wants — do not re-sort it.
+  const outstanding = unreimbursedExpenses(rows)
+  const owed = owedToYou(rows)
 
-  // Open claims first, biggest outstanding at the top; settled and written-off sink to the bottom.
-  claims.sort((a, b) => {
-    const aDone = a.totals.writtenOff || a.totals.settled
-    const bDone = b.totals.writtenOff || b.totals.settled
-    if (aDone !== bDone) return aDone ? 1 : -1
-    return b.totals.outstanding - a.totals.outstanding
-  })
-
-  const outstanding = claims.reduce(
-    (s, c) => s + (c.totals.writtenOff ? 0 : Math.max(0, c.totals.outstanding)),
-    0
+  // Marked expenses the deposits HAVE covered: every marked outflow whose id did not come back from
+  // the allocation above. Derived from that same call's output — never re-run with different inputs
+  // — so the two lists can't disagree about the same transaction.
+  const outstandingIds = new Set(outstanding.map((r) => r.id))
+  const covered = rows.filter(
+    (t) => t.amount > 0 && Number(t.reimbursable_amount ?? 0) > 0 && !outstandingIds.has(t.id)
   )
+  const coveredByMonth = new Map<string, Row[]>()
+  for (const t of covered) {
+    const key = t.date.slice(0, 7)
+    const list = coveredByMonth.get(key)
+    if (list) list.push(t)
+    else coveredByMonth.set(key, [t])
+  }
+  // Most recent month first. `rows` (and therefore each month's list) is already date-descending
+  // from the query, so only the group order needs sorting here.
+  const coveredMonths = [...coveredByMonth.keys()].sort((a, b) => b.localeCompare(a))
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Reimbursements"
+        title="Reimbursable"
         subtitle={
-          outstanding > 0
-            ? `You're owed ${money(outstanding)}. Pin a claim to mark expenses reimbursable in one tap.`
-            : 'Money other people owe you, and what has come back. Pin a claim to mark expenses reimbursable in one tap.'
+          owed > 0
+            ? `You're owed ${money(owed)}. These are the expenses to put on your next report.`
+            : 'Nothing outstanding. Tick a transaction as reimbursable and it will appear here.'
         }
       />
-      <ClaimList claims={claims} />
+
+      {outstanding.length === 0 ? (
+        <Card className="p-8 text-center">
+          <p className="text-sm text-muted">
+            Nothing outstanding. Mark a transaction reimbursable from the Transactions page to start
+            tracking expenses to put on your next report.
+          </p>
+        </Card>
+      ) : (
+        <Card className="p-0">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-line text-left">
+                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-faint">
+                  Date
+                </th>
+                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-faint">
+                  Merchant
+                </th>
+                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-faint">
+                  Note
+                </th>
+                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-faint">
+                  Outstanding
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {outstanding.map((r) => {
+                const t = byId.get(r.id)
+                return (
+                  <tr key={r.id} className="border-b border-line last:border-b-0">
+                    <td className="px-4 py-3 whitespace-nowrap text-sm text-muted">{r.date}</td>
+                    <td className="truncate px-4 py-3 font-medium text-ink">
+                      {t?.merchant_name ?? t?.name ?? 'Transaction'}
+                    </td>
+                    <td className="truncate px-4 py-3 text-sm text-muted">{t?.reimbursable_note}</td>
+                    <td className="px-4 py-3 text-right font-medium tabular-nums text-ink">
+                      {money(r.remaining)}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </Card>
+      )}
+
+      {coveredMonths.length > 0 && (
+        <div className="space-y-4">
+          <h2 className="text-sm font-semibold text-ink">Already reimbursed</h2>
+          {coveredMonths.map((key) => (
+            <Card key={key} className="p-0">
+              <div className="border-b border-line px-4 py-3">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-faint">
+                  {monthLabel(key)}
+                </h3>
+              </div>
+              <table className="w-full text-sm">
+                <tbody>
+                  {coveredByMonth.get(key)!.map((t) => (
+                    <tr key={t.id} className="border-b border-line last:border-b-0">
+                      <td className="px-4 py-3 whitespace-nowrap text-sm text-muted">{t.date}</td>
+                      <td className="truncate px-4 py-3 font-medium text-ink">
+                        {t.merchant_name ?? t.name ?? 'Transaction'}
+                      </td>
+                      <td className="truncate px-4 py-3 text-sm text-muted">{t.reimbursable_note}</td>
+                      <td className="px-4 py-3 text-right font-medium tabular-nums text-ink">
+                        {money(Number(t.reimbursable_amount))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
