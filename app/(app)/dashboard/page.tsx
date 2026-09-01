@@ -22,8 +22,8 @@ import {
 import { listItemsForHousehold } from '@/lib/plaid-items'
 import { listManualAssets } from '@/lib/manual-assets'
 import { budgetedSpend, spendByCategory, monthKey, type Txn } from '@/lib/budget'
-import { buildSpendContext, withWriteOffs } from '@/lib/spend-context'
-import { claimTotals, type Claim, type Split, type WriteOff } from '@/lib/reimbursements'
+import { buildSpendContext } from '@/lib/spend-context'
+import { claimTotals, type Claim, type Split } from '@/lib/reimbursements'
 
 function greeting(hour: number): string {
   if (hour < 12) return 'Good morning'
@@ -96,17 +96,15 @@ export default async function DashboardPage({
 
   const { data: flowTxns } = await supabase
     .from('transactions')
-    .select('id, amount, date, user_category, pfc_primary, pfc_detailed')
+    .select('id, amount, date, user_category, pfc_primary, pfc_detailed, reimbursable_amount')
     .eq('removed', false)
     .gte('date', sixStart)
 
+  // Still fetched for the "owed to you" widget below (claimTotals over open claims) — that
+  // computation is untouched by this refactor, so its own data path stays as-is.
   const { data: splitRows } = await supabase
     .from('reimbursement_splits')
     .select('transaction_id, claim_id, owed_by, amount')
-  const { data: writeOffRows } = await supabase
-    .from('reimbursement_write_offs')
-    .select('claim_id, category, amount, date')
-    .gte('date', sixStart)
 
   const { data: openClaims } = await supabase
     .from('reimbursement_claims')
@@ -138,16 +136,10 @@ export default async function DashboardPage({
     return sum + Math.max(0, outstanding)
   }, 0)
 
-  // The write-offs are fetched for this page's own six-month window (above) and travel in the
-  // context, so this surface cannot compute spending while forgetting them.
-  const ctx = buildSpendContext({
-    categories,
-    splits: (splitRows ?? []) as Split[],
-    writeOffs: (writeOffRows ?? []) as WriteOff[],
-  })
-  // A written-off claim is spending in the month it was written off, so it joins the list here —
-  // before the month bucketing below, exactly like a real transaction.
-  const allRows = withWriteOffs((flowTxns ?? []) as Txn[], ctx)
+  // The reimbursable map is built straight from this page's own transaction rows — see
+  // buildSpendContext.
+  const ctx = buildSpendContext({ categories, txns: (flowTxns ?? []) as Txn[] })
+  const allRows = (flowTxns ?? []) as Txn[]
 
   const flows = monthlyFlows(allRows as FlowTxn[], ctx, months)
   const thisMonth = flows[flows.length - 1]

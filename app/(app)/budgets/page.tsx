@@ -1,9 +1,8 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
-import { spendByCategory } from '@/lib/budget'
+import { spendByCategory, type Txn } from '@/lib/budget'
 import { spendingCategoryNames, type Category } from '@/lib/categories'
-import { buildSpendContext, withWriteOffs } from '@/lib/spend-context'
-import { type Split, type WriteOff } from '@/lib/reimbursements'
+import { buildSpendContext } from '@/lib/spend-context'
 import { BudgetEditor } from '@/components/BudgetEditor'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { buttonClass } from '@/components/ui/Button'
@@ -25,31 +24,17 @@ export default async function BudgetsPage() {
 
   const { data: txns } = await supabase
     .from('transactions')
-    .select('id, amount, date, user_category, pfc_primary, pfc_detailed')
+    .select('id, amount, date, user_category, pfc_primary, pfc_detailed, reimbursable_amount')
     .eq('removed', false)
-    .gte('date', monthStart)
-    .lt('date', nextMonthStart)
-
-  const { data: splitRows } = await supabase
-    .from('reimbursement_splits')
-    .select('transaction_id, claim_id, owed_by, amount')
-  const { data: writeOffRows } = await supabase
-    .from('reimbursement_write_offs')
-    .select('claim_id, category, amount, date')
     .gte('date', monthStart)
     .lt('date', nextMonthStart)
 
   const { data: budgets } = await supabase.from('budgets').select('category, monthly_limit')
 
-  // The write-offs are fetched for this page's own month window (above) and travel in the context,
-  // so this surface cannot compute spending while forgetting them.
-  const ctx = buildSpendContext({
-    categories,
-    splits: (splitRows ?? []) as Split[],
-    writeOffs: (writeOffRows ?? []) as WriteOff[],
-  })
-  // A written-off claim is spending in the month it was written off, so it joins the list here.
-  const spend = spendByCategory(withWriteOffs(txns ?? [], ctx), ctx)
+  // The reimbursable map is built straight from this page's own transaction rows — see
+  // buildSpendContext.
+  const ctx = buildSpendContext({ categories, txns: (txns ?? []) as Txn[] })
+  const spend = spendByCategory((txns ?? []) as Txn[], ctx)
   const initialLimits: Record<string, number> = {}
   for (const b of budgets ?? []) initialLimits[b.category] = Number(b.monthly_limit)
 

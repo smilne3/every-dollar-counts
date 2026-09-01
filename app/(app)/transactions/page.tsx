@@ -9,7 +9,7 @@ import { effectiveCategory } from '@/lib/effective-category'
 import { money } from '@/lib/format'
 import { pfcToName, isCreditCardPayment, type Category } from '@/lib/categories'
 import { buildSpendContext } from '@/lib/spend-context'
-import { spendableAmount, writeOffsAsTxns, type Split, type WriteOff } from '@/lib/reimbursements'
+import { spendableAmount, writeOffsAsTxns, type WriteOff } from '@/lib/reimbursements'
 
 type RealRow = {
   id: string
@@ -20,6 +20,7 @@ type RealRow = {
   user_category: string | null
   pfc_primary: string | null
   pfc_detailed: string | null
+  reimbursable_amount: number | null
 }
 
 // A write-off's frozen spending, reshaped for this page's own display. `name`/`merchant_name` are
@@ -124,16 +125,6 @@ export default async function TransactionsPage({
   if (month) woQuery = woQuery.gte('date', monthStart!).lt('date', monthEnd!)
   const { data: writeOffRows } = await woQuery
 
-  // The fifth money surface (design spec §6/§7): the same SpendContext the other four build, reusing
-  // the splits already fetched above for the split editor rather than querying twice. The write-offs
-  // ride along in the context like everywhere else, for this page's own date window — which view
-  // shapes actually RENDER them is a separate decision, made once below.
-  const ctx = buildSpendContext({
-    categories,
-    splits: (splitRows ?? []) as Split[],
-    writeOffs: (writeOffRows ?? []) as WriteOff[],
-  })
-
   // Only needed to name the account in the filter chip when drilling in from a Net Worth / Cash row.
   let accountName: string | null = null
   if (account) {
@@ -154,7 +145,7 @@ export default async function TransactionsPage({
   let query = supabase
     .from('transactions')
     .select(
-      'id, name, merchant_name, amount, date, user_category, pfc_primary, pfc_detailed, account_id',
+      'id, name, merchant_name, amount, date, user_category, pfc_primary, pfc_detailed, account_id, reimbursable_amount',
       { count: 'exact' }
     )
     .eq('removed', false)
@@ -166,6 +157,11 @@ export default async function TransactionsPage({
   if (month) query = query.gte('date', monthStart!).lt('date', monthEnd!)
   const { data: txns, count } = await query
   const totalMatching = count ?? 0
+
+  // The fifth money surface (design spec §6/§7): the same SpendContext the other four build, built
+  // from this page's own fetched rows — reimbursable now lives on the transaction, so there is no
+  // second query to keep in sync with this page's own filters/pagination.
+  const ctx = buildSpendContext({ categories, txns: (txns ?? []) as RealRow[] })
 
   // WHICH VIEW SHAPES SHOW WRITE-OFF ROWS — the rule, stated once rather than falling out of the
   // filters. A write-off row appears exactly where this page has to reconcile with a money figure
@@ -188,8 +184,8 @@ export default async function TransactionsPage({
   const includeWriteOffs = inMemoryFiltered && !account && !safe
   let writeOffDisplay: ({ isWriteOff: true; claimName: string } & WriteOffRow)[] = []
   if (includeWriteOffs) {
-    // Straight from the context — same rows, same date window as every other money surface's.
-    const rows = ctx.writeOffs
+    // Straight from this page's own write-offs query — same date window as the transactions query.
+    const rows = (writeOffRows ?? []) as WriteOff[]
 
     const claimIds = [...new Set(rows.map((w) => w.claim_id))]
     const claimNameById: Record<string, string> = {}

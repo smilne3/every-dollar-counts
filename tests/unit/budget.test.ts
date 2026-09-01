@@ -21,9 +21,6 @@ const ctx = (
   nonSpending,
   transfers: new Set(['Transfer In', 'Transfer Out']),
   reimbursedByTxn: {},
-  // These functions never read the write-offs — a surface concatenates them onto its transaction
-  // list before calling (see withWriteOffs), so they arrive as ordinary rows.
-  writeOffs: [],
   ...over,
 })
 
@@ -42,6 +39,7 @@ const t = (
   pfc_primary: pfc,
   pfc_detailed,
   user_category: override,
+  reimbursable_amount: null,
 })
 
 describe('spendByCategory', () => {
@@ -142,6 +140,7 @@ describe('spendByCategory', () => {
           user_category: 'Food & Drink',
           pfc_primary: null,
           pfc_detailed: null,
+          reimbursable_amount: null,
         },
       ],
       ctx()
