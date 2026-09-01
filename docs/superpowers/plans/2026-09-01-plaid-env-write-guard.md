@@ -430,16 +430,22 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('@/lib/supabase/admin', () => ({ supabaseAdmin: {} }))
 
-const accountsGet = vi.fn()
+// vi.hoisted, NOT a plain `const x = vi.fn()`. The static `import ... from '@/lib/ingest'` below
+// is evaluated before this file's own body runs, and linking it fires the '@/lib/plaid' mock
+// factory — so a factory closing over a plain top-level const throws "Cannot access 'accountsGet'
+// before initialization". vi.hoisted lifts the identities above the mocks.
+// (tests/unit/app-env.test.ts avoids this only because it imports dynamically inside each test.)
+const { accountsGet, syncItem, assertEnvMatchesDatabase } = vi.hoisted(() => ({
+  accountsGet: vi.fn(),
+  syncItem: vi.fn(),
+  assertEnvMatchesDatabase: vi.fn(),
+}))
+
 vi.mock('@/lib/plaid', () => ({
   plaidEnv: 'sandbox',
   plaidClient: { accountsGet },
 }))
-
-const syncItem = vi.fn()
 vi.mock('@/lib/sync', () => ({ syncItem }))
-
-const assertEnvMatchesDatabase = vi.fn()
 vi.mock('@/lib/app-env', () => ({ assertEnvMatchesDatabase }))
 
 import { storeAccounts, syncAndStore } from '@/lib/ingest'
@@ -547,20 +553,25 @@ The one genuinely dangerous door. The guard must run **before** the `plaid_items
 ```ts
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-const insert = vi.fn()
+// vi.hoisted for the same reason as tests/unit/ingest-env-guard.test.ts: the static route import
+// below is linked before this file's body runs, firing every mock factory, so a factory closing
+// over a plain top-level const throws "Cannot access 'x' before initialization".
+const { insert, itemPublicTokenExchange, getUser, assertEnvMatchesDatabase } = vi.hoisted(() => ({
+  insert: vi.fn(),
+  itemPublicTokenExchange: vi.fn(),
+  getUser: vi.fn(),
+  assertEnvMatchesDatabase: vi.fn(),
+}))
+
 vi.mock('@/lib/supabase/admin', () => ({
   supabaseAdmin: { from: () => ({ insert }) },
 }))
-
-const itemPublicTokenExchange = vi.fn()
 vi.mock('@/lib/plaid', () => ({
   plaidEnv: 'sandbox',
   plaidClient: { itemPublicTokenExchange },
 }))
-
 // The guard sits AFTER the auth and household checks, so those have to succeed for the test to
 // reach it. Same client shape as tests/unit/manual-assets-env.test.ts.
-const getUser = vi.fn()
 vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({
     auth: { getUser },
@@ -574,13 +585,14 @@ vi.mock('@/lib/supabase/server', () => ({
 vi.mock('@/lib/crypto', () => ({ encrypt: (s: string) => s }))
 vi.mock('@/lib/ingest', () => ({ storeAccounts: vi.fn(), syncAndStore: vi.fn() }))
 
-import { EnvMismatchError } from '@/lib/app-env'
-
-const assertEnvMatchesDatabase = vi.fn()
+// Keep the real EnvMismatchError so the route's `instanceof` branch is exercised for real; replace
+// only the assertion the test drives.
 vi.mock('@/lib/app-env', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/app-env')>()),
-  assertEnvMatchesDatabase: () => assertEnvMatchesDatabase(),
+  assertEnvMatchesDatabase,
 }))
+
+import { EnvMismatchError } from '@/lib/app-env'
 
 import { POST } from '@/app/api/plaid/exchange-public-token/route'
 
@@ -694,8 +706,14 @@ Closes the loose end migration 011 left as `-- Not filtered on yet.` — by guar
 ```ts
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-const upsert = vi.fn()
-const getUser = vi.fn()
+// vi.hoisted for the same reason as tests/unit/ingest-env-guard.test.ts: the static route import
+// below is linked before this file's body runs, firing every mock factory.
+const { upsert, getUser, assertEnvMatchesDatabase } = vi.hoisted(() => ({
+  upsert: vi.fn(),
+  getUser: vi.fn(),
+  assertEnvMatchesDatabase: vi.fn(),
+}))
+
 vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({
     auth: { getUser },
@@ -713,14 +731,14 @@ vi.mock('@/lib/supabase/server', () => ({
 vi.mock('@/lib/plaid', () => ({ plaidEnv: 'sandbox' }))
 vi.mock('@/lib/supabase/admin', () => ({ supabaseAdmin: {} }))
 
-import { EnvMismatchError } from '@/lib/app-env'
-
-const assertEnvMatchesDatabase = vi.fn()
+// Keep the real EnvMismatchError so the route's `instanceof` branch is exercised for real; replace
+// only the assertion the test drives.
 vi.mock('@/lib/app-env', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/app-env')>()),
-  assertEnvMatchesDatabase: () => assertEnvMatchesDatabase(),
+  assertEnvMatchesDatabase,
 }))
 
+import { EnvMismatchError } from '@/lib/app-env'
 import { POST } from '@/app/api/manual-assets/route'
 
 function saveRequest() {
