@@ -529,11 +529,13 @@ describe('unreimbursedExpenses', () => {
     expect(rows).toEqual([{ id: 't1', date: '2026-08-01', remaining: 100 }])
   })
 
-  it('does not leave a sub-cent residue as an outstanding row', () => {
+  it('drops an expense the deposits covered to the exact cent', () => {
     const rows = unreimbursedExpenses([
       exp('t1', '2026-08-01', 33.33, 33.33),
       dep('d1', '2026-08-18', 33.33, 33.33),
     ])
+    // Boundary: pool == marked exactly. When a deposit covers an expense to the exact cent,
+    // remaining becomes 0 and the expense vanishes from the outstanding list.
     expect(rows).toEqual([])
   })
 })

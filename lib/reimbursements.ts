@@ -277,8 +277,10 @@ export function unreimbursedExpenses(txns: DatedReimbursableTxn[]): Unreimbursed
     const covered = Math.min(pool, marked)
     pool -= covered
     const remaining = round2(marked - covered)
-    // Only a fully-covered expense should vanish. `> 0` rather than `!== 0` drops sub-cent residues
-    // from repeated rounding, which would otherwise render as a junk "$0.00 outstanding" row.
+    // Only a fully-covered expense should vanish: remaining = 0 means the pool exactly covered
+    // the marked amount. The `> 0` rather than `!== 0` is defensive — remaining can never be
+    // negative (Math.min guarantees covered <= marked), but `> 0` keeps it out if a future change
+    // ever removes that clamp.
     if (remaining > 0) out.push({ id: e.id, date: e.date, remaining })
   }
   return out
