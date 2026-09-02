@@ -25,7 +25,7 @@ database, and are still outstanding at the time this branch was finished:
 - **`PLAID_ENV` is only ever `'sandbox'` or `'production'`.** `lib/plaid.ts:9-14` throws at import time on any other value. Never introduce a third environment string.
 - **Vitest sets `PLAID_ENV: 'sandbox'` globally** (`vitest.config.ts`). Tests must never be able to reach real banks.
 - **`lib/supabase/admin.ts` runs `createClient(...)` at module scope.** Any test importing a module in that chain must `vi.mock('@/lib/supabase/admin', ...)` or it dies with "supabaseUrl is required" before the test body runs.
-- **`lib/` stays framework-free.** `lib/app-env.ts` must not import from `next/server`; routes translate its errors into responses themselves.
+- ~~**`lib/` stays framework-free.** `lib/app-env.ts` must not import from `next/server`; routes translate its errors into responses themselves.~~ **Superseded during PR review.** This constraint was wrong about the repo: `lib/supabase/server.ts:2` already imports `next/headers`, so `lib/` never was framework-free. Holding to it left the same ~16-line 409/500 try-catch copy-pasted across four routes, and the copies had already drifted. `lib/app-env.ts` now also exports `envGuardResponse()`, which imports `NextResponse` — consistent with existing practice in `lib/`.
 - **Verification commands:** `npm test`, `npx tsc --noEmit`, `npm run lint`, `npm run check:secrets`. All four are green on `main` today (168 tests, 20 files) and must stay green.
 - **Branch:** `fix/23-plaid-env-write-guard`, already created, spec already committed.
 
