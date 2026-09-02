@@ -84,10 +84,12 @@ describe('TransactionRow amount cell', () => {
     const amountCell = container.querySelectorAll('td')[3]
     expect(amountCell.className).not.toContain('text-emerald')
     expect(amountCell.className).toContain('text-muted')
-    expect(screen.getByText('between your accounts')).toBeTruthy()
-    // The Amount column is 160px and this line is nowrap: anything longer truncates to an ellipsis
-    // that explains nothing. This is the budget.
-    expect('between your accounts'.length).toBeLessThanOrEqual(22)
+    const note = 'between accounts'
+    expect(screen.getByText(note)).toBeTruthy()
+    // The Amount column gives ~128px of content and this line is nowrap, which at text-xs is about
+    // 19 characters. Two longer versions shipped and truncated to a useless ellipsis before this
+    // one fit, so the budget is asserted rather than remembered.
+    expect(note.length).toBeLessThanOrEqual(19)
   })
 
   it('still paints ordinary income emerald', () => {
