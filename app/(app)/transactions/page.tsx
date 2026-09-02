@@ -87,6 +87,7 @@ export default async function TransactionsPage({
     )
     .eq('removed', false)
     .order('date', { ascending: false })
+    .order('id', { ascending: false })  // #50: `date` is day-granular and ties constantly; without a unique second key Postgres may return tied rows in any order, so an UPDATE reshuffles the list under the reader.
     .range(from, from + PER_PAGE - 1)
   if (safe) query = query.or(`name.ilike.%${safe}%,merchant_name.ilike.%${safe}%`)
   // Account and month are plain columns — filter in SQL.

@@ -30,7 +30,7 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
   if (!TITLES[metric]) notFound()
 
   const supabase = await createClient()
-  const { data: accountsData } = await supabase.from('accounts').select('*').order('name')
+  const { data: accountsData } = await supabase.from('accounts').select('*').order('name').order('account_id')
   const accounts = accountsData ?? []
   const currency = accounts[0]?.iso_currency_code ?? 'USD'
 

@@ -26,6 +26,7 @@ export async function fetchReceivable(): Promise<number> {
     .not('reimbursable_amount', 'is', null)
     .eq('removed', false)
     .order('date', { ascending: false })
+    .order('id', { ascending: false })  // #50: `date` is day-granular and ties constantly; without a unique second key Postgres may return tied rows in any order, so an UPDATE reshuffles the list under the reader.
 
   // Fail loudly rather than reporting $0 owed. An unchecked read here is issue #46 in a new costume:
   // "the query failed" and "you are owed nothing" must never render identically.

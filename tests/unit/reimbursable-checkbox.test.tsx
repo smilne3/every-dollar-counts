@@ -79,4 +79,41 @@ describe('ReimbursableCheckbox', () => {
     const body = JSON.parse((init as RequestInit).body as string)
     expect(body.note).toBeNull()
   })
+
+  // Without optimistic state the box stayed bound to the server's value for the whole PATCH +
+  // router.refresh() round trip: the browser toggled it, React snapped it straight back on the next
+  // render, and it only settled once the refresh landed. That reads as a broken control (#50).
+  it('ticks immediately, before the request comes back', () => {
+    // A request that never resolves — so anything the box shows here is optimistic, by construction.
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+    render(<ReimbursableCheckbox {...props} />)
+    const box = screen.getByRole('checkbox') as HTMLInputElement
+    expect(box.checked).toBe(false)
+    fireEvent.click(box)
+    expect(box.checked).toBe(true)
+  })
+
+  // An optimistic tick that survives a rejection is a lie: it would show the charge as coming back
+  // when nothing was saved.
+  it('puts the box back when the server refuses', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: false, json: async () => ({ error: 'nope' }) }))
+    )
+    render(<ReimbursableCheckbox {...props} />)
+    const box = screen.getByRole('checkbox') as HTMLInputElement
+    fireEvent.click(box)
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy())
+    expect(box.checked).toBe(false)
+  })
+
+  it('puts the box back when the request never lands', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline') }))
+    render(<ReimbursableCheckbox {...props} />)
+    const box = screen.getByRole('checkbox') as HTMLInputElement
+    fireEvent.click(box)
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy())
+    expect(box.checked).toBe(false)
+  })
+
 })
