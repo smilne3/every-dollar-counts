@@ -80,10 +80,13 @@ export function TransactionRow({
           }`}
         >
           {/* The line is reserved on every row anyway, so saying what a card payment is costs no
-              height. An outflow's share is money out (shown negative); an inflow's untagged
-              remainder is money in (shown positive) — matching the `display` convention above. */}
+              height — but the Amount column is 160px and this is nowrap, so the words have to fit
+              in it. "moves between your accounts" truncated to "moves between your …", which
+              explains nothing. Keep any wording here short enough to survive that width.
+              An outflow's share is money out (shown negative); an inflow's untagged remainder is
+              money in (shown positive) — matching the `display` convention above. */}
           {isCC
-            ? 'moves between your accounts'
+            ? 'between your accounts'
             : marked > 0
               ? `your share ${money(t.amount < 0 ? share : -share)}`
               : '\u00A0'}
