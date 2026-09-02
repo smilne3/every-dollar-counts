@@ -16,17 +16,27 @@ create table if not exists app_env (
   updated_at timestamptz not null default now()
 );
 
--- Seed from the most recently linked bank, so this configures itself correctly wherever it runs:
--- the production database says 'production', a fresh dev database with no banks says 'sandbox'.
+-- Seed from the linked banks, so this configures itself correctly wherever it runs: a database
+-- holding real banks says 'production', a fresh dev database with no banks says 'sandbox'.
 -- Nothing is hardcoded, so re-running the migrations on a new project cannot mislabel it.
 insert into app_env (id, plaid_env)
 values (
   true,
+  -- ANY PRODUCTION BANK WINS, rather than simply the most recent link. The scenario this table
+  -- exists to close is a sandbox bank landing in the production database (#23) -- and in exactly
+  -- that state the newest row is the sandbox one, so a most-recent-wins seed would let the
+  -- contamination declare the production database to be 'sandbox' and lock the real app out of
+  -- every guarded write. This ordering fails in the safe direction: it can only ever refuse
+  -- sandbox writes, never real ones. Wrong is worse than stopped.
   -- nulls last: plaid_items.created_at is nullable (002) and Postgres sorts NULLS FIRST on DESC,
-  -- so a single null-timestamped row would outrank every real bank and decide what this whole
-  -- database claims to be. id desc breaks exact-timestamp ties, so the seed is deterministic.
+  -- so a single null-timestamped row would otherwise outrank every real bank. id desc breaks
+  -- exact-timestamp ties, so the seed is deterministic.
   coalesce(
-    (select plaid_env from plaid_items order by created_at desc nulls last, id desc limit 1),
+    (
+      select plaid_env from plaid_items
+      order by (plaid_env = 'production') desc, created_at desc nulls last, id desc
+      limit 1
+    ),
     'sandbox'
   )
 )
