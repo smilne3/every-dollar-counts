@@ -51,36 +51,64 @@ export function progress(spend: number, limit: number): { ratio: number; over: b
   return { ratio: Math.min(Math.max(ratio, 0), 1), over: spend > limit }
 }
 
-// Split spending per category name across this month vs last month.
-// Compare this month against last month, per category. `throughDay` makes it apples-to-apples:
-// this month is month-to-date, so last month is capped at the SAME day of the month (e.g. on the
-// 14th, Jun 1–14 vs Jul 1–14). Without this cap, mid-month every category looks like a triumph —
-// a partial month against a whole one — which is misleading on a budget tool (#9).
-export function spendThisVsLast(
-  txns: Txn[],
-  thisM: string,
-  lastM: string,
-  ctx: SpendContext,
-  throughDay: number
-) {
-  const thisMonth: Record<string, number> = {}
-  const lastMonth: Record<string, number> = {}
-  for (const t of txns) {
-    if (isCreditCardPayment(t)) continue // internal transfer, not spending
-    const cat = effectiveCategory(t, ctx.pfcMap)
-    if (ctx.nonSpending.has(cat)) continue // income + transfers
-    const mk = monthKey(t.date)
-    const amt = spendableAmount(t, ctx.reimbursedByTxn) // net of reimbursables (#27)
-    if (mk === thisM) {
-      thisMonth[cat] = (thisMonth[cat] ?? 0) + amt
-    } else if (mk === lastM && dayOfMonth(t.date) <= throughDay) {
-      lastMonth[cat] = (lastMonth[cat] ?? 0) + amt
-    }
-  }
-  return { thisMonth, lastMonth }
+// A span of days, both ends inclusive. Both are 'YYYY-MM-DD', which is what makes a plain string
+// comparison chronological — the `date` column is a Postgres `date` (db/migrations/003), so every
+// value has that exact shape and no timezone maths is involved anywhere downstream.
+export type DateWindow = { from: string; to: string }
+
+// Rows falling inside the window. Takes the window whole rather than two loose strings, so a
+// transposed call — which would return nothing and render an empty chart under a card header
+// still confidently naming the dates — cannot be written.
+export function inRange<T extends { date: string }>(txns: T[], w: DateWindow): T[] {
+  return txns.filter((t) => t.date >= w.from && t.date <= w.to)
 }
 
-// Day component of a 'YYYY-MM-DD' date, as a number.
-export function dayOfMonth(date: string): number {
-  return Number(date.slice(8, 10))
+// The two windows Trends compares: the month ending today, and the month before it. Full windows
+// on both sides, which is what replaced the `throughDay` cap that used to make a partial month
+// comparable to a whole one (#9).
+//
+// Anchored to calendar months rather than to a fixed 30 days. Each window then holds exactly one
+// of every calendar day 1-28, so a bill on a fixed early-month date is counted once on each side.
+// A fixed 30-day window holds no such guarantee: it is no longer than eleven months of twelve, so
+// it drifts backwards through the calendar and lands two 1st-of-month bills in one window while
+// its neighbour gets none. See tests/unit/budget.test.ts for the measurements.
+//
+// What neither scheme fixes: a bill that DRIFTS. The mortgage is due on the 1st but posts on the
+// 3rd when the 1st is a Saturday (#67 notes exactly this for August), and two postings 29 days
+// apart can both fall inside one month-long window. Anchoring makes that rarer than 30 days does
+// — 5.0% of days against 7.4%, measured in budget.test.ts — but it does not remove it. Recognising
+// a bill as one recurring commitment rather than as dated rows is #64's job, not this window's.
+export function rollingMonths(now: Date): { current: DateWindow; previous: DateWindow } {
+  // A window built from an invalid date would stringify to 'NaN-NaN-NaN' and reach the database
+  // as a filter. Fail here, where the cause is legible.
+  if (Number.isNaN(now.getTime())) {
+    throw new Error('rollingMonths: invalid Date — cannot build a spending window')
+  }
+  const oneBack = monthsBack(now, 1)
+  const twoBack = monthsBack(now, 2)
+  return {
+    current: { from: isoDay(dayAfter(oneBack)), to: isoDay(now) },
+    previous: { from: isoDay(dayAfter(twoBack)), to: isoDay(oneBack) },
+  }
+}
+
+// `n` months before `now`, clamped into the target month: 31 March less one month is the last day
+// of February, not an imaginary 31 February. Day 0 of the following month is the last day of the
+// month we want, which is how the clamp learns that month's length.
+function monthsBack(now: Date, n: number): Date {
+  const lastDay = new Date(now.getFullYear(), now.getMonth() - n + 1, 0).getDate()
+  return new Date(now.getFullYear(), now.getMonth() - n, Math.min(now.getDate(), lastDay))
+}
+
+function dayAfter(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)
+}
+
+// A Date's local calendar day as 'YYYY-MM-DD', to compare against transaction dates. Local
+// parts, matching how the rest of the app reads `now`; day arithmetic goes through the Date
+// constructor, which works in calendar days and so is unaffected by DST.
+function isoDay(d: Date): string {
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${m}-${day}`
 }
