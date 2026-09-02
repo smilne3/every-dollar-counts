@@ -40,7 +40,7 @@ export default async function DashboardPage({
   // arriving") so it isn't lost on the redirect. Next 16: searchParams is async.
   const notice = (await searchParams)?.notice
   const supabase = await createClient()
-  const { data: accountsData } = await supabase.from('accounts').select('*').order('name')
+  const { data: accountsData } = await supabase.from('accounts').select('*').order('name').order('account_id')
   const accounts = accountsData ?? []
 
   // Any bank that isn't syncing has to be visible on the main screen. Stale numbers that look
@@ -133,6 +133,7 @@ export default async function DashboardPage({
     .select('id, name, merchant_name, amount, date, user_category, pfc_primary')
     .eq('removed', false)
     .order('date', { ascending: false })
+    .order('id', { ascending: false })  // #50: `date` is day-granular and ties constantly; without a unique second key Postgres may return tied rows in any order, so an UPDATE reshuffles the list under the reader.
     .limit(6)
   const recentItems = (recentTxns ?? []).map((t) => ({
     id: t.id as string,

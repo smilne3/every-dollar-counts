@@ -31,6 +31,7 @@ export default async function ReimbursementsPage() {
     .not('reimbursable_amount', 'is', null)
     .eq('removed', false)
     .order('date', { ascending: false })
+    .order('id', { ascending: false })  // #50: `date` is day-granular and ties constantly; without a unique second key Postgres may return tied rows in any order, so an UPDATE reshuffles the list under the reader.
 
   // #46's lesson: a failed read must not render as "nothing outstanding".
   if (error) throw new Error(`could not read reimbursable transactions: ${error.message}`)

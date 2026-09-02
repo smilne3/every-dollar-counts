@@ -60,13 +60,21 @@ export function TransactionRow({
         className={`px-4 py-3 text-right font-medium tabular-nums ${display < 0 ? 'text-ink' : 'text-emerald'}`}
       >
         {money(display)}
-        {marked > 0 && (
-          <span className="block text-xs font-normal text-faint">
-            {/* An outflow's share is money out (shown negative); an inflow's untagged remainder is
-                money in (shown positive) — matching the `display` convention above. */}
-            your share {money(t.amount < 0 ? share : -share)}
-          </span>
-        )}
+        {/* ALWAYS rendered, merely hidden when unmarked. Conditionally mounting this line meant
+            ticking the box added a second line to the cell, which grew the row and pushed every
+            row beneath it down the page — the reader's place jumps on every tick (#50).
+            `invisible` is visibility:hidden, so the space stays reserved and assistive tech still
+            skips it. Where the row's height is already set by the taller category control, the
+            reserved line costs nothing at all. */}
+        {/* nowrap: the Amount column is 160px, and "your share -$12,345.67" would wrap to two lines
+            at text-xs — reintroducing the very row growth the reserved line exists to prevent. */}
+        <span
+          className={`block truncate text-xs font-normal whitespace-nowrap text-faint ${marked > 0 ? '' : 'invisible'}`}
+        >
+          {/* An outflow's share is money out (shown negative); an inflow's untagged remainder is
+              money in (shown positive) — matching the `display` convention above. */}
+          {marked > 0 ? `your share ${money(t.amount < 0 ? share : -share)}` : '\u00A0'}
+        </span>
       </td>
       {/* Its own column, under a "Reimbursable" header: the word used to be printed in every cell,
           which is the header's job. */}
