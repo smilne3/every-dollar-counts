@@ -47,6 +47,12 @@ jobs:
       - name: Test
         run: npx vitest run
 
+      # Date bugs here need opposite timezones to surface: reading local parts where UTC was meant
+      # only fails east of UTC, and parsing a bare date through `new Date()` only fails west of it.
+      # The suite defaults to east (vitest.config.mts), so run it once more from the other side.
+      - name: Test (west of UTC)
+        run: VITEST_TZ=America/New_York npx vitest run
+
       - name: No secrets in client code
         run: npm run check:secrets
 

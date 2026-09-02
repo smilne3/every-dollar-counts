@@ -22,10 +22,11 @@ export default defineConfig({
     // environment variables instead of about the code under test. Mirrors what CI already sets
     // for the build. Never 'production' here — tests must not be able to reach real banks.
     //
-    // TZ: the window helpers in lib/budget.ts read LOCAL date parts on purpose, so the date a
-    // card is labelled with can never disagree with the dates its rows were filtered by. At UTC
-    // that choice is untestable — `new Date(2026, 8, 2)` and its toISOString() slice are the same
-    // string — so the suite runs east of UTC, where a local-vs-UTC slip actually fails.
-    env: { PLAID_ENV: 'sandbox', TZ: 'Asia/Tokyo' },
+    // TZ: date handling here has two failure modes that need OPPOSITE timezones to expose.
+    // Reading local parts where UTC was meant (lib/budget.ts's isoDay) only shows east of UTC;
+    // parsing a bare 'YYYY-MM-DD' through `new Date()`, which is UTC midnight, only shows west of
+    // it. At UTC neither shows at all. So the default is east, and CI runs the suite a second
+    // time with VITEST_TZ set west — see .github/workflows/ci.yml.
+    env: { PLAID_ENV: 'sandbox', TZ: process.env.VITEST_TZ ?? 'Asia/Tokyo' },
   },
 })

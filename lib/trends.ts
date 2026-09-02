@@ -1,6 +1,6 @@
 import { spendByCategory, inRange, type DateWindow, type Txn } from './budget'
 import { sortedSpendRows } from './breakdown'
-import { shortDate } from './format'
+import { monthLabel } from './format'
 import type { SpendContext } from './spend-context'
 
 // Everything the Trends page renders, derived in one place so it can be tested without rendering
@@ -12,18 +12,17 @@ import type { SpendContext } from './spend-context'
 export type TrendsView = {
   spend: {
     rows: { category: string; amount: number }[]
-    dates: string // 'Aug 3 – Sep 2'
+    label: string // 'Aug 2026'
   }
   compare: {
     rows: { category: string; current: number; previous: number }[]
-    dates: string // 'Aug 3 – Sep 2 vs Jul 3 – Aug 2'
+    label: string // 'Aug 2026 vs Jul 2026'
     currentLabel: string
     previousLabel: string
   }
 }
 
 const cents = (n: number) => Math.round(n * 100) / 100
-const span = (w: DateWindow) => `${shortDate(w.from)} – ${shortDate(w.to)}`
 
 export function trendsView(
   windows: { current: DateWindow; previous: DateWindow },
@@ -31,6 +30,8 @@ export function trendsView(
   ctx: SpendContext
 ): TrendsView {
   const { current, previous } = windows
+  const currentLabel = monthLabel(current.from)
+  const previousLabel = monthLabel(previous.from)
 
   // spendByCategory carries the exclusions the rest of the app uses — credit-card payments (#31),
   // transfers and income, reimbursable remainders (#27) — so both windows inherit them by
@@ -44,7 +45,7 @@ export function trendsView(
   return {
     spend: {
       rows: sortedSpendRows(currentByCat),
-      dates: span(current),
+      label: currentLabel,
     },
     compare: {
       // Rounded here rather than in the chart: it keeps the component a pure pass-through with
@@ -56,9 +57,9 @@ export function trendsView(
           previous: cents(previousByCat[category] ?? 0),
         }))
         .sort((a, b) => b.current + b.previous - (a.current + a.previous)),
-      dates: `${span(current)} vs ${span(previous)}`,
-      currentLabel: 'Past month',
-      previousLabel: 'Month before',
+      label: `${currentLabel} vs ${previousLabel}`,
+      currentLabel,
+      previousLabel,
     },
   }
 }

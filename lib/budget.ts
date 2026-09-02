@@ -63,45 +63,41 @@ export function inRange<T extends { date: string }>(txns: T[], w: DateWindow): T
   return txns.filter((t) => t.date >= w.from && t.date <= w.to)
 }
 
-// The two windows Trends compares: the month ending today, and the month before it. Full windows
-// on both sides, which is what replaced the `throughDay` cap that used to make a partial month
-// comparable to a whole one (#9).
+// The two windows Trends compares: the last calendar month that has actually finished, and the
+// one before it. On 2 September that is August against July.
 //
-// Anchored to calendar months rather than to a fixed 30 days. Each window then holds exactly one
-// of every calendar day 1-28, so a bill on a fixed early-month date is counted once on each side.
-// A fixed 30-day window holds no such guarantee: it is no longer than eleven months of twelve, so
-// it drifts backwards through the calendar and lands two 1st-of-month bills in one window while
-// its neighbour gets none. See tests/unit/budget.test.ts for the measurements.
+// Complete months, for two reasons that pull the same way:
 //
-// What neither scheme fixes: a bill that DRIFTS. The mortgage is due on the 1st but posts on the
-// 3rd when the 1st is a Saturday (#67 notes exactly this for August), and two postings 29 days
-// apart can both fall inside one month-long window. Anchoring makes that rarer than 30 days does
-// — 5.0% of days against 7.4%, measured in budget.test.ts — but it does not remove it. Recognising
-// a bill as one recurring commitment rather than as dated rows is #64's job, not this window's.
-export function rollingMonths(now: Date): { current: DateWindow; previous: DateWindow } {
+// 1. A part-month is not worth charting. A window opening on the 1st is, for its first fortnight,
+//    almost entirely the mortgage — true, unchanging, and not what anyone opened the page to
+//    learn (#67). A finished month is always representative.
+// 2. A monthly bill is monthly BY CALENDAR MONTH, so each window holds exactly one of it however
+//    the posting date moves inside that month. A rolling month cannot promise this: the mortgage
+//    is due on the 1st and posts on the 3rd when the 1st is a Saturday, and the rolling windows
+//    put both August's and September's into one side and none into the other — $7,858.70 against
+//    $0.00 on the real data, on 2 September 2026.
+//
+// The cost is recency: late in September you are still reading August. The dashboard's "Spent in
+// September" tile and the Budgets page answer the current month; this page answers where the
+// money goes, which wants a month that has stopped moving.
+//
+// The limitation, since the broader claim is false: this holds for a bill that posts within its
+// own calendar month. One that crosses the boundary — 31 August falling on a Sunday and paying on
+// 1 September — belongs to August but lands in September, and no calendar window can fix that.
+// Knowing a payment is one recurring commitment rather than a dated row is #64's job.
+export function lastCompleteMonths(now: Date): { current: DateWindow; previous: DateWindow } {
   // A window built from an invalid date would stringify to 'NaN-NaN-NaN' and reach the database
   // as a filter. Fail here, where the cause is legible.
   if (Number.isNaN(now.getTime())) {
-    throw new Error('rollingMonths: invalid Date — cannot build a spending window')
+    throw new Error('lastCompleteMonths: invalid Date — cannot build a spending window')
   }
-  const oneBack = monthsBack(now, 1)
-  const twoBack = monthsBack(now, 2)
-  return {
-    current: { from: isoDay(dayAfter(oneBack)), to: isoDay(now) },
-    previous: { from: isoDay(dayAfter(twoBack)), to: isoDay(oneBack) },
-  }
-}
-
-// `n` months before `now`, clamped into the target month: 31 March less one month is the last day
-// of February, not an imaginary 31 February. Day 0 of the following month is the last day of the
-// month we want, which is how the clamp learns that month's length.
-function monthsBack(now: Date, n: number): Date {
-  const lastDay = new Date(now.getFullYear(), now.getMonth() - n + 1, 0).getDate()
-  return new Date(now.getFullYear(), now.getMonth() - n, Math.min(now.getDate(), lastDay))
-}
-
-function dayAfter(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)
+  // Day 0 of a month is the last day of the one before it, which is how each window learns its
+  // own length without anyone hard-coding 28, 30 or 31.
+  const monthWindow = (monthsBack: number): DateWindow => ({
+    from: isoDay(new Date(now.getFullYear(), now.getMonth() - monthsBack, 1)),
+    to: isoDay(new Date(now.getFullYear(), now.getMonth() - monthsBack + 1, 0)),
+  })
+  return { current: monthWindow(1), previous: monthWindow(2) }
 }
 
 // A Date's local calendar day as 'YYYY-MM-DD', to compare against transaction dates. Local
