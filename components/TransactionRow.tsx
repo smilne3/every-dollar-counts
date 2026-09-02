@@ -47,13 +47,25 @@ export function TransactionRow({
       <td className="truncate px-4 py-3 font-medium text-ink" title={label ?? undefined}>
         {label}
       </td>
+      {/* No category picker on a card payment. Setting user_category makes isCreditCardPayment
+          return false — the deliberate "user override wins" rule — which re-enters both legs into
+          the totals. Measured on a real $7,866.69 payment: picking a spending category takes
+          September spending from $3,949.16 to MINUS $3,917.53; picking Income invents $7,866.69 of
+          income. Only the two Transfer categories are harmless. A control where most choices
+          silently corrupt the numbers by thousands does not belong on the row, and "Loan Payments"
+          was never what this is anyway. Same reasoning that already hides the reimbursable box and
+          the editor here. */}
       <td className="px-4 py-3">
-        <CategoryPicker
-          transactionId={t.id}
-          value={categoryName}
-          options={categoryOptions}
-          label={label ?? undefined}
-        />
+        {isCC ? (
+          <span className="text-sm text-muted">Card payment</span>
+        ) : (
+          <CategoryPicker
+            transactionId={t.id}
+            value={categoryName}
+            options={categoryOptions}
+            label={label ?? undefined}
+          />
+        )}
       </td>
       {/* A credit-card payment is neither spending nor income — it moves your own money between two
           of your own accounts, and every total already skips both legs (#31). It was still painted
