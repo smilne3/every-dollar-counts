@@ -55,8 +55,15 @@ export function TransactionRow({
           label={label ?? undefined}
         />
       </td>
+      {/* A credit-card payment is neither spending nor income — it moves your own money between two
+          of your own accounts, and every total already skips both legs (#31). It was still painted
+          emerald on the leg that credits the card, which is the colour this table uses for money
+          arriving, so a $7,866.69 card payment read as income. Muted says "this is not new money"
+          without hiding a transaction that genuinely happened on the statement. */}
       <td
-        className={`px-4 py-3 text-right font-medium tabular-nums ${display < 0 ? 'text-ink' : 'text-emerald'}`}
+        className={`px-4 py-3 text-right font-medium tabular-nums ${
+          isCC ? 'text-muted' : display < 0 ? 'text-ink' : 'text-emerald'
+        }`}
       >
         {money(display)}
         {/* ALWAYS rendered, merely hidden when unmarked. Conditionally mounting this line meant
@@ -68,11 +75,18 @@ export function TransactionRow({
         {/* nowrap: the Amount column is 160px, and "your share -$12,345.67" would wrap to two lines
             at text-xs — reintroducing the very row growth the reserved line exists to prevent. */}
         <span
-          className={`block truncate text-xs font-normal whitespace-nowrap text-faint ${marked > 0 ? '' : 'invisible'}`}
+          className={`block truncate text-xs font-normal whitespace-nowrap text-faint ${
+            marked > 0 || isCC ? '' : 'invisible'
+          }`}
         >
-          {/* An outflow's share is money out (shown negative); an inflow's untagged remainder is
-              money in (shown positive) — matching the `display` convention above. */}
-          {marked > 0 ? `your share ${money(t.amount < 0 ? share : -share)}` : '\u00A0'}
+          {/* The line is reserved on every row anyway, so saying what a card payment is costs no
+              height. An outflow's share is money out (shown negative); an inflow's untagged
+              remainder is money in (shown positive) — matching the `display` convention above. */}
+          {isCC
+            ? 'moves between your accounts'
+            : marked > 0
+              ? `your share ${money(t.amount < 0 ? share : -share)}`
+              : '\u00A0'}
         </span>
       </td>
       {/* Its own column, under a "Reimbursable" header: the word used to be printed in every cell,

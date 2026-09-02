@@ -10,6 +10,7 @@ import { StatCard } from '@/components/ui/StatCard'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { money } from '@/lib/format'
 import { effectiveCategory } from '@/lib/effective-category'
+import { isCreditCardPayment } from '@/lib/categories'
 import { pfcToName, type Category } from '@/lib/categories'
 import {
   netWorth,
@@ -130,7 +131,7 @@ export default async function DashboardPage({
 
   const { data: recentTxns } = await supabase
     .from('transactions')
-    .select('id, name, merchant_name, amount, date, user_category, pfc_primary')
+    .select('id, name, merchant_name, amount, date, user_category, pfc_primary, pfc_detailed')
     .eq('removed', false)
     .order('date', { ascending: false })
     .order('id', { ascending: false })  // #50: `date` is day-granular and ties constantly; without a unique second key Postgres may return tied rows in any order, so an UPDATE reshuffles the list under the reader.
@@ -141,6 +142,10 @@ export default async function DashboardPage({
     category: effectiveCategory(t, pfcMap),
     date: t.date as string,
     amount: t.amount as number,
+    // Recent activity paints inflows emerald with a leading '+'. On the leg that credits the card
+    // that reads as income arriving, which it is not (#31 already keeps both legs out of every
+    // total). The list needs to be told, so pfc_detailed is selected above for this alone.
+    internalTransfer: isCreditCardPayment(t),
   }))
 
   const worth = netWorth(accounts, owedToYou) + sumManualAssets(manualAssets)
