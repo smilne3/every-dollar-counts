@@ -57,27 +57,45 @@ export function inRange<T extends { date: string }>(txns: T[], from: string, to:
   return txns.filter((t) => t.date >= from && t.date <= to)
 }
 
-// The two windows Trends compares: the `days` ending today, and the `days` immediately before
-// them. Contiguous, non-overlapping, and the same length.
+// The two windows Trends compares: the month ending today, and the month before it.
 //
 // This replaces the calendar month, which on the 2nd had nothing to show but the mortgage (#67),
 // and with it the `throughDay` cap that used to make a partial month comparable to a whole one
-// (#9) — two windows of equal length are fair by construction, so there is nothing left to cap.
-export function rollingWindows(
-  now: Date,
-  days: number
-): { current: { from: string; to: string }; previous: { from: string; to: string } } {
-  // Local date parts, matching how the rest of the app reads `now`. Day arithmetic goes through
-  // the Date constructor so month and year rollover are handled for us.
-  const back = (n: number) =>
-    isoDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - n))
+// (#9) — a full window on each side needs no capping.
+//
+// A fixed 30 days would be the obvious way to do that, and it is wrong. Thirty days is shorter
+// than eleven months of twelve, so such a window drifts backwards through the calendar and, on
+// about fifteen days a year, holds two 1st-of-month bills while its neighbour holds none. With a
+// $3,929.35 mortgage that reads as "$7,858.70 vs $0.00". Anchoring to calendar months instead
+// guarantees exactly one billing cycle per window; the price is windows of 28 to 31 days rather
+// than 30, which skews variable spending by a few per cent instead of doubling a fixed cost.
+export function rollingMonths(now: Date): {
+  current: { from: string; to: string }
+  previous: { from: string; to: string }
+} {
+  const oneBack = monthsBack(now, 1)
+  const twoBack = monthsBack(now, 2)
   return {
-    current: { from: back(days - 1), to: back(0) },
-    previous: { from: back(days * 2 - 1), to: back(days) },
+    current: { from: isoDay(dayAfter(oneBack)), to: isoDay(now) },
+    previous: { from: isoDay(dayAfter(twoBack)), to: isoDay(oneBack) },
   }
 }
 
-// A Date's local calendar day as 'YYYY-MM-DD', to compare against transaction dates.
+// `n` months before `now`, clamped into the target month: 31 March less one month is 28
+// February, not an imaginary 31 February. Day 0 of the following month is the last day of the
+// month we want, which is how the clamp learns that month's length.
+function monthsBack(now: Date, n: number): Date {
+  const lastDay = new Date(now.getFullYear(), now.getMonth() - n + 1, 0).getDate()
+  return new Date(now.getFullYear(), now.getMonth() - n, Math.min(now.getDate(), lastDay))
+}
+
+function dayAfter(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)
+}
+
+// A Date's local calendar day as 'YYYY-MM-DD', to compare against transaction dates. Local
+// parts, matching how the rest of the app reads `now`; day arithmetic goes through the Date
+// constructor, which works in calendar days and so is unaffected by DST.
 function isoDay(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')

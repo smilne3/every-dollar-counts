@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { spendByCategory, inRange, rollingWindows, type Txn } from '@/lib/budget'
+import { spendByCategory, inRange, rollingMonths, type Txn } from '@/lib/budget'
 import { sortedSpendRows } from '@/lib/breakdown'
 import { type Category } from '@/lib/categories'
 import { buildSpendContext } from '@/lib/spend-context'
@@ -9,19 +9,18 @@ import { PeriodOverPeriodChart } from '@/components/PeriodOverPeriodChart'
 import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
 
-// Trends is deliberately not calendar-bound, unlike Budgets. Any window that opens on the 1st
-// opens with the mortgage, so for the first fortnight of every month this page said "your money
-// goes on the mortgage" — true, unchanging, and not what anyone opened it to learn (#67).
+// Trends does not start on the 1st, unlike Budgets. Any window that does opens with the
+// mortgage, so for the first fortnight of every month this page said "your money goes on the
+// mortgage" — true, unchanging, and not what anyone opened it to learn (#67).
 //
 // The two pages now answer different questions on purpose: Budgets is "am I on track this
 // month", Trends is "where does my money actually go". The card labels below name their window
-// exactly so that difference is visible rather than confusing.
-const WINDOW_DAYS = 30
+// with real dates so that difference reads as intent rather than as a bug.
 
 export default async function TrendsPage() {
   const supabase = await createClient()
 
-  const { current, previous } = rollingWindows(new Date(), WINDOW_DAYS)
+  const { current, previous } = rollingMonths(new Date())
 
   const { data: cats } = await supabase
     .from('categories')
@@ -48,8 +47,9 @@ export default async function TrendsPage() {
 
   const spendData = sortedSpendRows(currentByCat)
 
-  // Two full windows of the same length, so there is nothing to cap to keep the comparison
-  // honest — the `throughDay` special case that did that for partial months (#9) is gone.
+  // A full window on each side, each holding exactly one of any monthly bill, so there is
+  // nothing to cap to keep the comparison honest — the `throughDay` special case that did that
+  // for partial months (#9) is gone.
   const names = Array.from(new Set([...Object.keys(currentByCat), ...Object.keys(previousByCat)]))
   const compareData = names
     .map((category) => ({
@@ -66,32 +66,26 @@ export default async function TrendsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Trends"
-        subtitle={`Where your money goes over the last ${WINDOW_DAYS} days, and how that compares with the ${WINDOW_DAYS} before.`}
+        subtitle="Where your money goes over the past month, and how that compares with the month before."
       />
 
       <Card className="p-5">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
           <h2 className="text-base font-semibold text-ink">Where the money went</h2>
-          <span className="text-xs text-faint">
-            Last {WINDOW_DAYS} days · {currentDates}
-          </span>
+          <span className="text-xs text-faint">Past month · {currentDates}</span>
         </div>
         <div className="mt-3">
           {spendData.length ? (
             <SpendByCategoryChart data={spendData} />
           ) : (
-            <p className="text-sm text-muted">
-              No spending recorded in the last {WINDOW_DAYS} days.
-            </p>
+            <p className="text-sm text-muted">No spending recorded in the past month.</p>
           )}
         </div>
       </Card>
 
       <Card className="p-5">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-          <h2 className="text-base font-semibold text-ink">
-            Last {WINDOW_DAYS} days vs the {WINDOW_DAYS} before
-          </h2>
+          <h2 className="text-base font-semibold text-ink">Past month vs the month before</h2>
           <span className="text-xs text-faint">
             {currentDates} vs {previousDates}
           </span>
@@ -100,8 +94,8 @@ export default async function TrendsPage() {
           {compareData.length ? (
             <PeriodOverPeriodChart
               data={compareData}
-              currentLabel={`Last ${WINDOW_DAYS} days`}
-              previousLabel={`Previous ${WINDOW_DAYS}`}
+              currentLabel="Past month"
+              previousLabel="Month before"
             />
           ) : (
             <p className="text-sm text-muted">Not enough data yet to compare periods.</p>

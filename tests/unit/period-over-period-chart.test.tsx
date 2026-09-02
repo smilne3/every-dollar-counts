@@ -61,19 +61,19 @@ describe('PeriodOverPeriodChart', () => {
     render(
       <PeriodOverPeriodChart
         data={data}
-        currentLabel="Last 30 days"
-        previousLabel="Previous 30"
+        currentLabel="Past month"
+        previousLabel="Month before"
       />
     )
-    expect(screen.getByText('Last 30 days')).toBeTruthy()
-    expect(screen.getByText('Previous 30')).toBeTruthy()
+    expect(screen.getByText('Past month')).toBeTruthy()
+    expect(screen.getByText('Month before')).toBeTruthy()
     // "This"/"Last" must not survive anywhere as a series name.
     expect(screen.queryByText('This')).toBeNull()
   })
 
   it('puts every category it is given on the axis', () => {
     const { container } = render(
-      <PeriodOverPeriodChart data={data} currentLabel="Last 30 days" previousLabel="Previous 30" />
+      <PeriodOverPeriodChart data={data} currentLabel="Past month" previousLabel="Month before" />
     )
     // recharts word-wraps an axis tick into <tspan>s, so compare with whitespace removed rather
     // than coupling the assertion to how it chose to break the label.

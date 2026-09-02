@@ -5,7 +5,7 @@ import {
   progress,
   monthKey,
   inRange,
-  rollingWindows,
+  rollingMonths,
 } from '@/lib/budget'
 import type { SpendContext } from '@/lib/spend-context'
 
@@ -190,31 +190,85 @@ describe('inRange', () => {
   })
 })
 
-describe('rollingWindows', () => {
-  // 2 September 2026 - the date in #67's screenshot, when the calendar month held two categories.
-  const w = rollingWindows(new Date(2026, 8, 2), 30)
+describe('rollingMonths', () => {
+  // 2 September 2026 — the date in #67's screenshot, when the calendar month held two categories.
+  const w = rollingMonths(new Date(2026, 8, 2))
 
-  it('ends the current window today and runs back `days` inclusive', () => {
-    expect(w.current).toEqual({ from: '2026-08-04', to: '2026-09-02' })
+  it('ends the current window today and opens it the day after a month ago', () => {
+    expect(w.current).toEqual({ from: '2026-08-03', to: '2026-09-02' })
   })
 
   it('puts the previous window immediately before it, with no gap and no overlap', () => {
-    expect(w.previous).toEqual({ from: '2026-07-05', to: '2026-08-03' })
+    expect(w.previous).toEqual({ from: '2026-07-03', to: '2026-08-02' })
   })
 
-  // The whole point of #67: two windows of equal length are inherently fair, which is why
-  // spendThisVsLast's throughDay cap (#9) stops being needed.
-  it('makes both windows exactly the same length', () => {
-    const days = (a: string, b: string) =>
-      (Date.parse(b) - Date.parse(a)) / 86_400_000 + 1
-    expect(days(w.current.from, w.current.to)).toBe(30)
-    expect(days(w.previous.from, w.previous.to)).toBe(30)
+  it('clamps to the shorter month rather than inventing a date', () => {
+    // 31 March minus one month is 28 February, not 31 February. The window then happens to be
+    // the whole of March, and the previous window the whole of February — which is correct.
+    const march = rollingMonths(new Date(2026, 2, 31))
+    expect(march.current).toEqual({ from: '2026-03-01', to: '2026-03-31' })
+    expect(march.previous).toEqual({ from: '2026-02-01', to: '2026-02-28' })
   })
 
   it('crosses a year boundary correctly', () => {
-    const jan = rollingWindows(new Date(2026, 0, 5), 30)
-    expect(jan.current).toEqual({ from: '2025-12-07', to: '2026-01-05' })
-    expect(jan.previous).toEqual({ from: '2025-11-07', to: '2025-12-06' })
+    const jan = rollingMonths(new Date(2026, 0, 5))
+    expect(jan.current).toEqual({ from: '2025-12-06', to: '2026-01-05' })
+    expect(jan.previous).toEqual({ from: '2025-11-06', to: '2025-12-05' })
+  })
+
+  // The property the whole comparison rests on, and the reason a fixed 30-day window was wrong:
+  // 30 days is shorter than 11 months of 12, so such a window drifts backwards through the
+  // calendar and periodically holds two 1st-of-month bills, or none. With this household's
+  // $3,929.35 mortgage that reads as "$7,858.70 vs $0.00" — a louder lie than the bug in #67.
+  //
+  // Checked every day for seven years rather than at one flattering date.
+  const everyDay = (fn: (now: Date) => string | null): string[] => {
+    const bad: string[] = []
+    for (let i = 0; i < 365 * 7; i++) {
+      const complaint = fn(new Date(2024, 0, 1 + i))
+      if (complaint) bad.push(complaint)
+    }
+    return bad
+  }
+
+  const firstsIn = (from: string, to: string): number => {
+    let n = 0
+    const d = new Date(`${from}T00:00:00Z`)
+    while (d.toISOString().slice(0, 10) <= to) {
+      if (d.getUTCDate() === 1) n++
+      d.setUTCDate(d.getUTCDate() + 1)
+    }
+    return n
+  }
+
+  it('always gives each window exactly one occurrence of a monthly bill', () => {
+    const bad = everyDay((now) => {
+      const { current, previous } = rollingMonths(now)
+      const c = firstsIn(current.from, current.to)
+      const p = firstsIn(previous.from, previous.to)
+      return c === 1 && p === 1 ? null : `${current.to}: current has ${c}, previous has ${p}`
+    })
+    expect(bad).toEqual([])
+  })
+
+  it('always stays contiguous, non-overlapping, and ending today', () => {
+    const nextDay = (s: string) => {
+      const d = new Date(`${s}T00:00:00Z`)
+      d.setUTCDate(d.getUTCDate() + 1)
+      return d.toISOString().slice(0, 10)
+    }
+    const bad = everyDay((now) => {
+      const { current, previous } = rollingMonths(now)
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
+        now.getDate()
+      ).padStart(2, '0')}`
+      if (current.to !== today) return `${today}: current ends ${current.to}`
+      if (nextDay(previous.to) !== current.from) {
+        return `${today}: ${previous.to} -> ${current.from} is not contiguous`
+      }
+      return null
+    })
+    expect(bad).toEqual([])
   })
 })
 
