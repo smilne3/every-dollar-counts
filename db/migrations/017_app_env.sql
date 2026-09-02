@@ -32,6 +32,18 @@ values (
 )
 on conflict (id) do nothing;
 
+-- IF THIS ROW IS WRONG, EVERY GUARDED WRITE STOPS. The guard fails closed by design, so a
+-- mis-seeded value is not a degraded mode: linking a bank and saving the home value both answer
+-- 409, and Refresh writes nothing at all -- lib/ingest.ts throws per item, and
+-- the sync loop catches that and marks every bank 'temporarily_unavailable' rather than naming
+-- the real cause. The remedy is one statement:
+--
+--   update app_env set plaid_env = 'production', updated_at = now();   -- or 'sandbox'
+--
+-- Then REDEPLOY. lib/app-env.ts memoises the value for the life of a process, so instances that
+-- already read the wrong value keep using it until they are replaced. Fixing the row alone does
+-- not bring a running deployment back.
+
 -- Server-only, like plaid_items (006): RLS on, no policy for authenticated, so the browser
 -- cannot read it. All access is via the service_role client.
 alter table app_env enable row level security;

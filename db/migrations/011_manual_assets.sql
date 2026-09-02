@@ -6,9 +6,11 @@ create table if not exists manual_assets (
   household_id uuid not null references households(id) on delete cascade,
   name text not null,
   value numeric not null default 0,
-  -- Which environment created it. NOT filtered on when reading, and never will be: the write is
-  -- guarded instead (#23, migration 017), so a wrong-environment row cannot be created at all.
-  -- Kept as a record of which environment created each row.
+  -- Which environment LAST WROTE this row: app/api/manual-assets/route.ts stamps it on every
+  -- save, and there is one 'Home' row per household (the unique constraint below), so it records
+  -- the last writer rather than the creator. NOT filtered on when reading, and never will be:
+  -- the write is guarded instead (#23, migration 017), so a wrong-environment row cannot be
+  -- written at all.
   plaid_env text not null default 'sandbox',
   updated_at timestamptz not null default now(),
   created_at timestamptz default now(),

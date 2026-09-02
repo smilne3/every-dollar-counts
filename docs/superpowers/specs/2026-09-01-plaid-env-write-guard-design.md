@@ -67,7 +67,7 @@ on conflict (id) do nothing;
 
 ## 4. Where the guard goes
 
-The inventory narrowed the danger to a **single door**. The sync, webhook and reconnect paths already filter `plaid_items` by environment, so pointed at the wrong database they find nothing and write nothing — already safe. The only genuinely dangerous path is linking a *new* bank, which is what creates the mis-stamped item in the first place.
+The inventory narrowed the danger to a **single door**. The sync, webhook and reconnect paths already filter `plaid_items` by environment, so pointed at the wrong database they find nothing and write nothing — already safe. (`app/api/plaid/remove-item/route.ts` was the one member of that family that did **not** filter, and it deletes rather than writes: a cross-environment `itemRemove` fails with `INVALID_ACCESS_TOKEN`, which `lib/plaid-errors.ts` swallows as "already removed", so the cascade delete ran anyway. It now refuses with a `409` like its siblings.) The only genuinely dangerous path is linking a *new* bank, which is what creates the mis-stamped item in the first place.
 
 The assertion itself lives in a new `lib/app-env.ts` — not inside `lib/ingest.ts`, because routes outside ingest need it too. One function, one job, testable on its own.
 
