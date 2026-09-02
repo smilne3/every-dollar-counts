@@ -27,18 +27,13 @@ export function PeriodOverPeriodChart({
   currentLabel: string
   previousLabel: string
 }) {
-  const rows = data.map((d) => ({
-    name: d.category,
-    current: Math.round(d.current * 100) / 100,
-    previous: Math.round(d.previous * 100) / 100,
-  }))
   return (
     <div style={{ width: '100%', height: 340 }}>
       <ResponsiveContainer>
-        <BarChart data={rows} margin={{ left: 20, right: 20, bottom: 60 }} barGap={4}>
+        <BarChart data={data} margin={{ left: 20, right: 20, bottom: 60 }} barGap={4}>
           <CartesianGrid vertical={false} stroke="#e6e9e3" />
           <XAxis
-            dataKey="name"
+            dataKey="category"
             angle={-40}
             textAnchor="end"
             interval={0}

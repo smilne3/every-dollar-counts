@@ -6,6 +6,7 @@ import {
   monthKey,
   inRange,
   rollingMonths,
+  type DateWindow,
 } from '@/lib/budget'
 import type { SpendContext } from '@/lib/spend-context'
 
@@ -175,18 +176,19 @@ describe('inRange', () => {
   // Both ends inclusive: a window described to the reader as "Aug 4 - Sep 2" must contain the
   // spending of Aug 4 and of Sep 2, or the label on the card is a lie.
   it('includes both endpoints', () => {
-    expect(inRange(rows, '2026-08-04', '2026-09-02').map((r) => r.amount)).toEqual([2, 3])
+    expect(inRange(rows, { from: '2026-08-04', to: '2026-09-02' }).map((r) => r.amount)).toEqual([
+      2, 3,
+    ])
   })
 
   it('is empty when nothing falls inside', () => {
-    expect(inRange(rows, '2026-07-01', '2026-07-31')).toEqual([])
+    expect(inRange(rows, { from: '2026-07-01', to: '2026-07-31' })).toEqual([])
   })
 
-  // The old query had a .gte and no upper bound, so a future-dated row counted as "this month".
   it('excludes rows after the window, not just before it', () => {
-    expect(inRange(rows, '2026-08-01', '2026-09-02').some((r) => r.date === '2026-09-03')).toBe(
-      false
-    )
+    expect(
+      inRange(rows, { from: '2026-08-01', to: '2026-09-02' }).some((r) => r.date === '2026-09-03')
+    ).toBe(false)
   })
 })
 
@@ -200,6 +202,14 @@ describe('rollingMonths', () => {
 
   it('puts the previous window immediately before it, with no gap and no overlap', () => {
     expect(w.previous).toEqual({ from: '2026-07-03', to: '2026-08-02' })
+  })
+
+  // An invalid Date stringifies to 'NaN-NaN-NaN' — String(NaN).padStart(2,'0') is 'NaN', so the
+  // padding does not catch it — and that string would go to Postgres as a date filter. The query
+  // then errors, the page shows "no spending", and only the card's label looks broken. Fail here,
+  // where the cause is legible, rather than three layers down as an empty chart.
+  it('refuses an invalid date instead of building a NaN window', () => {
+    expect(() => rollingMonths(new Date('nonsense'))).toThrow(/invalid Date/)
   })
 
   it('clamps to the shorter month rather than inventing a date', () => {
@@ -216,16 +226,20 @@ describe('rollingMonths', () => {
     expect(jan.previous).toEqual({ from: '2025-11-06', to: '2025-12-05' })
   })
 
-  // The property the whole comparison rests on, and the reason a fixed 30-day window was wrong:
-  // 30 days is shorter than 11 months of 12, so such a window drifts backwards through the
+  // The property the comparison rests on, and the reason a fixed 30-day window was rejected: 30
+  // days is no longer than eleven months of twelve, so such a window drifts backwards through the
   // calendar and periodically holds two 1st-of-month bills, or none. With this household's
   // $3,929.35 mortgage that reads as "$7,858.70 vs $0.00" — a louder lie than the bug in #67.
+  //
+  // Note what this does and does not cover: it is a claim about calendar DAYS, so it holds for a
+  // bill on a fixed date and not for one that drifts. See the drifting-bill test below.
   //
   // Checked every day for seven years rather than at one flattering date.
   const everyDay = (fn: (now: Date) => string | null): string[] => {
     const bad: string[] = []
-    for (let i = 0; i < 365 * 7; i++) {
-      const complaint = fn(new Date(2024, 0, 1 + i))
+    const stop = new Date(2031, 0, 1)
+    for (const d = new Date(2024, 0, 1); d < stop; d.setDate(d.getDate() + 1)) {
+      const complaint = fn(new Date(d))
       if (complaint) bad.push(complaint)
     }
     return bad
@@ -241,7 +255,7 @@ describe('rollingMonths', () => {
     return n
   }
 
-  it('always gives each window exactly one occurrence of a monthly bill', () => {
+  it('always gives each window exactly one occurrence of a fixed-date monthly bill', () => {
     const bad = everyDay((now) => {
       const { current, previous } = rollingMonths(now)
       const c = firstsIn(current.from, current.to)
@@ -251,7 +265,7 @@ describe('rollingMonths', () => {
     expect(bad).toEqual([])
   })
 
-  it('always stays contiguous, non-overlapping, and ending today', () => {
+  it('always stays contiguous and non-overlapping, ending today and starting a month back', () => {
     const nextDay = (s: string) => {
       const d = new Date(`${s}T00:00:00Z`)
       d.setUTCDate(d.getUTCDate() + 1)
@@ -266,9 +280,57 @@ describe('rollingMonths', () => {
       if (nextDay(previous.to) !== current.from) {
         return `${today}: ${previous.to} -> ${current.from} is not contiguous`
       }
+      if (!(previous.from <= previous.to)) return `${today}: previous window is inverted`
+      if (!(current.from <= current.to)) return `${today}: current window is inverted`
       return null
     })
     expect(bad).toEqual([])
+  })
+
+  // A real bill is not a fixed date. The mortgage is due on the 1st and posts on the 3rd when the
+  // 1st is a Saturday — #67 records exactly that for August — and two postings 29 days apart can
+  // both land in one month-long window. This test exists to stop the comments claiming otherwise:
+  // anchoring makes the failure rarer than a fixed 30-day window does, not impossible.
+  it('is still fooled by a bill that drifts off the 1st — just less often than 30 days', () => {
+    const posted = new Set<string>()
+    for (let y = 2024; y <= 2031; y++) {
+      for (let m = 0; m < 12; m++) {
+        const d = new Date(y, m, 1)
+        while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1)
+        posted.add(
+          `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+            d.getDate()
+          ).padStart(2, '0')}`
+        )
+      }
+    }
+    const held = (w: { from: string; to: string }) =>
+      [...posted].filter((p) => p >= w.from && p <= w.to).length
+
+    // The rejected alternative, inline, so the two are measured over identical days.
+    const fixed30 = (now: Date) => {
+      const back = (n: number) => {
+        const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - n)
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+          d.getDate()
+        ).padStart(2, '0')}`
+      }
+      return { current: { from: back(29), to: back(0) }, previous: { from: back(59), to: back(30) } }
+    }
+
+    const unevenDays = (windows: (now: Date) => { current: DateWindow; previous: DateWindow }) =>
+      everyDay((now) => {
+        const { current, previous } = windows(now)
+        return held(current) === held(previous) ? null : 'x'
+      }).length
+
+    const anchored = unevenDays(rollingMonths)
+    const thirty = unevenDays(fixed30)
+
+    // The honest claim, and the only one worth asserting: anchoring is better, not perfect.
+    // Measured over 2024-2030: 129 days of 2,557 against 190 — 5.0% versus 7.4%.
+    expect(anchored).toBeLessThan(thirty)
+    expect(anchored).toBeGreaterThan(0)
   })
 })
 

@@ -3,6 +3,7 @@ import { isCreditCardPayment } from './categories'
 import { monthKey } from './budget'
 import { spendableAmount } from './reimbursements'
 import type { SpendContext } from './spend-context'
+import { MONTH_LABELS } from './format'
 
 export type FlowTxn = {
   id: string
@@ -54,20 +55,6 @@ export function cashOnHand(accounts: Acct[]): number {
     .reduce((s, a) => s + (a.current_balance ?? 0), 0)
 }
 
-const MONTH_LABELS = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-]
 
 // The last `n` months (chronological), each as { key: 'YYYY-MM', label: 'Jul' }.
 export function lastNMonths(now: Date, n: number): { key: string; label: string }[] {

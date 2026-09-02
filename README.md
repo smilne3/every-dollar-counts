@@ -16,7 +16,7 @@ Mint shut down, and the replacements all wanted a subscription to show me my own
 - **Dashboard** — net worth, cash on hand, what you've spent this month, and what you actually saved.
 - **Transactions** — auto-categorised from Plaid's taxonomy, searchable, and re-categorisable when it guesses wrong.
 - **Budgets** — a monthly limit per category, with bars that fill as you spend.
-- **Trends** — where the money went, and how this month compares to last.
+- **Trends** — where the money went over the past month, and how that compares with the month before.
 - **Savings goals** — set a target, track how close you are.
 - **Shared** — both people in the household see the same data.
 

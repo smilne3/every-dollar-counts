@@ -67,8 +67,21 @@ describe('PeriodOverPeriodChart', () => {
     )
     expect(screen.getByText('Past month')).toBeTruthy()
     expect(screen.getByText('Month before')).toBeTruthy()
-    // "This"/"Last" must not survive anywhere as a series name.
-    expect(screen.queryByText('This')).toBeNull()
+  })
+
+  // Both names reaching the legend is not enough — they have to name the RIGHT series. recharts
+  // does not draw bars under jsdom, but each legend entry carries its series colour, so the
+  // swatch is what ties a label to a series. Emerald is the current window, grey the previous.
+  it('gives each window the colour its own bar is drawn in', () => {
+    const { container } = render(
+      <PeriodOverPeriodChart data={data} currentLabel="Past month" previousLabel="Month before" />
+    )
+    const legend = Array.from(container.querySelectorAll('.recharts-legend-item')).map((li) => [
+      li.querySelector('[fill]')?.getAttribute('fill'),
+      li.textContent,
+    ])
+    expect(legend).toContainEqual(['#0e9f6e', 'Past month'])
+    expect(legend).toContainEqual(['#c9cec7', 'Month before'])
   })
 
   it('puts every category it is given on the axis', () => {

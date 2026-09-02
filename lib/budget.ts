@@ -51,28 +51,39 @@ export function progress(spend: number, limit: number): { ratio: number; over: b
   return { ratio: Math.min(Math.max(ratio, 0), 1), over: spend > limit }
 }
 
-// Rows whose date falls inside [from, to], both ends inclusive. Dates are 'YYYY-MM-DD', so a
-// plain string comparison is chronological and no timezone maths is involved.
-export function inRange<T extends { date: string }>(txns: T[], from: string, to: string): T[] {
-  return txns.filter((t) => t.date >= from && t.date <= to)
+// A span of days, both ends inclusive. Both are 'YYYY-MM-DD', which is what makes a plain string
+// comparison chronological — the `date` column is a Postgres `date` (db/migrations/003), so every
+// value has that exact shape and no timezone maths is involved anywhere downstream.
+export type DateWindow = { from: string; to: string }
+
+// Rows falling inside the window. Takes the window whole rather than two loose strings, so a
+// transposed call — which would return nothing and render an empty chart under a card header
+// still confidently naming the dates — cannot be written.
+export function inRange<T extends { date: string }>(txns: T[], w: DateWindow): T[] {
+  return txns.filter((t) => t.date >= w.from && t.date <= w.to)
 }
 
-// The two windows Trends compares: the month ending today, and the month before it.
+// The two windows Trends compares: the month ending today, and the month before it. Full windows
+// on both sides, which is what replaced the `throughDay` cap that used to make a partial month
+// comparable to a whole one (#9).
 //
-// This replaces the calendar month, which on the 2nd had nothing to show but the mortgage (#67),
-// and with it the `throughDay` cap that used to make a partial month comparable to a whole one
-// (#9) — a full window on each side needs no capping.
+// Anchored to calendar months rather than to a fixed 30 days. Each window then holds exactly one
+// of every calendar day 1-28, so a bill on a fixed early-month date is counted once on each side.
+// A fixed 30-day window holds no such guarantee: it is no longer than eleven months of twelve, so
+// it drifts backwards through the calendar and lands two 1st-of-month bills in one window while
+// its neighbour gets none. See tests/unit/budget.test.ts for the measurements.
 //
-// A fixed 30 days would be the obvious way to do that, and it is wrong. Thirty days is shorter
-// than eleven months of twelve, so such a window drifts backwards through the calendar and, on
-// about fifteen days a year, holds two 1st-of-month bills while its neighbour holds none. With a
-// $3,929.35 mortgage that reads as "$7,858.70 vs $0.00". Anchoring to calendar months instead
-// guarantees exactly one billing cycle per window; the price is windows of 28 to 31 days rather
-// than 30, which skews variable spending by a few per cent instead of doubling a fixed cost.
-export function rollingMonths(now: Date): {
-  current: { from: string; to: string }
-  previous: { from: string; to: string }
-} {
+// What neither scheme fixes: a bill that DRIFTS. The mortgage is due on the 1st but posts on the
+// 3rd when the 1st is a Saturday (#67 notes exactly this for August), and two postings 29 days
+// apart can both fall inside one month-long window. Anchoring makes that rarer than 30 days does
+// — 5.0% of days against 7.4%, measured in budget.test.ts — but it does not remove it. Recognising
+// a bill as one recurring commitment rather than as dated rows is #64's job, not this window's.
+export function rollingMonths(now: Date): { current: DateWindow; previous: DateWindow } {
+  // A window built from an invalid date would stringify to 'NaN-NaN-NaN' and reach the database
+  // as a filter. Fail here, where the cause is legible.
+  if (Number.isNaN(now.getTime())) {
+    throw new Error('rollingMonths: invalid Date — cannot build a spending window')
+  }
   const oneBack = monthsBack(now, 1)
   const twoBack = monthsBack(now, 2)
   return {
@@ -81,8 +92,8 @@ export function rollingMonths(now: Date): {
   }
 }
 
-// `n` months before `now`, clamped into the target month: 31 March less one month is 28
-// February, not an imaginary 31 February. Day 0 of the following month is the last day of the
+// `n` months before `now`, clamped into the target month: 31 March less one month is the last day
+// of February, not an imaginary 31 February. Day 0 of the following month is the last day of the
 // month we want, which is how the clamp learns that month's length.
 function monthsBack(now: Date, n: number): Date {
   const lastDay = new Date(now.getFullYear(), now.getMonth() - n + 1, 0).getDate()

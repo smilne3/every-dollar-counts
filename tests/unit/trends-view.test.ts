@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { spendByCategory, inRange, rollingMonths, monthKey } from '@/lib/budget'
-import { sortedSpendRows } from '@/lib/breakdown'
+import { spendByCategory, rollingMonths, monthKey } from '@/lib/budget'
+import { trendsView } from '@/lib/trends'
 import type { SpendContext } from '@/lib/spend-context'
 
 // #67: on the 2nd of the month, Trends showed two categories — the mortgage and one small
@@ -43,7 +43,7 @@ const MORTGAGE = 3929.35
 
 // On 2 September the windows are [Aug 3 - Sep 2] and [Jul 3 - Aug 2].
 const NOW = new Date(2026, 8, 2)
-const { current, previous } = rollingMonths(NOW)
+const windows = rollingMonths(NOW)
 
 const txns = [
   // --- the previous window ---
@@ -77,6 +77,11 @@ const txns = [
     user_category: null,
     reimbursable_amount: null,
   },
+  // A refund (#8): an inflow in a spending category nets that category down rather than counting
+  // as income. Rolling windows make this newly interesting — the boundary moves daily, so a
+  // purchase and its refund can end up on opposite sides of it, which a calendar month held
+  // together for a whole month at a time.
+  t(-40.0, '2026-08-26', 'GENERAL_MERCHANDISE'),
   // A $300 work expense with $200 coming back: only the $100 share is spending (#27).
   {
     id: 'work-laptop-bag',
@@ -89,8 +94,16 @@ const txns = [
   },
 ]
 
-const inCurrent = () => spendByCategory(inRange(txns, current.from, current.to), ctx)
-const inPrevious = () => spendByCategory(inRange(txns, previous.from, previous.to), ctx)
+// Everything below goes through the same function the page calls, so a regression in the
+// composition — the wrong window on a card, a dropped default, a swapped label — fails here.
+const view = trendsView(windows, txns, ctx)
+
+const byCategory = (rows: { category: string; amount: number }[]) =>
+  Object.fromEntries(rows.map((r) => [r.category, r.amount]))
+
+const inCurrent = () => byCategory(view.spend.rows)
+const inPrevious = () =>
+  Object.fromEntries(view.compare.rows.map((r) => [r.category, r.previous]))
 
 const share = (byCat: Record<string, number>, cat: string) => {
   const total = Object.values(byCat).reduce((a, b) => a + b, 0)
@@ -123,8 +136,8 @@ describe('Trends on the 2nd of the month', () => {
     expect(byCat.Transportation).toBeCloseTo(34.99)
   })
 
-  it('sorts the categories largest first, using the shared helper', () => {
-    const rows = sortedSpendRows(inCurrent())
+  it('sorts the categories largest first', () => {
+    const rows = view.spend.rows
     expect(rows[0].category).toBe('Loan Payments')
     expect(rows.map((r) => r.amount)).toEqual([...rows.map((r) => r.amount)].sort((a, b) => b - a))
   })
@@ -138,15 +151,16 @@ describe('the rolling slice keeps the exclusions the totals use', () => {
   })
 
   it('counts only the unreimbursed share of a work expense (#27)', () => {
-    // 88.40 + 245.60 + 73.13 + 19.81 of ordinary shopping, plus 300 - 200 of the work expense.
-    expect(inCurrent().Shopping).toBeCloseTo(526.94)
+    // 88.40 + 245.60 + 73.13 + 19.81 of shopping, less a 40.00 refund, plus 300 - 200 of the
+    // work expense.
+    expect(inCurrent().Shopping).toBeCloseTo(486.94)
   })
 })
 
 describe('the two windows compare fairly', () => {
-  // The reason throughDay (#9) is no longer needed — and the reason a fixed 30-day window would
-  // not have done: each window holds exactly one mortgage, so neither side is a partial month
-  // and neither side is a double one.
+  // Why throughDay (#9) is no longer needed: in this fixture each window is a full month holding
+  // one mortgage, so neither side is a partial month against a whole one. (The general property,
+  // and the case a drifting bill still breaks, are pinned in budget.test.ts.)
   it('gives each window one full month of fixed costs', () => {
     expect(inCurrent()['Loan Payments']).toBeCloseTo(MORTGAGE)
     expect(inPrevious()['Loan Payments']).toBeCloseTo(MORTGAGE)
@@ -154,5 +168,51 @@ describe('the two windows compare fairly', () => {
 
   it('has something to compare on both sides', () => {
     expect(Object.keys(inPrevious()).length).toBeGreaterThanOrEqual(5)
+  })
+
+  // A category that only exists on one side still belongs on the chart, at zero for the other —
+  // otherwise "you spent nothing on this" and "this category does not exist" look the same.
+  it('carries a one-sided category across at zero', () => {
+    const transport = view.compare.rows.find((r) => r.category === 'Transportation')
+    expect(transport).toEqual({ category: 'Transportation', current: 34.99, previous: 0 })
+    const personal = view.compare.rows.find((r) => r.category === 'Personal Care')
+    expect(personal).toEqual({ category: 'Personal Care', current: 0, previous: 21.19 })
+  })
+})
+
+describe('the comparison rows are rounded to cents', () => {
+  // Money summed in binary floating point does not land on a cent: three $0.10 charges total
+  // 0.30000000000000004, and recharts would render the tooltip with every digit of it.
+  it('rounds a floating-point sum to a real amount', () => {
+    const pennies = [
+      t(0.1, '2026-08-10', 'FOOD_AND_DRINK'),
+      t(0.1, '2026-08-11', 'FOOD_AND_DRINK'),
+      t(0.1, '2026-08-12', 'FOOD_AND_DRINK'),
+    ]
+    const v = trendsView(windows, pennies, ctx)
+    const row = v.compare.rows.find((r) => r.category === 'Food & Drink')
+    expect(row?.current).toBe(0.3)
+  })
+})
+
+describe('each card is labelled with the window it actually shows', () => {
+  // #67 was, at bottom, a page showing one window under a heading naming another. These pin the
+  // pairing, so a swapped prop fails here rather than in front of the reader.
+  it('names the current window on the spending card', () => {
+    expect(view.spend.dates).toBe('Aug 3 – Sep 2')
+  })
+
+  it('names both windows, current first, on the comparison card', () => {
+    expect(view.compare.dates).toBe('Aug 3 – Sep 2 vs Jul 3 – Aug 2')
+    expect(view.compare.currentLabel).toBe('Past month')
+    expect(view.compare.previousLabel).toBe('Month before')
+  })
+
+  // The spending card shows the CURRENT window, not the previous one. The two are close enough
+  // in shape that plotting the wrong one looks entirely plausible.
+  it('plots the current window on the spending card, not the previous', () => {
+    const spend = byCategory(view.spend.rows)
+    expect(spend['Food & Drink']).toBeCloseTo(461.54) // current; previous is 64.20
+    expect(spend['Personal Care']).toBeUndefined() // previous-only category
   })
 })

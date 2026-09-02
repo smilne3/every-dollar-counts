@@ -11,7 +11,7 @@ export function axisTick(v: number): string {
   return `$${(v / 1000).toFixed(1).replace(/\.0$/, '')}k`
 }
 
-const MONTH_LABELS = [
+export const MONTH_LABELS = [
   'Jan',
   'Feb',
   'Mar',
@@ -31,6 +31,8 @@ const MONTH_LABELS = [
 export function shortDate(date: string): string {
   const m = Number(date.slice(5, 7))
   const d = Number(date.slice(8, 10))
-  if (!m || !d) return date
+  // Bound the month, not just its truthiness: MONTH_LABELS[12] is undefined, so an unchecked
+  // month renders the plausible-looking "undefined 5" rather than falling back visibly.
+  if (!m || m > 12 || !d) return date
   return `${MONTH_LABELS[m - 1]} ${d}`
 }

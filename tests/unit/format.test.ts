@@ -36,4 +36,11 @@ describe('shortDate', () => {
   it('returns the input unchanged when it cannot be read', () => {
     expect(shortDate('not-a-date')).toBe('not-a-date')
   })
+
+  // The dangerous branch is not the visible fallback but an out-of-range month: MONTH_LABELS[12]
+  // is undefined, which renders the plausible-looking "undefined 5" instead of failing visibly.
+  it('falls back visibly on an impossible month rather than rendering "undefined"', () => {
+    expect(shortDate('2026-13-05')).toBe('2026-13-05')
+    expect(shortDate('2026-99-05')).toBe('2026-99-05')
+  })
 })
