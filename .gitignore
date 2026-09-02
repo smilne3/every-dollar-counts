@@ -45,3 +45,6 @@ next-env.d.ts
 preview.env
 *.env.local
 .env*.local
+
+# subagent-driven-development scratch (ledger, briefs, review packages)
+.superpowers/

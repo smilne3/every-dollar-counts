@@ -5,6 +5,7 @@ import { plaidLogSafe, isOutOfItemSlots } from '@/lib/plaid-errors'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { decrypt } from '@/lib/crypto'
+import { assertEnvMatchesDatabase, envGuardResponse } from '@/lib/app-env'
 
 // Map the client's requested product strings to Plaid's enum.
 // Plaid Link only lists institutions that support EVERY requested product, so these are
@@ -46,6 +47,31 @@ export async function POST(req: Request) {
   if (!membership) return NextResponse.json({ error: 'no household' }, { status: 403 })
 
   const body = await req.json().catch(() => ({}) as Record<string, unknown>)
+  const updateMode = body.mode === 'update' && typeof body.itemId === 'string'
+
+  // THE ONLY PLACE A CROSS-ENVIRONMENT LINK CAN BE REFUSED FOR FREE (#23). Completing Link creates
+  // the Item at Plaid and spends one of ten unrefundable slots — before exchange-public-token has
+  // run. So the backstop guard in exchange-public-token cannot prevent the cost, only clean up
+  // after it: the best it can do is revoke the Item it was just handed a token for. Refusing here,
+  // before the token that opens Link is even issued, means the user never reaches their bank and
+  // no Item is created at all.
+  //
+  // Update mode is deliberately exempt: it creates no Item, and the item's own plaid_env check
+  // below already covers it. Failing it closed on an app_env blip would block reconnects for
+  // nothing.
+  if (!updateMode) {
+    try {
+      await assertEnvMatchesDatabase()
+    } catch (e) {
+      return envGuardResponse(e, {
+        tag: '[plaid]',
+        mismatch:
+          'This app is pointed at a database from a different Plaid environment, so connecting a ' +
+          'bank was refused. Nothing was connected.',
+        unreadable: 'Could not verify which database this is, so nothing was connected.',
+      })
+    }
+  }
 
   // Real banks hand the login off to their own website and return the user here. Without a
   // registered redirect_uri the OAuth institutions (Wells Fargo, Chase, BofA…) will not open.
@@ -66,7 +92,7 @@ export async function POST(req: Request) {
   try {
     // Update mode: reopen an existing item's login (reconnect). No products; uses access_token.
     // This does NOT create a new Item, so it costs no Item slot.
-    if (body.mode === 'update' && typeof body.itemId === 'string') {
+    if (updateMode) {
       const { data: item } = await supabaseAdmin
         .from('plaid_items')
         .select('access_token_encrypted, household_id, plaid_env')

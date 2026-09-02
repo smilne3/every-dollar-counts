@@ -23,11 +23,16 @@ alter table plaid_items
 -- one bank linked from a laptop after go-live is indistinguishable from a real one and
 -- takes every real bank's sync down with it. The sync loop, the bank list, and the webhook
 -- route all filter on it; the reset script deletes only sandbox rows.
--- KNOWN GAP: the dashboard/trends/budgets money reads query accounts and transactions
--- directly, and those tables have no plaid_env column, so a sandbox bank linked against this
--- shared DB after go-live would still show up in net worth. Closed operationally by the cutover
--- runbook's "never link from preview/dev against the live DB" rule; the durable code fix is to
--- denormalize plaid_env onto accounts + transactions and filter those reads too.
+-- The gap this used to name is CLOSED by migration 017. It was: the dashboard/trends/budgets
+-- money reads query accounts and transactions directly, those tables have no plaid_env column,
+-- so a sandbox bank linked against this shared DB after go-live would still show up in net
+-- worth. 017 adds an app_env row recording which environment owns the database, and
+-- lib/app-env.ts refuses every write from an app in a different one — so the wrong-environment
+-- rows those reads would have shown cannot be created at all.
+-- Denormalizing plaid_env onto accounts + transactions and filtering those reads was considered
+-- and REJECTED (#23): ~14 read sites and growing versus 3 write paths, and a row that missed the
+-- stamp would be filtered out of production, hiding REAL transactions. Wrong is worse than
+-- stopped. See docs/superpowers/specs/2026-09-01-plaid-env-write-guard-design.md.
 alter table plaid_items
   add column if not exists plaid_env text not null default 'sandbox';
 

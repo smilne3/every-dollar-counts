@@ -14,6 +14,29 @@ Settings, and webhook paths ignore mismatched-environment banks, but the net-wor
 does not yet. If you ever need to test against sandbox again, do it against a throwaway Supabase
 project, not this one.
 
+As of #23 this rule is enforced in code, not just by discipline: `db/migrations/017_app_env.sql`
+records which environment owns the database, and every write path (linking a bank, syncing
+transactions, reconnecting, and saving a manual asset) asserts a match against it before writing.
+Disconnecting a bank is guarded too, against that bank's own recorded environment. A local session
+pointed at the production database now gets a 409 when linking a bank rather than silently writing
+sandbox accounts into real net worth.
+
+The refusal that matters most is the earliest one: **`create-link-token` checks before Link
+opens.** Completing Link is what creates the Item at Plaid and spends one of ten unrefundable
+slots — that happens before `exchange-public-token` ever runs, so a refusal there cannot save the
+slot; it only declines the access token that `/item/remove` would have needed, leaving an Item
+nothing can revoke. Refusing at the link-token step means the user never reaches their bank and no
+Item is created. The guard in `exchange-public-token` remains as the backstop for a database that
+changes identity mid-flow.
+
+**Apply `017_app_env.sql` BEFORE deploying the code that depends on it.** The guard fails closed,
+so code-first means an outage until the migration lands: linking a bank and saving the home value
+answer 500 ("Could not verify which database this is"), and Refresh reports success while pulling
+nothing, marking every bank *temporarily unavailable*. Migration first, then deploy — never the
+other way round. If the seeded value turns out to be wrong, `017_app_env.sql` carries the one-line
+correction; it needs a **redeploy** afterwards, because each running instance memoises the value
+for its whole life.
+
 ---
 
 ### Before you touch anything

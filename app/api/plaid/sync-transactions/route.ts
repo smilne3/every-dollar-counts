@@ -6,6 +6,7 @@ import { plaidEnv } from '@/lib/plaid'
 import { storeAccounts, syncAndStore } from '@/lib/ingest'
 import { shouldSyncTransactions } from '@/lib/sync-policy'
 import { classifyPlaidError, plaidErrorCode } from '@/lib/plaid-errors'
+import { EnvMismatchError } from '@/lib/app-env'
 
 // A bank whose sync failed maps to one of these, and each is a different sentence on screen.
 const STATUS_FOR = {
@@ -84,8 +85,13 @@ export async function POST() {
       // INSTITUTION_DOWN, rate limits, ITEM_LOCKED, PASSWORD_RESET_REQUIRED, and a failed decrypt
       // are all live possibilities. Rethrowing here would 500 the whole refresh and leave every
       // bank after this one silently unsynced.
-      const code = plaidErrorCode(e) ?? 'UNKNOWN_ERROR'
-      const status = STATUS_FOR[classifyPlaidError(e)]
+      // An environment mismatch is OUR misconfiguration, not the bank's — 010 defines
+      // 'config_error' for exactly this and says never to render it as "the bank is having
+      // trouble." It carries no Plaid error_code, so classifyPlaidError would fall through to its
+      // unknown-codes default of 'temporary' and label every real bank temporarily unavailable.
+      const envMismatch = e instanceof EnvMismatchError
+      const code = envMismatch ? 'ENV_MISMATCH' : (plaidErrorCode(e) ?? 'UNKNOWN_ERROR')
+      const status = envMismatch ? STATUS_FOR.config : STATUS_FOR[classifyPlaidError(e)]
       if (status === 'needs_reconnect') brokenNow++
       else failed++
       problems.push({ bank: item.institution_name ?? 'A bank', status, code })
