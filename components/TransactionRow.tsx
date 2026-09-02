@@ -66,7 +66,11 @@ export function TransactionRow({
             `invisible` is visibility:hidden, so the space stays reserved and assistive tech still
             skips it. Where the row's height is already set by the taller category control, the
             reserved line costs nothing at all. */}
-        <span className={`block text-xs font-normal text-faint ${marked > 0 ? '' : 'invisible'}`}>
+        {/* nowrap: the Amount column is 160px, and "your share -$12,345.67" would wrap to two lines
+            at text-xs — reintroducing the very row growth the reserved line exists to prevent. */}
+        <span
+          className={`block truncate text-xs font-normal whitespace-nowrap text-faint ${marked > 0 ? '' : 'invisible'}`}
+        >
           {/* An outflow's share is money out (shown negative); an inflow's untagged remainder is
               money in (shown positive) — matching the `display` convention above. */}
           {marked > 0 ? `your share ${money(t.amount < 0 ? share : -share)}` : '\u00A0'}

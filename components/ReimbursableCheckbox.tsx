@@ -31,6 +31,15 @@ export function ReimbursableCheckbox({
   // "no click outstanding — trust the prop"; it is reset on failure, and after a success the
   // refreshed prop already agrees with it.
   const [optimistic, setOptimistic] = useState<number | null>(null)
+  // Drop the optimistic value the moment the server's own value changes. Without this it outlives
+  // its click: tick a $100 dinner here, then set it to $40 in the row menu's editor, and this box
+  // would still read "all of it is coming back" beside an amount cell saying "your share -$60.00" —
+  // the row contradicting itself. React's documented way to adjust state when a prop changes.
+  const [seen, setSeen] = useState(reimbursableAmount)
+  if (seen !== reimbursableAmount) {
+    setSeen(reimbursableAmount)
+    setOptimistic(null)
+  }
 
   // Guards #31: the route refuses these, so offering the control would only ever produce an error.
   if (isCreditCardPayment({ pfc_detailed: pfcDetailed, user_category: userCategory })) return null

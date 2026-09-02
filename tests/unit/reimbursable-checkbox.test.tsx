@@ -116,4 +116,20 @@ describe('ReimbursableCheckbox', () => {
     expect(box.checked).toBe(false)
   })
 
+
+  // The optimistic tick must not outlive its click. The row menu's editor writes the same field
+  // through the same route, so without clearing on a prop change this box would keep claiming the
+  // whole charge is coming back while the amount cell beside it showed a partial share (#50).
+  it('drops the optimistic tick once the server value changes underneath it', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+    const { rerender } = render(<ReimbursableCheckbox {...props} amount={100} />)
+    fireEvent.click(screen.getByRole('checkbox'))
+    expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(true)
+
+    // The editor saved a partial and the page refreshed: the prop now says 40 of 100.
+    rerender(<ReimbursableCheckbox {...props} amount={100} reimbursableAmount={40} />)
+    expect(screen.queryByRole('checkbox')).toBeNull()
+    expect(screen.getByText(/40/)).toBeTruthy()
+  })
+
 })
