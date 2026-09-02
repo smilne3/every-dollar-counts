@@ -97,4 +97,19 @@ describe('TransactionRow amount cell', () => {
     expect(container.querySelectorAll('td')[3].className).toContain('text-emerald')
   })
 
+
+  // Setting user_category flips isCreditCardPayment to false and re-enters BOTH legs into the
+  // totals. On a real $7,866.69 payment that is the difference between September spending of
+  // $3,949.16 and MINUS $3,917.53. The control does not belong here.
+  it('offers no category picker on a credit-card payment', () => {
+    renderRow({ pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' })
+    expect(screen.queryByRole('combobox')).toBeNull()
+    expect(screen.getByText('Card payment')).toBeTruthy()
+  })
+
+  it('still offers the picker on an ordinary charge', () => {
+    renderRow()
+    expect(screen.getByRole('combobox')).toBeTruthy()
+  })
+
 })
