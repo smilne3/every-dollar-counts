@@ -51,36 +51,35 @@ export function progress(spend: number, limit: number): { ratio: number; over: b
   return { ratio: Math.min(Math.max(ratio, 0), 1), over: spend > limit }
 }
 
-// Split spending per category name across this month vs last month.
-// Compare this month against last month, per category. `throughDay` makes it apples-to-apples:
-// this month is month-to-date, so last month is capped at the SAME day of the month (e.g. on the
-// 14th, Jun 1–14 vs Jul 1–14). Without this cap, mid-month every category looks like a triumph —
-// a partial month against a whole one — which is misleading on a budget tool (#9).
-export function spendThisVsLast(
-  txns: Txn[],
-  thisM: string,
-  lastM: string,
-  ctx: SpendContext,
-  throughDay: number
-) {
-  const thisMonth: Record<string, number> = {}
-  const lastMonth: Record<string, number> = {}
-  for (const t of txns) {
-    if (isCreditCardPayment(t)) continue // internal transfer, not spending
-    const cat = effectiveCategory(t, ctx.pfcMap)
-    if (ctx.nonSpending.has(cat)) continue // income + transfers
-    const mk = monthKey(t.date)
-    const amt = spendableAmount(t, ctx.reimbursedByTxn) // net of reimbursables (#27)
-    if (mk === thisM) {
-      thisMonth[cat] = (thisMonth[cat] ?? 0) + amt
-    } else if (mk === lastM && dayOfMonth(t.date) <= throughDay) {
-      lastMonth[cat] = (lastMonth[cat] ?? 0) + amt
-    }
-  }
-  return { thisMonth, lastMonth }
+// Rows whose date falls inside [from, to], both ends inclusive. Dates are 'YYYY-MM-DD', so a
+// plain string comparison is chronological and no timezone maths is involved.
+export function inRange<T extends { date: string }>(txns: T[], from: string, to: string): T[] {
+  return txns.filter((t) => t.date >= from && t.date <= to)
 }
 
-// Day component of a 'YYYY-MM-DD' date, as a number.
-export function dayOfMonth(date: string): number {
-  return Number(date.slice(8, 10))
+// The two windows Trends compares: the `days` ending today, and the `days` immediately before
+// them. Contiguous, non-overlapping, and the same length.
+//
+// This replaces the calendar month, which on the 2nd had nothing to show but the mortgage (#67),
+// and with it the `throughDay` cap that used to make a partial month comparable to a whole one
+// (#9) — two windows of equal length are fair by construction, so there is nothing left to cap.
+export function rollingWindows(
+  now: Date,
+  days: number
+): { current: { from: string; to: string }; previous: { from: string; to: string } } {
+  // Local date parts, matching how the rest of the app reads `now`. Day arithmetic goes through
+  // the Date constructor so month and year rollover are handled for us.
+  const back = (n: number) =>
+    isoDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - n))
+  return {
+    current: { from: back(days - 1), to: back(0) },
+    previous: { from: back(days * 2 - 1), to: back(days) },
+  }
+}
+
+// A Date's local calendar day as 'YYYY-MM-DD', to compare against transaction dates.
+function isoDay(d: Date): string {
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${m}-${day}`
 }

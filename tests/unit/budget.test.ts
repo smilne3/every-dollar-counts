@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { spendByCategory, budgetedSpend, progress, spendThisVsLast, monthKey } from '@/lib/budget'
+import {
+  spendByCategory,
+  budgetedSpend,
+  progress,
+  monthKey,
+  inRange,
+  rollingWindows,
+} from '@/lib/budget'
 import type { SpendContext } from '@/lib/spend-context'
 
 const pfcMap: Record<string, string> = {
@@ -157,34 +164,57 @@ describe('progress', () => {
   })
 })
 
-describe('spendThisVsLast', () => {
-  it('buckets by month (full period when throughDay covers the month)', () => {
-    const r = spendThisVsLast(
-      [t(10, '2026-07-05', 'FOOD_AND_DRINK'), t(30, '2026-06-20', 'FOOD_AND_DRINK')],
-      '2026-07',
-      '2026-06',
-      ctx(),
-      31
-    )
-    expect(r.thisMonth['Food & Drink']).toBe(10)
-    expect(r.lastMonth['Food & Drink']).toBe(30)
+describe('inRange', () => {
+  const rows = [
+    t(1, '2026-08-03', 'FOOD_AND_DRINK'),
+    t(2, '2026-08-04', 'FOOD_AND_DRINK'),
+    t(3, '2026-09-02', 'FOOD_AND_DRINK'),
+    t(4, '2026-09-03', 'FOOD_AND_DRINK'),
+  ]
+
+  // Both ends inclusive: a window described to the reader as "Aug 4 - Sep 2" must contain the
+  // spending of Aug 4 and of Sep 2, or the label on the card is a lie.
+  it('includes both endpoints', () => {
+    expect(inRange(rows, '2026-08-04', '2026-09-02').map((r) => r.amount)).toEqual([2, 3])
   })
 
-  // The #9 fix: mid-month, last month must be capped at the same day so it's a fair comparison.
-  it('caps last month at throughDay (apples-to-apples, not partial-vs-whole)', () => {
-    const r = spendThisVsLast(
-      [
-        t(10, '2026-07-05', 'FOOD_AND_DRINK'), // this month, day 5
-        t(30, '2026-06-05', 'FOOD_AND_DRINK'), // last month, day 5 — counts
-        t(200, '2026-06-25', 'FOOD_AND_DRINK'), // last month, day 25 — excluded on the 10th
-      ],
-      '2026-07',
-      '2026-06',
-      ctx(),
-      10 // "today" is the 10th
+  it('is empty when nothing falls inside', () => {
+    expect(inRange(rows, '2026-07-01', '2026-07-31')).toEqual([])
+  })
+
+  // The old query had a .gte and no upper bound, so a future-dated row counted as "this month".
+  it('excludes rows after the window, not just before it', () => {
+    expect(inRange(rows, '2026-08-01', '2026-09-02').some((r) => r.date === '2026-09-03')).toBe(
+      false
     )
-    expect(r.thisMonth['Food & Drink']).toBe(10)
-    expect(r.lastMonth['Food & Drink']).toBe(30) // the day-25 $200 is not yet "reached" this month
+  })
+})
+
+describe('rollingWindows', () => {
+  // 2 September 2026 - the date in #67's screenshot, when the calendar month held two categories.
+  const w = rollingWindows(new Date(2026, 8, 2), 30)
+
+  it('ends the current window today and runs back `days` inclusive', () => {
+    expect(w.current).toEqual({ from: '2026-08-04', to: '2026-09-02' })
+  })
+
+  it('puts the previous window immediately before it, with no gap and no overlap', () => {
+    expect(w.previous).toEqual({ from: '2026-07-05', to: '2026-08-03' })
+  })
+
+  // The whole point of #67: two windows of equal length are inherently fair, which is why
+  // spendThisVsLast's throughDay cap (#9) stops being needed.
+  it('makes both windows exactly the same length', () => {
+    const days = (a: string, b: string) =>
+      (Date.parse(b) - Date.parse(a)) / 86_400_000 + 1
+    expect(days(w.current.from, w.current.to)).toBe(30)
+    expect(days(w.previous.from, w.previous.to)).toBe(30)
+  })
+
+  it('crosses a year boundary correctly', () => {
+    const jan = rollingWindows(new Date(2026, 0, 5), 30)
+    expect(jan.current).toEqual({ from: '2025-12-07', to: '2026-01-05' })
+    expect(jan.previous).toEqual({ from: '2025-11-07', to: '2025-12-06' })
   })
 })
 

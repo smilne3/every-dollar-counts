@@ -1,4 +1,4 @@
-import { money } from '@/lib/format'
+import { money, shortDate } from '@/lib/format'
 import { ArrowUpRightIcon, ArrowDownLeftIcon } from './ui/icons'
 
 export type ActivityItem = {
@@ -11,29 +11,6 @@ export type ActivityItem = {
   // accounts. Painted like income otherwise (#31 keeps it out of the totals; this keeps it out of
   // the reading).
   internalTransfer?: boolean
-}
-
-const MONTH_LABELS = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-]
-
-// 'YYYY-MM-DD' -> 'Jul 12' without timezone drift.
-function shortDate(date: string): string {
-  const m = Number(date.slice(5, 7))
-  const d = Number(date.slice(8, 10))
-  if (!m || !d) return date
-  return `${MONTH_LABELS[m - 1]} ${d}`
 }
 
 export function RecentActivity({ items }: { items: ActivityItem[] }) {
