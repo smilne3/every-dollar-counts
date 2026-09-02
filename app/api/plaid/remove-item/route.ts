@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { decrypt } from '@/lib/crypto'
-import { plaidClient } from '@/lib/plaid'
+import { plaidClient, plaidEnv } from '@/lib/plaid'
 import { plaidLogSafe, isAlreadyRemoved } from '@/lib/plaid-errors'
 
 // Disconnect a bank: remove it at Plaid, THEN delete our record. Deleting the plaid_items row
@@ -27,11 +27,22 @@ export async function POST(req: Request) {
 
   const { data: item } = await supabaseAdmin
     .from('plaid_items')
-    .select('id, household_id, access_token_encrypted')
+    .select('id, household_id, access_token_encrypted, plaid_env')
     .eq('id', itemId)
     .single()
   if (!item || item.household_id !== membership.household_id) {
     return NextResponse.json({ error: 'not found' }, { status: 403 })
+  }
+  // Refuse across environments, like reconnect and create-link-token do (#23). Without this the
+  // route is silently destructive: a sandbox access token sent to production itemRemove fails with
+  // INVALID_ACCESS_TOKEN, which lib/plaid-errors.ts treats as "already removed" and swallows — so
+  // the delete below runs anyway, cascading a real bank's accounts and transactions away while the
+  // live Plaid connection is never revoked, its slot stays spent, and the UI reports success.
+  if (item.plaid_env !== plaidEnv) {
+    return NextResponse.json(
+      { error: 'That bank was linked in a different environment and cannot be disconnected here.' },
+      { status: 409 }
+    )
   }
 
   // Decrypt OUTSIDE the try. The access token is the ONLY way to revoke this connection at Plaid.
