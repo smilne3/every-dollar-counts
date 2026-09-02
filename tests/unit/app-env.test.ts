@@ -90,4 +90,37 @@ describe('assertEnvMatchesDatabase', () => {
     await expect(assertEnvMatchesDatabase()).resolves.toBeUndefined()
     expect(maybeSingle).toHaveBeenCalledTimes(2)
   })
+
+  // The two above cover concurrent SUCCESS and sequential FAILURE. This is where they meet, and
+  // it is the case the deduplication comment actually promises: a cold start whose very first
+  // app_env read fails while several requests are already waiting on it. All of them must see the
+  // failure, and the rejected in-flight promise must be cleared rather than left for the next
+  // caller to inherit — otherwise one blip fails every later request for the life of the process.
+  it('shares one failing read, and still retries afterwards', async () => {
+    let reject: (e: unknown) => void = () => {}
+    maybeSingle.mockReturnValueOnce(
+      new Promise((_, r) => {
+        reject = r
+      })
+    )
+    maybeSingle.mockResolvedValueOnce({ data: { plaid_env: 'sandbox' }, error: null })
+    const { assertEnvMatchesDatabase } = await freshModule()
+
+    // allSettled attaches both handlers before the rejection lands, so neither is ever unhandled.
+    const settled = Promise.allSettled([assertEnvMatchesDatabase(), assertEnvMatchesDatabase()])
+    reject(new Error('connection reset'))
+    const outcomes = (await settled).map((r) =>
+      r.status === 'rejected' ? String(r.reason) : 'RESOLVED'
+    )
+
+    expect(outcomes).toEqual([
+      expect.stringContaining('connection reset'),
+      expect.stringContaining('connection reset'),
+    ])
+    expect(maybeSingle).toHaveBeenCalledTimes(1)
+
+    // Nothing cached, nothing left in flight: the next call issues a second read and succeeds.
+    await expect(assertEnvMatchesDatabase()).resolves.toBeUndefined()
+    expect(maybeSingle).toHaveBeenCalledTimes(2)
+  })
 })

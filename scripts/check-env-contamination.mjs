@@ -40,6 +40,17 @@ async function readAll(table, columns) {
 
   const { data, error } = await admin.from(table).select(columns)
   if (error) die(table, error)
+  // Two different failures, so two different messages. PostgREST returns count as null when the
+  // Content-Range header is missing or unparseable, and `0 !== null` is true -- so an EMPTY table
+  // with no count header used to abort claiming truncation, which is both alarming and wrong.
+  // Both still refuse, because a read we cannot verify cannot honestly report "Clean" either way.
+  if (count == null) {
+    console.error(
+      `No exact row count came back for ${table}, so truncation would be undetectable. This ` +
+        'check cannot honestly report "Clean" without one — even if the table is simply empty.'
+    )
+    process.exit(1)
+  }
   if (data.length !== count) {
     console.error(
       `Read ${data.length} of ${count} ${table} rows — the result was truncated, so this check ` +
