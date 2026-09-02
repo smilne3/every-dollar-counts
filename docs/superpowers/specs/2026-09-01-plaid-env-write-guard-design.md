@@ -4,7 +4,7 @@
 - **Date:** 2026-09-01
 - **Closes:** #23 (sandbox banks can count toward real net worth)
 - **Status:** Approved design, ready for implementation plan
-- **One line:** The database records which Plaid environment it belongs to, and the two functions that write bank data refuse to run against a database from a different one — closing #23 at its single entrance instead of filtering fourteen exits.
+- **One line:** The database records which Plaid environment it belongs to, and every path that writes bank data refuses to run against a database from a different one — closing #23 at its single entrance instead of filtering fourteen exits.
 
 ---
 
@@ -24,10 +24,10 @@ This is a latent seam, not a live bug. It is closed today only by a standing rul
 
 | | Count | Where |
 |---|---|---|
-| Functions that **create** account/transaction rows | **2** | `storeAccounts`, `syncAndStore` — both in `lib/ingest.ts` |
+| Places that **create** account/transaction rows | **3** | `storeAccounts`, `syncAndStore` — both in `lib/ingest.ts` — and `scripts/seed-sandbox-bank.mjs`, a dev-only tool run by hand, now guarded the same way |
 | Places that **read** them for money | **~14** | dashboard, transactions, trends, budgets, breakdown, reimbursements, settings, `lib/receivable.ts`, `lib/manual-assets.ts` |
 
-#23 listed six read sites when it was filed. A month of new pages has made it fourteen. Two doors versus fourteen windows.
+#23 listed six read sites when it was filed. A month of new pages has made it fourteen. Three doors versus fourteen windows.
 
 **We already ran this experiment and it failed.** Migration `011_manual_assets.sql:9` added `plaid_env` to `manual_assets` under the comment `-- Not filtered on yet.` A month later `lib/manual-assets.ts:11` still does not filter on it. One table, one read site, one explicit note-to-self — and it still decayed. Correctness that depends on remembering to add a line at every new call site does not survive contact with a growing app.
 
@@ -79,6 +79,8 @@ It is applied at every place this app writes household financial data:
 | `lib/ingest.ts` → `storeAccounts` | Throws |
 | `lib/ingest.ts` → `syncAndStore` | Throws |
 | `app/api/manual-assets/route.ts` — the POST | `409` |
+
+`scripts/seed-sandbox-bank.mjs` writes the same three tables, but it is a dev-only tool run by hand outside the app, so it cannot import `lib/app-env.ts`. It carries the same refusal inline: it reads `app_env` itself and exits non-zero unless the database says `sandbox`, failing closed on a missing or unreadable row exactly as the library does.
 
 Checking *before* the `plaid_items` insert matters: a guard that fired later would leave an orphaned bank row behind. The two `ingest.ts` assertions are backstops — the sync, webhook and reconnect paths are already safe — so that a future write path cannot quietly reopen this.
 

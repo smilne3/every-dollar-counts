@@ -18,6 +18,37 @@ function encrypt(plain) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 const admin = createClient(url, svc, { auth: { persistSession: false } })
+
+// #23: this script writes plaid_items, accounts and transactions through the service-role client,
+// against whatever .env.local happens to point at -- and ONE Supabase project serves local dev,
+// Vercel Preview and production. Run from a laptop pointed at the live database, it would seed a
+// fake bank whose invented balances count toward real net worth while the item itself is hidden
+// from the environment-filtered Settings list. A .env file can claim anything; app_env
+// (db/migrations/017_app_env.sql) is the DATABASE saying what it is, which is the claim a laptop
+// cannot forge. Fails closed on purpose: a missing row or an unreadable table refuses too, exactly
+// like lib/app-env.ts.
+const { data: appEnv, error: appEnvErr } = await admin
+  .from('app_env')
+  .select('plaid_env')
+  .maybeSingle()
+if (appEnvErr) {
+  console.error(`Could not read app_env: ${appEnvErr.message}. Refusing to seed a sandbox bank.`)
+  process.exit(1)
+}
+if (!appEnv) {
+  console.error(
+    'app_env has no row: run db/migrations/017_app_env.sql. Refusing to seed a sandbox bank.'
+  )
+  process.exit(1)
+}
+if (appEnv.plaid_env !== 'sandbox') {
+  console.error(
+    `This database belongs to "${appEnv.plaid_env}", not sandbox. Refusing to seed a fake bank ` +
+      'into it — its balances would count toward real net worth (#23).'
+  )
+  process.exit(1)
+}
+
 const plaid = new PlaidApi(
   new Configuration({
     basePath: PlaidEnvironments.sandbox,
@@ -49,6 +80,9 @@ const { data: item } = await admin
     item_id: ex.data.item_id,
     access_token_encrypted: encrypt(accessToken),
     institution_name: 'First Platypus Bank (Sandbox)',
+    // Stamped explicitly rather than left to migration 010's column default, so the row says what
+    // it is instead of merely happening to match.
+    plaid_env: 'sandbox',
   })
   .select('id')
   .single()
