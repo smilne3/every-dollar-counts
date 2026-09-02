@@ -38,7 +38,11 @@ export function HomeValueCard({
     }).catch(() => null)
     setBusy(false)
     if (!res || !res.ok) {
-      setError("Couldn't save that. Please try again.")
+      // Prefer the server's own words when it has any — the environment guard's 409 is a
+      // misconfiguration, and "please try again" is advice that can never succeed. Same pattern as
+      // components/plaid-link-context.ts.
+      const body = res ? ((await res.json().catch(() => ({}))) as { error?: string }) : {}
+      setError(body.error ?? "Couldn't save that. Please try again.")
       return
     }
     router.refresh()

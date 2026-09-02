@@ -28,6 +28,7 @@ export async function POST(req: Request) {
     await assertEnvMatchesDatabase()
   } catch (e) {
     if (e instanceof EnvMismatchError) {
+      console.error('[manual-assets] refusing to save across environments', e.message)
       return NextResponse.json(
         { error: 'This app is pointed at a database from a different environment. Nothing saved.' },
         { status: 409 }
