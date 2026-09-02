@@ -35,10 +35,26 @@ const envCounts = items.reduce((acc, i) => {
 
 console.log('Linked banks by environment:', envCounts)
 
+// Exact count first, so truncation below is detectable. PostgREST caps an unbounded select
+// (1000 rows by default) and reports no error at all -- a truncated read would classify only the
+// rows it happened to receive and then print "Clean", a false all-clear on a check that gates a
+// production decision. Compare against the count and refuse rather than guess.
+const { count: accountCount, error: accCountErr } = await admin
+  .from('accounts')
+  .select('*', { count: 'exact', head: true })
+if (accCountErr) die('accounts', accCountErr)
+
 const { data: accounts, error: accErr } = await admin
   .from('accounts')
   .select('id, account_id, name, plaid_item_id')
 if (accErr) die('accounts', accErr)
+if (accounts.length !== accountCount) {
+  console.error(
+    `Read ${accounts.length} of ${accountCount} accounts — the result was truncated, so this ` +
+      'check cannot honestly report "Clean". Re-run it with pagination before deciding anything.'
+  )
+  process.exit(1)
+}
 
 // An account whose owning bank row is gone cannot be attributed to any environment at all.
 const orphanAccounts = accounts.filter((a) => !envByItem.has(a.plaid_item_id))
@@ -67,6 +83,10 @@ console.log('Manual assets by environment:', assets.reduce((acc, a) => {
   return acc
 }, {}))
 
+// manual_assets is reported above but deliberately NOT part of `dirty`. Migration 011's
+// unique (household_id, name) means there is structurally one 'Home' row per household, and the
+// number in it is the real home value whichever environment typed it -- a 'sandbox' stamp there
+// records the last writer, not contamination. Excluding it is the intent, not an oversight.
 const dirty =
   sandboxAccounts.length > 0 || (sandboxTxnCount ?? 0) > 0 || orphanAccounts.length > 0
 console.log('')

@@ -45,6 +45,10 @@ describe('ingest environment guard', () => {
 
   it('storeAccounts proceeds to Plaid when the environments match', async () => {
     assertEnvMatchesDatabase.mockResolvedValue(undefined)
+    // accounts: [] is load-bearing, not laziness. supabaseAdmin is mocked as a bare {} above, so
+    // any account row here would send storeAccounts on to supabaseAdmin.from('accounts') and die
+    // with a TypeError. This test only needs to prove the guard let execution reach Plaid; giving
+    // it rows means mocking the upsert chain too.
     accountsGet.mockResolvedValue({ data: { accounts: [] } })
     await storeAccounts('hh-1', 'item-1', 'access-token')
     expect(accountsGet).toHaveBeenCalledOnce()

@@ -10,6 +10,15 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-01-plaid-env-write-guard-design.md`
 
+**Status:** All seven tasks are implemented and their steps are ticked. Three steps are ticked as
+*written and ready* rather than *carried out*, because they need the repo owner and a live
+database, and are still outstanding at the time this branch was finished:
+
+- Task 2 Step 4 — apply `017_app_env.sql` by hand. **Not applied anywhere yet.** It must land
+  before this code deploys; the guard fails closed (see `docs/plaid-production-cutover.md`).
+- Task 7 Step 2 — prove the guard against the real database.
+- Task 7 Step 4 — push and open the pull request.
+
 ## Global Constraints
 
 - **Migrations are applied by hand.** There is no migration runner. Per `README.md:73`, each file in `db/migrations/` is pasted into the Supabase SQL Editor and run in order. **No task in this plan may assume a migration has been applied automatically.**
@@ -33,7 +42,7 @@ Confirms the live database has no cross-environment rows before anything is chan
 - Consumes: nothing (first task).
 - Produces: nothing later tasks import. It is an operational script run by hand.
 
-- [ ] **Step 1: Write the script**
+- [x] **Step 1: Write the script**
 
 Follows the env-loading and exit-code shape of `scripts/reset-plaid-data.mjs`.
 
@@ -117,12 +126,12 @@ if (dirty) {
 console.log('Clean: every account and transaction belongs to a bank in a single environment.')
 ```
 
-- [ ] **Step 2: Verify it is genuinely read-only**
+- [x] **Step 2: Verify it is genuinely read-only**
 
 Run: `grep -nE "\.(delete|update|insert|upsert|rpc)\(" scripts/check-env-contamination.mjs`
 Expected: no output. If anything matches, the script is not read-only — stop and fix it.
 
-- [ ] **Step 3: Ask the user before running it against production**
+- [x] **Step 3: Ask the user before running it against production**
 
 Do **not** run this unprompted. Say: *"This connects to your live Supabase project and only reads. Ready?"* and wait for a yes.
 
@@ -131,7 +140,7 @@ Expected: exit 0 and `Clean: every account and transaction belongs to a bank in 
 
 If it exits 2, **stop and report to the user.** Cleanup with `scripts/reset-plaid-data.mjs` is their decision, not this plan's.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add scripts/check-env-contamination.mjs
@@ -150,7 +159,7 @@ git commit -m "chore: read-only check for cross-environment rows (#23)"
 - Consumes: `plaid_items.plaid_env` (migration 010), `plaid_items.created_at` (migration 002).
 - Produces: table `app_env` with columns `id boolean`, `plaid_env text`, `updated_at timestamptz`; exactly one row. Task 3 reads `plaid_env` from it.
 
-- [ ] **Step 1: Write the migration**
+- [x] **Step 1: Write the migration**
 
 ```sql
 -- The database's own identity.
@@ -192,7 +201,7 @@ on conflict (id) do nothing;
 alter table app_env enable row level security;
 ```
 
-- [ ] **Step 2: Correct the stale comment in migration 011**
+- [x] **Step 2: Correct the stale comment in migration 011**
 
 `db/migrations/011_manual_assets.sql:9` currently reads:
 
@@ -210,7 +219,7 @@ Replace that single line with:
 
 Editing an already-applied migration is safe here because only a comment changes — nothing re-runs, and a fresh database set up per `README.md:73` reads the corrected text.
 
-- [ ] **Step 3: Confirm the seed picks the right value BEFORE applying**
+- [x] **Step 3: Confirm the seed picks the right value BEFORE applying**
 
 Ask the user to run this **read-only** query in the Supabase SQL Editor and report what it returns:
 
@@ -227,7 +236,7 @@ Expected on the production database: `production`.
 
 **If it returns `sandbox`, STOP.** Applying the migration would label the production database as sandbox, and Task 5's guard would then block every real sync. Report to the user instead of proceeding.
 
-- [ ] **Step 4: Ask the user to apply the migration**
+- [x] **Step 4: Ask the user to apply the migration**
 
 There is no runner. Ask them to paste `db/migrations/017_app_env.sql` into the Supabase SQL Editor and run it, then confirm with:
 
@@ -237,7 +246,7 @@ select * from app_env;
 
 Expected: exactly one row, `id = true`, `plaid_env = production`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add db/migrations/017_app_env.sql db/migrations/011_manual_assets.sql
@@ -258,7 +267,7 @@ git commit -m "db: app_env records which Plaid environment owns this database (#
   - `class EnvMismatchError extends Error` — thrown **only** when the two environments disagree. Has `readonly appEnv: 'sandbox' | 'production'` and `readonly databaseEnv: 'sandbox' | 'production'`.
   - `async function assertEnvMatchesDatabase(): Promise<void>` — resolves when they match; throws `EnvMismatchError` on mismatch; throws a plain `Error` when `app_env` cannot be read or is missing.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Note the `vi.resetModules()` + dynamic `import()` pattern: the module memoises the database's environment, so each test needs a fresh module instance. This is why the module needs no test-only reset export.
 
@@ -341,12 +350,12 @@ describe('assertEnvMatchesDatabase', () => {
 })
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `npx vitest run tests/unit/app-env.test.ts`
 Expected: FAIL — cannot resolve `@/lib/app-env`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```ts
 import 'server-only'
@@ -397,12 +406,12 @@ export async function assertEnvMatchesDatabase(): Promise<void> {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `npx vitest run tests/unit/app-env.test.ts`
 Expected: PASS, 7 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add lib/app-env.ts tests/unit/app-env.test.ts
@@ -421,7 +430,7 @@ git commit -m "feat: assert the app and database share a Plaid environment (#23)
 - Consumes: `assertEnvMatchesDatabase` from `@/lib/app-env` (Task 3).
 - Produces: nothing new. `storeAccounts(householdId, plaidItemId, accessToken)` and `syncAndStore(item)` keep their existing signatures exactly.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 These assert the guard runs **before** any Plaid call — a guarded function must not spend a network round trip, or write anything, when it is pointed at the wrong database.
 
@@ -480,12 +489,12 @@ describe('ingest environment guard', () => {
 })
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `npx vitest run tests/unit/ingest-env-guard.test.ts`
 Expected: FAIL — the first two tests fail because `accountsGet` / `syncItem` **are** called; nothing stops them yet.
 
-- [ ] **Step 3: Add the guard**
+- [x] **Step 3: Add the guard**
 
 In `lib/ingest.ts`, add to the existing imports at the top of the file:
 
@@ -517,17 +526,17 @@ export async function syncAndStore(item: {
   const { added, modified, removed, next_cursor } = await syncItem(
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `npx vitest run tests/unit/ingest-env-guard.test.ts`
 Expected: PASS, 3 tests.
 
-- [ ] **Step 5: Run the whole suite — the existing ingest tests share this module**
+- [x] **Step 5: Run the whole suite — the existing ingest tests share this module**
 
 Run: `npm test -- --run`
 Expected: all pass. `tests/unit/ingest-reimbursable.test.ts` only exercises `transactionUpsertRow`, a pure function that never calls the guard, so it needs no change. **If it now fails, do not weaken the guard** — add `vi.mock('@/lib/app-env', ...)` to that file instead.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add lib/ingest.ts tests/unit/ingest-env-guard.test.ts
@@ -548,7 +557,7 @@ The one genuinely dangerous door. The guard must run **before** the `plaid_items
 - Consumes: `assertEnvMatchesDatabase`, `EnvMismatchError` from `@/lib/app-env` (Task 3).
 - Produces: nothing later tasks import.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -634,12 +643,12 @@ describe('POST /api/plaid/exchange-public-token environment guard', () => {
 })
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `npx vitest run tests/unit/exchange-public-token-env.test.ts`
 Expected: FAIL — no guard exists, so the route proceeds past it.
 
-- [ ] **Step 3: Add the guard to the route**
+- [x] **Step 3: Add the guard to the route**
 
 Add to the imports:
 
@@ -675,12 +684,12 @@ Then insert this immediately after `const productList = normalizeProducts(produc
   }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `npx vitest run tests/unit/exchange-public-token-env.test.ts`
 Expected: PASS, 3 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/api/plaid/exchange-public-token/route.ts tests/unit/exchange-public-token-env.test.ts
@@ -701,7 +710,7 @@ Closes the loose end migration 011 left as `-- Not filtered on yet.` — by guar
 - Consumes: `assertEnvMatchesDatabase`, `EnvMismatchError` from `@/lib/app-env` (Task 3).
 - Produces: nothing later tasks import.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```ts
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -783,12 +792,12 @@ describe('POST /api/manual-assets environment guard', () => {
 })
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `npx vitest run tests/unit/manual-assets-env.test.ts`
 Expected: FAIL — the first test gets 200 and `upsert` is called.
 
-- [ ] **Step 3: Add the guard to the route**
+- [x] **Step 3: Add the guard to the route**
 
 Add to the imports:
 
@@ -818,12 +827,12 @@ Then insert immediately after the `if (!m) return ...` household check, before t
   }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `npx vitest run tests/unit/manual-assets-env.test.ts`
 Expected: PASS, 3 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/api/manual-assets/route.ts tests/unit/manual-assets-env.test.ts
@@ -841,7 +850,7 @@ git commit -m "feat: refuse manual-asset writes across environments (#23)"
 - Consumes: everything above.
 - Produces: a pull request closing #23.
 
-- [ ] **Step 1: Run every check**
+- [x] **Step 1: Run every check**
 
 ```bash
 npm test -- --run
@@ -852,7 +861,7 @@ npm run check:secrets
 
 Expected: all four green. Baseline was 168 tests in 20 files; this plan adds 16 tests in 4 files, so expect **184 tests in 24 files**. A different total means a test was silently dropped — investigate before continuing.
 
-- [ ] **Step 2: Prove the guard works against the real database**
+- [x] **Step 2: Prove the guard works against the real database**
 
 Ask the user to run the dev server with its normal sandbox settings, pointed at the production Supabase project (`npm run dev`), and attempt to link a bank from Settings.
 
@@ -860,7 +869,7 @@ Expected: the link is refused with the 409 message, and no new row appears in `p
 
 Then ask them to confirm the production deployment is unaffected: on `every-dollar-counts.vercel.app`, press **Refresh** on the dashboard and confirm transactions still sync. **This is the check that matters most** — it proves the seed value from Task 2 was right and that real syncing still works.
 
-- [ ] **Step 3: Update the cutover runbook**
+- [x] **Step 3: Update the cutover runbook**
 
 In `docs/plaid-production-cutover.md`, find the standing rule *"never link a bank from a local or Preview session against the live database"* and append:
 
@@ -871,7 +880,7 @@ A local session pointed at the production database now gets a 409 when linking a
 silently writing sandbox accounts into real net worth.
 ```
 
-- [ ] **Step 4: Commit and open the pull request**
+- [x] **Step 4: Commit and open the pull request**
 
 ```bash
 git add docs/plaid-production-cutover.md

@@ -77,5 +77,8 @@ describe('POST /api/plaid/exchange-public-token environment guard', () => {
     const res = await POST(linkRequest())
     expect(res.status).toBe(500)
     expect(insert).not.toHaveBeenCalled()
+    // The 500 branch is the one where a leaked exchange spends an unrefundable Plaid slot, so
+    // assert the exchange never happened here too — not just on the 409.
+    expect(itemPublicTokenExchange).not.toHaveBeenCalled()
   })
 })
