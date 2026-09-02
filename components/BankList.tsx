@@ -42,7 +42,17 @@ function statusLine(item: ItemSummary) {
   }
 }
 
-export function BankList({ items }: { items: ItemSummary[] }) {
+export function BankList({
+  items,
+  slotsUsed = null,
+  lifetimeSlots,
+}: {
+  items: ItemSummary[]
+  // How many of the lifetime allowance have been spent, or null when it cannot be established
+  // (#51). Null keeps the old wording rather than printing a number we do not stand behind.
+  slotsUsed?: number | null
+  lifetimeSlots: number
+}) {
   const router = useRouter()
   const [pendingRemove, setPendingRemove] = useState<ItemSummary | null>(null)
   const [busy, setBusy] = useState(false)
@@ -71,13 +81,23 @@ export function BankList({ items }: { items: ItemSummary[] }) {
   return (
     <>
       {error && <p className="pb-2 text-sm text-coral">{error}</p>}
-      {/* The slot budget has to be visible, not remembered: 10 lifetime, never refunded.
-          Deliberately NOT phrased as "N of 10 used" — disconnecting deletes the row and would make
-          that number drop, which is exactly the opposite of the truth (the slot stays spent). So we
-          show the current count and state the lifetime rule separately. */}
+      {/* "N of 10 used" was deliberately NOT printed here for a long time, and the reason was
+          sound: the only number available was the count of LIVE banks, which falls on a disconnect
+          — the opposite of the truth, since the slot stays spent. plaid_slot_ledger now survives
+          the delete, so the honest number exists and can be shown (#51). Where it cannot be
+          established the old wording stands rather than a figure we do not stand behind. */}
       <p className="pb-2 text-xs text-muted">
-        {items.length} bank {items.length === 1 ? 'connection' : 'connections'} active. You get 10
-        over the lifetime of the account, and disconnecting one does not free it up.
+        {items.length} bank {items.length === 1 ? 'connection' : 'connections'} active.{' '}
+        {slotsUsed == null ? (
+          <>You get {lifetimeSlots} over the lifetime of the account, and disconnecting one does not free it up.</>
+        ) : (
+          <>
+            <span className={slotsUsed >= lifetimeSlots ? 'font-medium text-coral' : slotsUsed >= lifetimeSlots - 2 ? 'font-medium text-amber' : undefined}>
+              {slotsUsed} of {lifetimeSlots} lifetime connections used.
+            </span>{' '}
+            Disconnecting one does not give it back.
+          </>
+        )}
       </p>
 
       {items.length === 0 ? (
