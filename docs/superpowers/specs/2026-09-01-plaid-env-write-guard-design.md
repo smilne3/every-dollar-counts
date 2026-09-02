@@ -52,13 +52,18 @@ create table if not exists app_env (
 );
 ```
 
-Seeded from the newest `plaid_items` row, so production says `production` and a fresh dev database says `sandbox`, with nothing hardcoded and nothing to configure:
+Seeded from the linked banks, so a database holding real banks says `production` and a fresh dev database says `sandbox`, with nothing hardcoded and nothing to configure:
 
 ```sql
 insert into app_env (id, plaid_env)
 values (true, coalesce(
-  -- nulls last matters: created_at is nullable, and Postgres sorts NULLS FIRST on DESC.
-  (select plaid_env from plaid_items order by created_at desc nulls last, id desc limit 1),
+  -- Any PRODUCTION bank wins, not simply the newest link. In the exact state this table exists
+  -- to detect — a sandbox bank in the production database — the newest row is the sandbox one,
+  -- so most-recent-wins would let the contamination declare the database 'sandbox' and lock
+  -- every guarded write, Refresh included. This ordering can only ever refuse sandbox writes.
+  -- nulls last: created_at is nullable, and Postgres sorts NULLS FIRST on DESC.
+  (select plaid_env from plaid_items
+   order by (plaid_env = 'production') desc, created_at desc nulls last, id desc limit 1),
   'sandbox'))
 on conflict (id) do nothing;
 ```
