@@ -2,7 +2,6 @@ import { money } from '@/lib/format'
 import { isCreditCardPayment } from '@/lib/categories'
 import { CategoryPicker } from './CategoryPicker'
 import { ReimbursableCheckbox } from './ReimbursableCheckbox'
-import { RowMenu } from './RowMenu'
 import { ReimbursableEditor } from './ReimbursableEditor'
 
 type Txn = {
@@ -36,7 +35,7 @@ export function TransactionRow({
   const share = Math.max(0, Math.abs(t.amount) - marked)
   const label = t.merchant_name ?? t.name
   // Guards #31, same as ReimbursableCheckbox: the route refuses credit-card payments, so the partial
-  // editor in the row menu must not be offered on one either — reuse the one predicate rather than
+  // editor must not be offered on one either — reuse the one predicate rather than
   // letting a second copy drift from it.
   const isCC = isCreditCardPayment({ pfc_detailed: t.pfc_detailed, user_category: t.user_category })
 
@@ -89,17 +88,20 @@ export function TransactionRow({
           userCategory={t.user_category}
         />
       </td>
+      {/* The editor owns its own trigger now. A menu wrapper made sense when it might hold several
+          actions; with exactly one it was ceremony, and on a credit-card payment it opened onto an
+          empty panel. Nothing renders here for those rows instead. */}
       <td className="px-4 py-3 text-right">
-        <RowMenu label={label ?? 'transaction'}>
-          {!isCC && (
-            <ReimbursableEditor
-              transactionId={t.id}
-              amount={t.amount}
-              reimbursableAmount={t.reimbursable_amount}
-              note={t.reimbursable_note}
-            />
-          )}
-        </RowMenu>
+        {!isCC && (
+          <ReimbursableEditor
+            transactionId={t.id}
+            amount={t.amount}
+            reimbursableAmount={t.reimbursable_amount}
+            note={t.reimbursable_note}
+            label={label ?? 'transaction'}
+            date={t.date}
+          />
+        )}
       </td>
     </tr>
   )

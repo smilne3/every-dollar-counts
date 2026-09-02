@@ -12,8 +12,8 @@ const txn = {
   name: 'JOE S DEN',
   merchant_name: 'Joe S Den',
   amount: 100,
-  user_category: null,
-  pfc_detailed: null,
+  user_category: null as string | null,
+  pfc_detailed: null as string | null,
   reimbursable_amount: null as number | null,
   reimbursable_note: null as string | null,
 }
@@ -57,4 +57,17 @@ describe('TransactionRow amount cell', () => {
     expect(line.className).toContain('invisible')
     expect(line.className.split(/\s+/)).not.toContain('hidden')
   })
+
+  // The route refuses credit-card payments (#31), so the editor must not be offered on one. The
+  // guard moved out of RowMenu and into this cell, and nothing covered it.
+  it('offers no editor on a credit-card payment', () => {
+    renderRow({ pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' })
+    expect(screen.queryByRole('button', { name: /partial reimbursable amount/ })).toBeNull()
+  })
+
+  it('offers the editor on an ordinary charge', () => {
+    renderRow()
+    expect(screen.getByRole('button', { name: /partial reimbursable amount/ })).toBeTruthy()
+  })
+
 })
