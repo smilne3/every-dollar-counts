@@ -10,7 +10,7 @@ const txn = {
   id: 't1',
   date: '2026-08-29',
   name: 'JOE S DEN',
-  merchant_name: 'Joe S Den',
+  merchant_name: 'Joe S Den' as string | null,
   amount: 100,
   user_category: null as string | null,
   pfc_detailed: null as string | null,
@@ -68,6 +68,28 @@ describe('TransactionRow amount cell', () => {
   it('offers the editor on an ordinary charge', () => {
     renderRow()
     expect(screen.getByRole('button', { name: /partial reimbursable amount/ })).toBeTruthy()
+  })
+
+
+  // A card payment is real on the statement but is your own money moving between your own accounts.
+  // Both legs are already kept out of every total (#31); the leg that credits the card was still
+  // painted emerald — this table's colour for money arriving — so $7,866.69 read as income.
+  it('reads a credit-card payment as a transfer, not as income', () => {
+    const { container } = renderRow({
+      amount: -7866.69, // negative: money INTO the card, the leg that looked like income
+      pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT',
+      name: 'CAPITAL ONE AUTOPAY PYMT',
+      merchant_name: null,
+    })
+    const amountCell = container.querySelectorAll('td')[3]
+    expect(amountCell.className).not.toContain('text-emerald')
+    expect(amountCell.className).toContain('text-muted')
+    expect(screen.getByText('moves between your accounts')).toBeTruthy()
+  })
+
+  it('still paints ordinary income emerald', () => {
+    const { container } = renderRow({ amount: -2772.63, pfc_detailed: 'INCOME_WAGES' })
+    expect(container.querySelectorAll('td')[3].className).toContain('text-emerald')
   })
 
 })
