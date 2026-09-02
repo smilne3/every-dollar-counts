@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { money } from '@/lib/format'
 import { inputClass, labelClass } from './ui/styles'
@@ -40,6 +40,7 @@ export function ReimbursableEditor({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const amountRef = useRef<HTMLInputElement>(null)
+  const limitId = useId()
 
   function openEditor() {
     // Re-seed from what the server currently holds. The dialog can be opened again after a save or
@@ -81,6 +82,11 @@ export function ReimbursableEditor({
 
   const typed = Number(value)
   const amountIsUsable = value.trim() !== '' && Number.isFinite(typed) && typed >= 0 && typed <= full
+  // Round the way the route rounds (lib/reimbursements.ts clamps to 2dp) BEFORE deciding whether
+  // this is really a clear. Without it 0.004 reads as a mark here and rounds to nothing there — the
+  // amount comes back null while the note is written anyway, which is exactly the orphaned note
+  // this file refuses to create.
+  const rounded = Math.round(typed * 100) / 100
 
   return (
     <>
@@ -88,20 +94,21 @@ export function ReimbursableEditor({
         type="button"
         onClick={openEditor}
         aria-label={`Set a partial reimbursable amount for ${label}`}
-        className="cursor-pointer rounded-lg px-1 text-xs font-medium text-muted transition-colors hover:text-ink focus-visible:ring-2 focus-visible:ring-emerald/40 focus-visible:outline-none"
+        className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-lg text-xs font-medium text-muted transition-colors hover:text-ink focus-visible:ring-2 focus-visible:ring-emerald/40 focus-visible:outline-none"
       >
         ⋮
       </button>
 
       <Dialog
         open={open}
-        title={label}
+        title={`Reimbursable — ${label}`}
         initialFocusRef={amountRef}
         onCancel={() => setOpen(false)}
         footer={
           <>
-            {/* Only offered when there is a mark to remove. "Clear" on an unmarked charge would be
-                a control that does nothing. */}
+            {/* Only offered when there is a mark to remove, and named for the state it leaves
+                behind. "Clear" beside Cancel and Save reads as "clear the form", and "Remove"
+                sitting beside a transaction reads as deleting the transaction. */}
             {marked > 0 && (
               <Button
                 type="button"
@@ -111,7 +118,7 @@ export function ReimbursableEditor({
                 onClick={() => save(null)}
                 disabled={busy}
               >
-                Clear
+                Not reimbursable
               </Button>
             )}
             <Button
@@ -128,7 +135,7 @@ export function ReimbursableEditor({
               size="sm"
               // Typing 0 means the same thing as clearing it, so send null rather than a zero mark
               // the route would have to interpret.
-              onClick={() => save(typed === 0 ? null : typed)}
+              onClick={() => save(rounded === 0 ? null : rounded)}
               disabled={busy || !amountIsUsable}
             >
               Save
@@ -151,9 +158,17 @@ export function ReimbursableEditor({
               max={full}
               value={value}
               onChange={(e) => setValue(e.target.value)}
+              aria-describedby={limitId}
               className={`${inputClass} mt-1`}
             />
           </label>
+          {/* Outside the <label> on purpose: inside it, this text joins the field's accessible name
+              and the label stops being the label. Save greys out above this limit and there is no
+              <form>, so the browser's own max= message never fires — say it rather than leaving a
+              dead button unexplained. */}
+          <p id={limitId} className="-mt-2 text-xs text-faint">
+            Up to {money(full)}
+          </p>
 
           <label className="block">
             <span className={labelClass}>Note (optional)</span>
@@ -165,6 +180,10 @@ export function ReimbursableEditor({
               className={`${inputClass} mt-1`}
             />
           </label>
+
+          {marked > 0 && (note ?? '') !== '' && (
+            <p className="text-xs text-faint">Marking it not reimbursable also removes the note.</p>
+          )}
 
           {error && (
             <p role="alert" className="text-sm text-coral">

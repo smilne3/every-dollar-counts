@@ -55,20 +55,20 @@ describe('ReimbursableEditor', () => {
   it('names the charge it is editing', () => {
     render(<ReimbursableEditor {...props} />)
     openEditor()
-    expect(screen.getByRole('heading', { name: 'Joe S Den' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: /Joe S Den/ })).toBeTruthy()
     expect(screen.getByText(/on 2026-08-29/)).toBeTruthy()
   })
 
-  // "Clear" on an unmarked charge is a control that does nothing.
-  it('offers Clear only when there is a mark to remove', () => {
+  // A remove action on an unmarked charge is a control that does nothing.
+  it('offers the remove action only when there is a mark to remove', () => {
     render(<ReimbursableEditor {...props} />)
     openEditor()
-    expect(screen.queryByRole('button', { name: 'Clear' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Not reimbursable' })).toBeNull()
     cleanup()
 
     render(<ReimbursableEditor {...props} reimbursableAmount={40} />)
     openEditor()
-    expect(screen.getByRole('button', { name: 'Clear' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Not reimbursable' })).toBeTruthy()
   })
 
   it('saves the typed amount and note', async () => {
@@ -131,4 +131,35 @@ describe('ReimbursableEditor', () => {
     expect((screen.getByLabelText('How much is coming back?') as HTMLInputElement).value).toBe('40')
     expect((screen.getByLabelText('Note (optional)') as HTMLInputElement).value).toBe('Dave')
   })
+
+  // The route rounds to 2dp, so 0.004 becomes nothing there. If the client still called it a mark
+  // it would send a note alongside an amount that rounds away — leaving reimbursable_note set with
+  // reimbursable_amount null, the orphaned state both this editor and the checkbox refuse to make.
+  it('treats a sub-cent amount as no mark at all, note included', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({}) }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<ReimbursableEditor {...props} reimbursableAmount={40} note="Dave" />)
+    openEditor()
+
+    fireEvent.change(screen.getByLabelText('How much is coming back?'), { target: { value: '0.004' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string)
+    expect(body.amount).toBeNull()
+    expect(body.note).toBeNull()
+  })
+
+  it('says the limit rather than leaving a disabled Save unexplained', () => {
+    render(<ReimbursableEditor {...props} />)
+    openEditor()
+    expect(screen.getByText(/Up to \$100\.00/)).toBeTruthy()
+  })
+
+  it('warns that removing the mark takes the note with it', () => {
+    render(<ReimbursableEditor {...props} reimbursableAmount={40} note="Dave" />)
+    openEditor()
+    expect(screen.getByText(/also removes the note/)).toBeTruthy()
+  })
+
 })

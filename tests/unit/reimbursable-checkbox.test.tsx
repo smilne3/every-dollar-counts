@@ -117,7 +117,7 @@ describe('ReimbursableCheckbox', () => {
   })
 
 
-  // The optimistic tick must not outlive its click. The row menu's editor writes the same field
+  // The optimistic tick must not outlive its click. The ⋮ editor writes the same field
   // through the same route, so without clearing on a prop change this box would keep claiming the
   // whole charge is coming back while the amount cell beside it showed a partial share (#50).
   it('drops the optimistic tick once the server value changes underneath it', async () => {

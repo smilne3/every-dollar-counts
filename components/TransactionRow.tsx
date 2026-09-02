@@ -35,7 +35,7 @@ export function TransactionRow({
   const share = Math.max(0, Math.abs(t.amount) - marked)
   const label = t.merchant_name ?? t.name
   // Guards #31, same as ReimbursableCheckbox: the route refuses credit-card payments, so the partial
-  // editor in the row menu must not be offered on one either — reuse the one predicate rather than
+  // editor must not be offered on one either — reuse the one predicate rather than
   // letting a second copy drift from it.
   const isCC = isCreditCardPayment({ pfc_detailed: t.pfc_detailed, user_category: t.user_category })
 

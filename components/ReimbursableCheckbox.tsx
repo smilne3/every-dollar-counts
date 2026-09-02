@@ -32,7 +32,7 @@ export function ReimbursableCheckbox({
   // refreshed prop already agrees with it.
   const [optimistic, setOptimistic] = useState<number | null>(null)
   // Drop the optimistic value the moment the server's own value changes. Without this it outlives
-  // its click: tick a $100 dinner here, then set it to $40 in the row menu's editor, and this box
+  // its click: tick a $100 dinner here, then set it to $40 in the ⋮ editor, and this box
   // would still read "all of it is coming back" beside an amount cell saying "your share -$60.00" —
   // the row contradicting itself. React's documented way to adjust state when a prop changes.
   const [seen, setSeen] = useState(reimbursableAmount)
@@ -79,8 +79,8 @@ export function ReimbursableCheckbox({
     }
   }
 
-  // A partial mark has no honest tick state — see the test. Show what is marked; the editor in the
-  // row menu is where it changes.
+  // A partial mark has no honest tick state — see the test. Show what is marked; the ⋮ editor is
+  // where it changes.
   if (partial) {
     return (
       <span className="text-xs font-medium text-emerald" title={note ?? undefined}>
