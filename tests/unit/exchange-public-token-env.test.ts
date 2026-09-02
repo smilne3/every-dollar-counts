@@ -44,6 +44,9 @@ vi.mock('@/lib/supabase/server', () => ({
 }))
 vi.mock('@/lib/crypto', () => ({ encrypt: (s: string) => s }))
 vi.mock('@/lib/ingest', () => ({ storeAccounts, syncAndStore }))
+// Slot bookkeeping (#51) is not what this suite is about, and it writes through the same
+// supabaseAdmin stub. Mocked out so the `insert` spy still means "a plaid_items row was created".
+vi.mock('@/lib/plaid-slots', () => ({ recordSlotUsed: vi.fn(), LIFETIME_SLOTS: 10 }))
 
 // Keep the real EnvMismatchError so the route's `instanceof` branch is exercised for real; replace
 // only the assertion the test drives.

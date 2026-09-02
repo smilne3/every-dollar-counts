@@ -5,6 +5,7 @@ import { encrypt } from '@/lib/crypto'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { storeAccounts, syncAndStore } from '@/lib/ingest'
+import { recordSlotUsed } from '@/lib/plaid-slots'
 import { shouldSyncTransactions } from '@/lib/sync-policy'
 import { assertEnvMatchesDatabase, envGuardResponse } from '@/lib/app-env'
 
@@ -52,6 +53,11 @@ export async function POST(req: Request) {
       { status: 502 }
     )
   }
+
+  // Record the spent connection HERE, before anything else can fail. The ten are consumed by Link
+  // creating the Item, not by us storing it, and /item/remove never gives one back — so a link that
+  // dies on the next line still cost one, and the ledger has to say so (#51). Never throws.
+  await recordSlotUsed({ householdId: household_id, itemId, institutionName: institution_name ?? null })
 
   // Before the plaid_items insert, so no wrong-environment bank row can be created (#23) — and
   // deliberately AFTER the exchange above. The Item already exists at Plaid by then, so refusing

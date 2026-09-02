@@ -3,6 +3,7 @@ import { InvitePartnerForm } from '@/components/InvitePartnerForm'
 import { LinkButton } from '@/components/LinkButton'
 import { BankList } from '@/components/BankList'
 import { listItemsForHousehold } from '@/lib/plaid-items'
+import { countSlotsUsed, LIFETIME_SLOTS } from '@/lib/plaid-slots'
 import { HomeValueCard } from '@/components/HomeValueCard'
 import { listManualAssets } from '@/lib/manual-assets'
 import { CategoryManager, type CategoryUsage } from '@/components/CategoryManager'
@@ -17,6 +18,9 @@ export default async function SettingsPage() {
   const household = households?.[0]
   const { count } = await supabase.from('accounts').select('id', { count: 'exact', head: true })
   const items = household ? await listItemsForHousehold(household.id) : []
+  // Null when it cannot be established — BankList falls back to the old wording rather than
+  // printing a number nobody stands behind.
+  const slotsUsed = household ? await countSlotsUsed(household.id) : null
   const manualAssets = household ? await listManualAssets(household.id) : []
   const home = manualAssets.find((a) => a.name === 'Home') ?? null
   const { data: categories } = await supabase
@@ -65,7 +69,7 @@ export default async function SettingsPage() {
         <p className="text-sm text-muted">
           {count ? `${count} account(s) connected.` : 'No banks connected yet.'}
         </p>
-        <BankList items={items} />
+        <BankList items={items} slotsUsed={slotsUsed} lifetimeSlots={LIFETIME_SLOTS} />
         <LinkButton />
       </Card>
 
