@@ -162,4 +162,18 @@ describe('ReimbursableEditor', () => {
     expect(screen.getByText(/also removes the note/)).toBeTruthy()
   })
 
+
+  // Found only by looking at it: the trigger lives in a `text-right` cell, and text-align inherits
+  // straight into the dialog — title, sub-line and both labels were flush right. Every test passed
+  // and it looked wrong, so this pins the alignment the shell is responsible for.
+  it('reads left-aligned even though its trigger sits in a right-aligned cell', () => {
+    const { container } = render(
+      <div className="text-right">
+        <ReimbursableEditor {...props} />
+      </div>
+    )
+    openEditor()
+    expect(container.querySelector('dialog > div')!.className).toContain('text-left')
+  })
+
 })

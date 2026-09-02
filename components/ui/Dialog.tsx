@@ -58,7 +58,11 @@ export function Dialog({
       }}
       className="m-auto w-[min(28rem,calc(100vw-2rem))] rounded-card border border-line bg-surface p-0 text-ink shadow-lg backdrop:bg-ink/40"
     >
-      <div className="p-5">
+      {/* text-left explicitly: a dialog opened from a right-aligned table cell inherits that cell's
+          text-align straight through, which put the title, the sub-line and every field label
+          against the right edge (#49). Where a dialog is opened from has nothing to do with how it
+          should read, so the shell pins it rather than each caller remembering to. */}
+      <div className="p-5 text-left">
         <h2 id={titleId} className="text-base font-semibold text-ink">
           {title}
         </h2>
