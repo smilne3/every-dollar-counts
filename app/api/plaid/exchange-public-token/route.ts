@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { storeAccounts, syncAndStore } from '@/lib/ingest'
 import { shouldSyncTransactions } from '@/lib/sync-policy'
-import { assertEnvMatchesDatabase, EnvMismatchError } from '@/lib/app-env'
+import { assertEnvMatchesDatabase, envGuardResponse } from '@/lib/app-env'
 
 // Only the three product strings we support; default to transactions.
 function normalizeProducts(input: unknown): string[] {
@@ -36,28 +36,24 @@ export async function POST(req: Request) {
   const household_id = membership.household_id
   const productList = normalizeProducts(products)
 
-  // Before the token exchange AND before the plaid_items insert. Linking is the only path that
-  // can put a wrong-environment bank into this database (#23), and a guard that fired later
-  // would leave an orphaned row behind and spend one of ten unrefundable Plaid slots.
+  // Before the plaid_items insert, so no wrong-environment bank row can be created (#23).
+  //
+  // BE HONEST ABOUT WHAT THIS CANNOT UNDO: the Item already exists at Plaid by the time this route
+  // runs (see below), so refusing here does NOT leave the slot unspent — it leaves an Item we can
+  // never remove, because /item/remove needs the access token this refusal declines to fetch. The
+  // guard that actually prevents that is in create-link-token: it refuses BEFORE Link opens, so
+  // the user never reaches their bank and no Item is created. This one is the backstop for a
+  // database that changed identity mid-flow.
   try {
     await assertEnvMatchesDatabase()
   } catch (e) {
-    if (e instanceof EnvMismatchError) {
-      console.error('[plaid] refusing to link across environments', e.message)
-      return NextResponse.json(
-        {
-          error:
-            'This app is pointed at a database from a different Plaid environment, so linking a ' +
-            'bank was refused. Nothing was connected.',
-        },
-        { status: 409 }
-      )
-    }
-    console.error('[plaid] environment guard could not run', e)
-    return NextResponse.json(
-      { error: 'Could not verify which database this is, so nothing was connected.' },
-      { status: 500 }
-    )
+    return envGuardResponse(e, {
+      tag: '[plaid]',
+      mismatch:
+        'This app is pointed at a database from a different Plaid environment, so linking a ' +
+        'bank was refused. Nothing was connected.',
+      unreadable: 'Could not verify which database this is, so nothing was connected.',
+    })
   }
 
   // THE ITEM ALREADY EXISTS AT PLAID by the time this route runs — Link created it the moment the

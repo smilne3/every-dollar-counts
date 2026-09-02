@@ -3,11 +3,22 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // vi.hoisted for the same reason as tests/unit/ingest-env-guard.test.ts: the static route import
 // below is linked before this file's body runs, firing every mock factory, so a factory closing
 // over a plain top-level const throws "Cannot access 'x' before initialization".
-const { insert, itemPublicTokenExchange, getUser, assertEnvMatchesDatabase } = vi.hoisted(() => ({
+const {
+  insert,
+  insertSingle,
+  itemPublicTokenExchange,
+  getUser,
+  assertEnvMatchesDatabase,
+  storeAccounts,
+  syncAndStore,
+} = vi.hoisted(() => ({
   insert: vi.fn(),
+  insertSingle: vi.fn(),
   itemPublicTokenExchange: vi.fn(),
   getUser: vi.fn(),
   assertEnvMatchesDatabase: vi.fn(),
+  storeAccounts: vi.fn(),
+  syncAndStore: vi.fn(),
 }))
 
 vi.mock('@/lib/supabase/admin', () => ({
@@ -30,7 +41,7 @@ vi.mock('@/lib/supabase/server', () => ({
   }),
 }))
 vi.mock('@/lib/crypto', () => ({ encrypt: (s: string) => s }))
-vi.mock('@/lib/ingest', () => ({ storeAccounts: vi.fn(), syncAndStore: vi.fn() }))
+vi.mock('@/lib/ingest', () => ({ storeAccounts, syncAndStore }))
 
 // Keep the real EnvMismatchError so the route's `instanceof` branch is exercised for real; replace
 // only the assertion the test drives.
@@ -54,9 +65,19 @@ function linkRequest() {
 describe('POST /api/plaid/exchange-public-token environment guard', () => {
   beforeEach(() => {
     insert.mockReset()
+    insertSingle.mockReset()
     itemPublicTokenExchange.mockReset()
     assertEnvMatchesDatabase.mockReset()
+    storeAccounts.mockReset()
+    syncAndStore.mockReset()
     getUser.mockResolvedValue({ data: { user: { id: 'user-1' } } })
+    insert.mockReturnValue({ select: () => ({ single: insertSingle }) })
+    insertSingle.mockResolvedValue({ data: { id: 'item-row-1' }, error: null })
+    itemPublicTokenExchange.mockResolvedValue({
+      data: { access_token: 'access-sandbox-1', item_id: 'item-1' },
+    })
+    storeAccounts.mockResolvedValue(undefined)
+    syncAndStore.mockResolvedValue({ added: 2, modified: 0, removed: 0 })
   })
 
   it('answers 409 when pointed at another environment’s database', async () => {
@@ -77,8 +98,22 @@ describe('POST /api/plaid/exchange-public-token environment guard', () => {
     const res = await POST(linkRequest())
     expect(res.status).toBe(500)
     expect(insert).not.toHaveBeenCalled()
-    // The 500 branch is the one where a leaked exchange spends an unrefundable Plaid slot, so
-    // assert the exchange never happened here too — not just on the 409.
+    // NOTE what refusing here does and does not buy. The Item already exists at Plaid — Link
+    // created it when the user finished at their bank — so declining the exchange does not save
+    // the slot; it forfeits the access token that /item/remove would have needed. The guard that
+    // actually prevents the cost runs in create-link-token, before Link opens; see
+    // tests/unit/create-link-token-env.test.ts.
     expect(itemPublicTokenExchange).not.toHaveBeenCalled()
+  })
+
+  // The match case. Without it, a refactor that made the guard reject unconditionally would leave
+  // this suite green on the one route where that means no bank can ever be connected.
+  it('links normally when the environments match', async () => {
+    assertEnvMatchesDatabase.mockResolvedValue(undefined)
+    const res = await POST(linkRequest())
+    expect(res.status).toBe(200)
+    expect(itemPublicTokenExchange).toHaveBeenCalledOnce()
+    expect(insert).toHaveBeenCalledOnce()
+    expect(await res.json()).toMatchObject({ ok: true, added: 2 })
   })
 })

@@ -6,6 +6,7 @@ import { plaidEnv } from '@/lib/plaid'
 import { plaidLogSafe } from '@/lib/plaid-errors'
 import { storeAccounts, syncAndStore } from '@/lib/ingest'
 import { shouldSyncTransactions } from '@/lib/sync-policy'
+import { assertEnvMatchesDatabase, envGuardResponse } from '@/lib/app-env'
 
 // Called after Link's update mode succeeds: the item's login is fixed and its access token is
 // unchanged, so clear the broken flag and pull whatever we missed while it was down.
@@ -40,6 +41,21 @@ export async function POST(req: Request) {
       { error: 'That bank was linked in a different environment and cannot be reconnected here.' },
       { status: 409 }
     )
+  }
+
+  // BEFORE the status write below, not inside the sync that follows it. storeAccounts/syncAndStore
+  // now assert this themselves (#23), but by then this route has already cleared status to 'ok' —
+  // and its catch answers `{ ok: true, warning: … }`. So without this, an app_env blip would mark a
+  // genuinely broken bank healthy and tell the user the reconnect worked. Refuse before the write.
+  try {
+    await assertEnvMatchesDatabase()
+  } catch (e) {
+    return envGuardResponse(e, {
+      tag: '[plaid]',
+      mismatch:
+        'This app is pointed at a database from a different Plaid environment. Nothing was changed.',
+      unreadable: 'Could not verify which database this is, so nothing was changed.',
+    })
   }
 
   // Clear the flag first so the item is eligible for the sync below.

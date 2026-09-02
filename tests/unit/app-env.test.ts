@@ -9,7 +9,7 @@ vi.mock('@/lib/supabase/admin', () => ({
 }))
 
 // plaidEnv is a module constant frozen at import time, so the app side of the comparison has to
-// be mocked to test a mismatch. vitest.config.ts pins the real one to 'sandbox'.
+// be mocked to test a mismatch. vitest.config.mts pins the real one to 'sandbox'.
 vi.mock('@/lib/plaid', () => ({ plaidEnv: 'sandbox' }))
 
 async function freshModule() {
@@ -60,6 +60,23 @@ describe('assertEnvMatchesDatabase', () => {
     await assertEnvMatchesDatabase()
     await assertEnvMatchesDatabase()
     await assertEnvMatchesDatabase()
+    expect(maybeSingle).toHaveBeenCalledTimes(1)
+  })
+
+  // A cold start can serve several guarded requests at once. Without in-flight deduplication each
+  // one issues its own app_env query before the first has a value to cache.
+  it('shares one read across calls that start before it resolves', async () => {
+    let release: (v: unknown) => void = () => {}
+    maybeSingle.mockReturnValue(
+      new Promise((r) => {
+        release = r
+      })
+    )
+    const { assertEnvMatchesDatabase } = await freshModule()
+    const first = assertEnvMatchesDatabase()
+    const second = assertEnvMatchesDatabase()
+    release({ data: { plaid_env: 'sandbox' }, error: null })
+    await Promise.all([first, second])
     expect(maybeSingle).toHaveBeenCalledTimes(1)
   })
 
