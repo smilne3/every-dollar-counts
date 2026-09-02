@@ -75,14 +75,24 @@ It is applied at every place this app writes household financial data:
 
 | Call site | On mismatch |
 |---|---|
-| `app/api/plaid/exchange-public-token/route.ts` — **before** the `plaid_items` insert | `409` with a plain-English reason |
+| `app/api/plaid/create-link-token/route.ts` — **add mode only**, before the link token is issued | `409` with a plain-English reason. Link never opens, so no Item is created and no slot is spent |
+| `app/api/plaid/exchange-public-token/route.ts` — after the token exchange, **before** the `plaid_items` insert | `409`, and the Item just exchanged is removed at Plaid |
+| `app/api/plaid/reconnect/route.ts` — before the `status: 'ok'` write | `409` |
 | `lib/ingest.ts` → `storeAccounts` | Throws |
 | `lib/ingest.ts` → `syncAndStore` | Throws |
 | `app/api/manual-assets/route.ts` — the POST | `409` |
 
+`create-link-token`'s **update mode is deliberately exempt.** Reopening an existing item's login creates no Item, and that branch already refuses on the item's own `plaid_env`, so it is covered without this guard. Failing it closed on an `app_env` blip would only block reconnects for nothing.
+
+`reconnect` earns an assertion of its own even though `storeAccounts`/`syncAndStore` already carry one, because it clears `status` to `'ok'` *before* calling them and its catch answers `{ ok: true, warning: … }` — so without it an `app_env` blip would mark a genuinely broken bank healthy and tell the user the reconnect worked.
+
 `scripts/seed-sandbox-bank.mjs` writes the same three tables, but it is a dev-only tool run by hand outside the app, so it cannot import `lib/app-env.ts`. It carries the same refusal inline: it reads `app_env` itself and exits non-zero unless the database says `sandbox`, failing closed on a missing or unreadable row exactly as the library does.
 
-Checking *before* the `plaid_items` insert matters: a guard that fired later would leave an orphaned bank row behind. The two `ingest.ts` assertions are backstops — the sync, webhook and reconnect paths are already safe — so that a future write path cannot quietly reopen this.
+Checking *before* the `plaid_items` insert matters: a guard that fired later would leave an orphaned bank row behind.
+
+**In `exchange-public-token` the guard sits *after* the token exchange, and that is deliberate.** By the time that route runs the Item already exists at Plaid — Link created it the moment the user finished at their bank — so refusing earlier does not leave the slot unspent. It only forfeits the one access token `/item/remove` could ever use, leaving a live authorization against a real bank login that this app can never revoke. Refusing after the exchange costs the same slot and hands back a token we *can* act on, so that path removes the Item at Plaid before answering, exactly as the insert-failure path beside it already did. The guard that genuinely prevents the cost is the `create-link-token` one, which refuses before Link ever opens.
+
+The two `ingest.ts` assertions are backstops — the sync and webhook paths are already environment-filtered — so that a future write path cannot quietly reopen this.
 
 **Caching.** The value cannot change under a running process, so it is read once and memoised. A *failed* read is never cached — otherwise one transient blip would poison the process for its whole life, and the fail-closed behaviour below would turn a moment's trouble into an outage.
 
@@ -104,7 +114,9 @@ Step one of implementation is therefore a **read-only** check confirming the liv
 | App environment differs | Throws; nothing written |
 | `app_env` row missing | Throws (fails closed) — *not* "assume it's fine" |
 | Read of `app_env` fails, then succeeds | Second call retries and succeeds — the failure was not cached |
-| Bank link from a mismatched environment | `409`, and **no `plaid_items` row created** |
+| Link token requested from a mismatched environment (add mode) | `409`, and no link token issued — Link never opens |
+| Bank link from a mismatched environment | `409`, **no `plaid_items` row created**, and the exchanged Item removed at Plaid |
+| That removal itself fails | Still `409`; the `item_id` is logged so it can be removed by hand |
 | Manual asset POST from a mismatched environment | `409`, nothing written |
 | Manual asset POST when `app_env` cannot be read | `500` (not `409`), nothing written |
 
@@ -120,7 +132,7 @@ Route coverage follows the pattern established by `tests/unit/reimbursable-route
 
 **Linking a sandbox bank locally will now be refused** with a clear error. This is intended: the user confirmed sandbox linking is finished now that the app runs on real accounts. If it is ever needed again, the fix is a separate dev Supabase project — which is the right answer regardless, and would also stop a laptop reading real bank transactions.
 
-**No Plaid quota impact.** This change makes no Plaid API calls and creates no Items. (Noted because the account is on the Trial plan, capped at 10 Production Items, and `/item/remove` does not free a slot — a real constraint, but unrelated to this work.)
+**No Plaid quota impact.** This change creates no Items. The one Plaid call it adds is the `/item/remove` on the `exchange-public-token` refusal path, which revokes an Item Link had already created rather than making a new one. (Noted because the account is on the Trial plan, capped at 10 Production Items, and `/item/remove` does not free a slot — which is exactly why the guard that matters is the one at token issuance.)
 
 ## 9. Rejected alternatives
 

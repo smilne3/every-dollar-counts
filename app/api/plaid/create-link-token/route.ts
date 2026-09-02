@@ -51,10 +51,10 @@ export async function POST(req: Request) {
 
   // THE ONLY PLACE A CROSS-ENVIRONMENT LINK CAN BE REFUSED FOR FREE (#23). Completing Link creates
   // the Item at Plaid and spends one of ten unrefundable slots — before exchange-public-token has
-  // run, and before it holds the access token that /item/remove would need. So a guard that waits
-  // for the exchange cannot prevent the cost, only the database row: it leaves a live connection
-  // to a real bank that this app can never revoke. Refusing here, before the token that opens Link
-  // is even issued, means the user never reaches their bank and no Item is created.
+  // run. So the backstop guard in exchange-public-token cannot prevent the cost, only clean up
+  // after it: the best it can do is revoke the Item it was just handed a token for. Refusing here,
+  // before the token that opens Link is even issued, means the user never reaches their bank and
+  // no Item is created at all.
   //
   // Update mode is deliberately exempt: it creates no Item, and the item's own plaid_env check
   // below already covers it. Failing it closed on an app_env blip would block reconnects for

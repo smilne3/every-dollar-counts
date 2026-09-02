@@ -44,9 +44,11 @@ on conflict (id) do nothing;
 
 -- IF THIS ROW IS WRONG, EVERY GUARDED WRITE STOPS. The guard fails closed by design, so a
 -- mis-seeded value is not a degraded mode: linking a bank and saving the home value both answer
--- 409, and Refresh writes nothing at all -- lib/ingest.ts throws per item, and
--- the sync loop catches that and marks every bank 'temporarily_unavailable' rather than naming
--- the real cause. The remedy is one statement:
+-- 409, and Refresh writes nothing at all -- lib/ingest.ts throws per item, and the sync loop
+-- catches that and marks every bank 'config_error' with status_detail 'ENV_MISMATCH', which does
+-- name the real cause. (A missing or unreadable row is a plain Error rather than an
+-- EnvMismatchError, so it still classifies as 'temporarily_unavailable' and does NOT name it.)
+-- The remedy is one statement:
 --
 --   update app_env set plaid_env = 'production', updated_at = now();   -- or 'sandbox'
 --

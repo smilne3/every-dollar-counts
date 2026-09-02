@@ -17,11 +17,20 @@ import {
 // There is deliberately no third "loan" button. The household's mortgage is at Wells Fargo, which
 // supports `transactions`, so it appears in the ordinary bank flow inside the same login — no
 // extra Item slot. A dedicated button only pays for itself with a servicer you don't also bank at.
+
+// An error carries whether a bank connection was actually at stake. Nothing is created until the
+// user finishes at their bank, so a failure while we are still fetching the link token cannot have
+// spent a slot — and pairing the server's "Nothing was connected." with a warning that "every new
+// attempt uses one of your ten bank connections permanently" would contradict it and scare the
+// user off a retry that is genuinely free. One object rather than two states, so the flag cannot
+// drift away from the message it describes.
+type LinkError = { message: string; slotAtRisk: boolean }
+
 export function LinkButton() {
   const router = useRouter()
   const [token, setToken] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<LinkError | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
   const onSuccess = useCallback(
@@ -33,7 +42,7 @@ export function LinkButton() {
       if (!result.ok) {
         // Loud on purpose: the Plaid connection already exists at this point, so a silent failure
         // invites a retry that spends another unrefundable slot.
-        setError(result.error)
+        setError({ message: result.error, slotAtRisk: true })
         return
       }
       setError(null)
@@ -48,7 +57,13 @@ export function LinkButton() {
     clearPendingLink()
     setBusy(false)
     setToken(null)
-    if (err) setError(err.display_message ?? "That didn't finish. Nothing was connected.")
+    // Link opened, so treat the slot as at risk: only the bank knows how far the user got.
+    if (err) {
+      setError({
+        message: err.display_message ?? "That didn't finish. Nothing was connected.",
+        slotAtRisk: true,
+      })
+    }
   }, [])
 
   const { open, ready } = usePlaidLink({ token, onSuccess, onExit })
@@ -70,11 +85,19 @@ export function LinkButton() {
       })
       body = await res.json().catch(() => ({}))
       if (!res.ok || !body.link_token) {
-        setError(body.error ?? "Couldn't start the connection. Please try again.")
+        // No link token means Link never opened, so no Item exists and no slot is at risk —
+        // including the environment guard's 409/500, which says "Nothing was connected."
+        setError({
+          message: body.error ?? "Couldn't start the connection. Please try again.",
+          slotAtRisk: false,
+        })
         return
       }
     } catch {
-      setError("Couldn't reach the app. Check your connection, then try again.")
+      setError({
+        message: "Couldn't reach the app. Check your connection, then try again.",
+        slotAtRisk: false,
+      })
       return
     }
     savePendingLink({ token: body.link_token, mode: 'add', products })
@@ -102,8 +125,9 @@ export function LinkButton() {
       </div>
       {error && (
         <p className="text-sm text-coral">
-          {error} Check the list above before trying again — every new attempt uses one of your ten
-          bank connections permanently.
+          {error.message}
+          {error.slotAtRisk &&
+            ' Check the list above before trying again — every new attempt uses one of your ten bank connections permanently.'}
         </p>
       )}
       {notice && <p className="text-sm text-muted">{notice}</p>}
