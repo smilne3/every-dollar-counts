@@ -36,26 +36,6 @@ export async function POST(req: Request) {
   const household_id = membership.household_id
   const productList = normalizeProducts(products)
 
-  // Before the plaid_items insert, so no wrong-environment bank row can be created (#23).
-  //
-  // BE HONEST ABOUT WHAT THIS CANNOT UNDO: the Item already exists at Plaid by the time this route
-  // runs (see below), so refusing here does NOT leave the slot unspent — it leaves an Item we can
-  // never remove, because /item/remove needs the access token this refusal declines to fetch. The
-  // guard that actually prevents that is in create-link-token: it refuses BEFORE Link opens, so
-  // the user never reaches their bank and no Item is created. This one is the backstop for a
-  // database that changed identity mid-flow.
-  try {
-    await assertEnvMatchesDatabase()
-  } catch (e) {
-    return envGuardResponse(e, {
-      tag: '[plaid]',
-      mismatch:
-        'This app is pointed at a database from a different Plaid environment, so linking a ' +
-        'bank was refused. Nothing was connected.',
-      unreadable: 'Could not verify which database this is, so nothing was connected.',
-    })
-  }
-
   // THE ITEM ALREADY EXISTS AT PLAID by the time this route runs — Link created it the moment the
   // user finished at their bank. Everything below is us catching up. That asymmetry is why every
   // failure path here has to be loud and has to clean up after itself.
@@ -71,6 +51,39 @@ export async function POST(req: Request) {
       { error: "Couldn't finish connecting that bank. Check Settings before trying again." },
       { status: 502 }
     )
+  }
+
+  // Before the plaid_items insert, so no wrong-environment bank row can be created (#23) — and
+  // deliberately AFTER the exchange above. The Item already exists at Plaid by then, so refusing
+  // BEFORE the exchange would not leave the slot unspent; it would only forfeit the one access
+  // token /item/remove could ever use, leaving a live authorization against a real bank login
+  // that nothing can revoke. The slot is gone either way, so this path takes the token and tears
+  // the Item down, exactly like the insert-failure path below. The guard that actually prevents
+  // the cost is in create-link-token: it refuses before Link opens, so no Item is ever created.
+  // This one is the backstop for a database that changed identity mid-flow.
+  try {
+    await assertEnvMatchesDatabase()
+  } catch (e) {
+    console.error('[plaid] environment guard refused an item that already exists at Plaid', itemId)
+    try {
+      await plaidClient.itemRemove({ access_token: accessToken })
+      console.error('[plaid] orphaned item removed at Plaid', itemId)
+    } catch (removeErr) {
+      // A failed teardown must not replace the guard's own answer: the user still gets the
+      // 409/500, and the id is logged so the Item can be removed by hand.
+      console.error(
+        '[plaid] ALSO failed to remove orphaned item — remove it by hand',
+        itemId,
+        plaidLogSafe(removeErr)
+      )
+    }
+    return envGuardResponse(e, {
+      tag: '[plaid]',
+      mismatch:
+        'This app is pointed at a database from a different Plaid environment, so linking a ' +
+        'bank was refused. Nothing was connected.',
+      unreadable: 'Could not verify which database this is, so nothing was connected.',
+    })
   }
 
   const { data: item, error: itemErr } = await supabaseAdmin

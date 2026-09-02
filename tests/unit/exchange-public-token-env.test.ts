@@ -7,6 +7,7 @@ const {
   insert,
   insertSingle,
   itemPublicTokenExchange,
+  itemRemove,
   getUser,
   assertEnvMatchesDatabase,
   storeAccounts,
@@ -15,6 +16,7 @@ const {
   insert: vi.fn(),
   insertSingle: vi.fn(),
   itemPublicTokenExchange: vi.fn(),
+  itemRemove: vi.fn(),
   getUser: vi.fn(),
   assertEnvMatchesDatabase: vi.fn(),
   storeAccounts: vi.fn(),
@@ -26,7 +28,7 @@ vi.mock('@/lib/supabase/admin', () => ({
 }))
 vi.mock('@/lib/plaid', () => ({
   plaidEnv: 'sandbox',
-  plaidClient: { itemPublicTokenExchange },
+  plaidClient: { itemPublicTokenExchange, itemRemove },
 }))
 // The guard sits AFTER the auth and household checks, so those have to succeed for the test to
 // reach it. Same client shape as tests/unit/manual-assets-env.test.ts.
@@ -67,6 +69,7 @@ describe('POST /api/plaid/exchange-public-token environment guard', () => {
     insert.mockReset()
     insertSingle.mockReset()
     itemPublicTokenExchange.mockReset()
+    itemRemove.mockReset()
     assertEnvMatchesDatabase.mockReset()
     storeAccounts.mockReset()
     syncAndStore.mockReset()
@@ -76,6 +79,7 @@ describe('POST /api/plaid/exchange-public-token environment guard', () => {
     itemPublicTokenExchange.mockResolvedValue({
       data: { access_token: 'access-sandbox-1', item_id: 'item-1' },
     })
+    itemRemove.mockResolvedValue({ data: { removed: true } })
     storeAccounts.mockResolvedValue(undefined)
     syncAndStore.mockResolvedValue({ added: 2, modified: 0, removed: 0 })
   })
@@ -86,11 +90,23 @@ describe('POST /api/plaid/exchange-public-token environment guard', () => {
     expect(res.status).toBe(409)
   })
 
-  it('creates no plaid_items row and exchanges no token on a mismatch', async () => {
+  it('creates no plaid_items row on a mismatch', async () => {
     assertEnvMatchesDatabase.mockRejectedValue(new EnvMismatchError('sandbox', 'production'))
     await POST(linkRequest())
     expect(insert).not.toHaveBeenCalled()
-    expect(itemPublicTokenExchange).not.toHaveBeenCalled()
+  })
+
+  // THE POINT OF THE ORDERING. The Item already exists at Plaid — Link created it when the user
+  // finished at their bank — so the guard runs AFTER the exchange, on purpose: refusing before it
+  // would forfeit the only access token /item/remove could ever use and leave a live, un-revocable
+  // authorization against a real bank login. Refusing after it costs the same spent slot and hands
+  // back a token we can revoke. These assertions fail against the earlier before-the-exchange
+  // ordering, where neither call happened at all.
+  it('exchanges the token and revokes the Item at Plaid on a mismatch', async () => {
+    assertEnvMatchesDatabase.mockRejectedValue(new EnvMismatchError('sandbox', 'production'))
+    await POST(linkRequest())
+    expect(itemPublicTokenExchange).toHaveBeenCalledOnce()
+    expect(itemRemove).toHaveBeenCalledWith({ access_token: 'access-sandbox-1' })
   })
 
   it('answers 500, not 409, when app_env simply cannot be read', async () => {
@@ -98,12 +114,22 @@ describe('POST /api/plaid/exchange-public-token environment guard', () => {
     const res = await POST(linkRequest())
     expect(res.status).toBe(500)
     expect(insert).not.toHaveBeenCalled()
-    // NOTE what refusing here does and does not buy. The Item already exists at Plaid — Link
-    // created it when the user finished at their bank — so declining the exchange does not save
-    // the slot; it forfeits the access token that /item/remove would have needed. The guard that
-    // actually prevents the cost runs in create-link-token, before Link opens; see
-    // tests/unit/create-link-token-env.test.ts.
-    expect(itemPublicTokenExchange).not.toHaveBeenCalled()
+  })
+
+  it('revokes the Item at Plaid when app_env cannot be read either', async () => {
+    assertEnvMatchesDatabase.mockRejectedValue(new Error('could not read app_env: timeout'))
+    await POST(linkRequest())
+    expect(itemRemove).toHaveBeenCalledWith({ access_token: 'access-sandbox-1' })
+  })
+
+  // A failed teardown must not become the user's answer, and must not throw out of the route:
+  // they still need the 409, and the item id is logged so it can be removed by hand.
+  it('still answers 409 when the revocation itself fails', async () => {
+    assertEnvMatchesDatabase.mockRejectedValue(new EnvMismatchError('sandbox', 'production'))
+    itemRemove.mockRejectedValue(new Error('plaid unreachable'))
+    const res = await POST(linkRequest())
+    expect(res.status).toBe(409)
+    expect(insert).not.toHaveBeenCalled()
   })
 
   // The match case. Without it, a refactor that made the guard reject unconditionally would leave
@@ -114,6 +140,7 @@ describe('POST /api/plaid/exchange-public-token environment guard', () => {
     expect(res.status).toBe(200)
     expect(itemPublicTokenExchange).toHaveBeenCalledOnce()
     expect(insert).toHaveBeenCalledOnce()
+    expect(itemRemove).not.toHaveBeenCalled()
     expect(await res.json()).toMatchObject({ ok: true, added: 2 })
   })
 })
