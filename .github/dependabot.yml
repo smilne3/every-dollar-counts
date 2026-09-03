@@ -1,0 +1,30 @@
+# Without this file Dependabot opens one PR per package, which is how four arrived in a single
+# evening for updates nobody would review separately. Grouping them into one weekly PR per
+# ecosystem makes them reviewable; the security group stays separate so a real advisory is never
+# queued behind a routine bump.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      # Anything with an advisory behind it, on its own, so it can be merged on its own.
+      security:
+        applies-to: security-updates
+        patterns: ['*']
+      # Everything else in one PR. Majors excluded: this repo runs Next 16, where a major is a
+      # migration with its own guide (see AGENTS.md), not a version bump.
+      routine:
+        applies-to: version-updates
+        patterns: ['*']
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ['*']

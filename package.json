@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest",
+    "check:invariants": "node scripts/check-invariants.mjs",
     "check:secrets": "! grep -rElq 'NEXT_PUBLIC_(PLAID_SECRET|SUPABASE_SERVICE_ROLE_KEY|TOKEN_ENCRYPTION_KEY)' app lib proxy.ts 2>/dev/null && echo 'secrets ok'"
   },
   "dependencies": {

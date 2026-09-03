@@ -56,5 +56,11 @@ jobs:
       - name: No secrets in client code
         run: npm run check:secrets
 
+      # Tripwires for the three defect classes this repo has actually shipped: a read that renders
+      # a failure as no-data (#46), a calendar value taken off the server's clock (#73), and an
+      # unbounded transactions read that PostgREST can truncate in silence (#69).
+      - name: Repo invariants
+        run: npm run check:invariants
+
       - name: Build
         run: npm run build
