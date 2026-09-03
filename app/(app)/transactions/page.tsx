@@ -43,10 +43,13 @@ export default async function TransactionsPage({
   const inMemoryFiltered = !!(category || flow === 'in' || flow === 'out')
 
   const supabase = await createClient()
-  const { data: cats } = await supabase
+  const { data: cats, error: catsError } = await supabase
     .from('categories')
     .select('id, name, pfc_primary, sort_order')
     .order('sort_order')
+  // effectiveCategory falls back to 'Uncategorized' with no map, so every row on the page would be
+  // relabelled and the category filter would match nothing (#46).
+  if (catsError) throw new Error(`could not read categories: ${catsError.message}`)
   const categories = (cats ?? []) as Category[]
   const pfcMap = pfcToName(categories)
   const categoryOptions = categories.map((c) => c.name)
@@ -65,11 +68,12 @@ export default async function TransactionsPage({
   // Only needed to name the account in the filter chip when drilling in from a Net Worth / Cash row.
   let accountName: string | null = null
   if (account) {
-    const { data: acct } = await supabase
+    const { data: acct, error: acctError } = await supabase
       .from('accounts')
       .select('name')
       .eq('account_id', account)
       .maybeSingle()
+    if (acctError) throw new Error(`could not read the account name: ${acctError.message}`)
     accountName = acct?.name ?? null
   }
 
@@ -93,7 +97,9 @@ export default async function TransactionsPage({
   // Account and month are plain columns — filter in SQL.
   if (account) query = query.eq('account_id', account)
   if (month) query = query.gte('date', monthStart!).lt('date', monthEnd!)
-  const { data: txns, count } = await query
+  const { data: txns, count, error: txnsError } = await query
+  // "No transactions" and "we could not read your transactions" must not look the same (#46).
+  if (txnsError) throw new Error(`could not read transactions: ${txnsError.message}`)
   const totalMatching = count ?? 0
 
   // The fifth money surface (design spec §6/§7): the same SpendContext the other four build, built

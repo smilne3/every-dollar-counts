@@ -30,16 +30,24 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
   if (!TITLES[metric]) notFound()
 
   const supabase = await createClient()
-  const { data: accountsData } = await supabase.from('accounts').select('*').order('name').order('account_id')
+  const { data: accountsData, error: accountsError } = await supabase
+    .from('accounts')
+    .select('*')
+    .order('name')
+    .order('account_id')
+  // This page exists to explain a net-worth figure. Explaining it from an empty list would be a
+  // confident wrong answer (#46).
+  if (accountsError) throw new Error(`could not read accounts: ${accountsError.message}`)
   const accounts = accountsData ?? []
   const currency = accounts[0]?.iso_currency_code ?? 'USD'
 
   // Manual assets (the home) count on the asset side of net worth, netting against the live mortgage.
-  const { data: membershipRow } = await supabase
+  const { data: membershipRow, error: membershipError } = await supabase
     .from('memberships')
     .select('household_id')
     .limit(1)
     .single()
+  if (membershipError) throw new Error(`could not read your household: ${membershipError.message}`)
   const manualAssets = membershipRow
     ? await listManualAssets(membershipRow.household_id)
     : []
@@ -114,20 +122,25 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
     total = { label: 'Cash on hand', amount: cashOnHand(accounts), currency }
   } else {
     // spent / saved both need this month's flows
-    const { data: cats } = await supabase
+    const { data: cats, error: catsError } = await supabase
       .from('categories')
       .select('id, name, pfc_primary, sort_order')
       .order('sort_order')
+    // Same trap as the dashboard: with no categories the Income and Transfer exclusions never fire,
+    // so a paycheck is counted as negative spending and this breakdown explains a number that never
+    // happened (#46).
+    if (catsError) throw new Error(`could not read categories: ${catsError.message}`)
     const categories = (cats ?? []) as Category[]
 
     const now = new Date()
     const months = lastNMonths(now, 6)
     const thisKey = months[months.length - 1].key
-    const { data: flowTxns } = await supabase
+    const { data: flowTxns, error: flowError } = await supabase
       .from('transactions')
       .select('id, amount, date, user_category, pfc_primary, pfc_detailed, reimbursable_amount')
       .eq('removed', false)
       .gte('date', `${thisKey}-01`)
+    if (flowError) throw new Error(`could not read transactions: ${flowError.message}`)
 
     // The reimbursable map is built straight from this page's own transaction rows — see
     // buildSpendContext.

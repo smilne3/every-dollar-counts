@@ -14,7 +14,11 @@ import { pfcToName, type Category } from '@/lib/categories'
 
 export default async function SettingsPage() {
   const supabase = await createClient()
-  const { data: households } = await supabase.from('households').select('id, name').limit(1)
+  const { data: households, error: householdsError } = await supabase
+    .from('households')
+    .select('id, name')
+    .limit(1)
+  if (householdsError) throw new Error(`could not read your household: ${householdsError.message}`)
   const household = households?.[0]
   const { count } = await supabase.from('accounts').select('id', { count: 'exact', head: true })
   const items = household ? await listItemsForHousehold(household.id) : []
@@ -23,10 +27,12 @@ export default async function SettingsPage() {
   const slotsUsed = household ? await countSlotsUsed(household.id) : null
   const manualAssets = household ? await listManualAssets(household.id) : []
   const home = manualAssets.find((a) => a.name === 'Home') ?? null
-  const { data: categories } = await supabase
+  const { data: categories, error: categoriesError } = await supabase
     .from('categories')
     .select('id, name, pfc_primary, sort_order')
     .order('sort_order')
+  // An empty list here reads as "you have no categories" and offers to create the defaults again.
+  if (categoriesError) throw new Error(`could not read categories: ${categoriesError.message}`)
 
   // What deleting each category would actually cost you, so the confirmation can say so.
   // Counts by EFFECTIVE category: auto-mapped transactions fall back to Uncategorized once
