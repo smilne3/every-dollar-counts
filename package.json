@@ -14,7 +14,7 @@
   "dependencies": {
     "@supabase/ssr": "^0.12.1",
     "@supabase/supabase-js": "^2.110.3",
-    "next": "16.2.10",
+    "next": "16.2.11",
     "plaid": "^43.0.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
@@ -41,6 +41,8 @@
   "overrides": {
     "next": {
       "postcss": "^8.5.10"
-    }
+    },
+    "_comment_sharp": "next 16.2.11 declares sharp ^0.34.5, and the libvips CVEs behind GHSA-f88m-g3jw-g9cj are only fixed in 0.35.0. Overriding rather than taking next 16.3.0, which is a minor and per AGENTS.md carries its own migration. sharp is an optionalDependency used only by the image optimizer, and next/image is used in zero files here, so the blast radius of forcing it is nil. Drop this override when next's own range reaches 0.35.",
+    "sharp": "^0.35.3"
   }
 }
