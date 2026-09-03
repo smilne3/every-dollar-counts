@@ -144,6 +144,8 @@ Six, across four pages. `greeting(hour: number)` needs no change — only its ar
 
 **`dashboard:120` is a fifth site not in #73's table, and it matters.** `thisMonthLabel` is derived independently of `thisMonthKey` at `:128`, so fixing one and not the other would let the tile's label and its number name different months — worse than the bug. Both now derive from the same key.
 
+**The dashboard's early return uses the greeting too.** `accounts.length === 0` returns at `:69` with its own `<PageHeader title={greeting(...)} subtitle={dateStr} />` at `:72`. The timezone must therefore be resolved *before* that branch, not between it and the main render. Membership is already read at `:49`, so there is room; the constraint is only that the new read goes above `:60`, not below `:69`.
+
 **`breakdown` propagates.** It embeds its month into outbound hrefs (`:145`, `:159`, `:166` — `/transactions?…&month=${thisKey}`), so a wrong month leaks into the transactions page's query string. Fixing the producer fixes the consumer; `transactions/page.tsx` needs no change, as its month parsing is already pure string arithmetic.
 
 Two new formatters in `lib/format.ts`, both taking strings, both matching the existing zone-proof style:
@@ -152,6 +154,8 @@ Two new formatters in `lib/format.ts`, both taking strings, both matching the ex
 export function longDate(date: string): string      // '2026-09-02' -> 'Wednesday, September 2'
 export function monthNameLong(key: string): string  // '2026-09'    -> 'September'
 ```
+
+Note the module will then hold two input shapes: `shortDate` and `monthLabel` take a full `'YYYY-MM-DD'`, while `monthNameLong` takes a `'YYYY-MM'` key because that is what `lastNMonths` returns and what the tile already has in hand. Both are named for what they emit, and each returns its input unchanged when it cannot parse it, so a shape mismatch is visible rather than rendering `undefined`.
 
 ## 8. Settings
 
