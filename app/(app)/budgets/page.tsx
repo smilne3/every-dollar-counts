@@ -15,21 +15,29 @@ export default async function BudgetsPage() {
   const next = new Date(now.getFullYear(), now.getMonth() + 1, 1)
   const nextMonthStart = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-01`
 
-  const { data: cats } = await supabase
+  const { data: cats, error: catsError } = await supabase
     .from('categories')
     .select('id, name, pfc_primary, sort_order')
     .order('sort_order')
+  // With no categories there is nothing to budget, so the page renders as though the household had
+  // never set any up (#46).
+  if (catsError) throw new Error(`could not read categories: ${catsError.message}`)
   const categories = (cats ?? []) as Category[]
   const categoryNames = spendingCategoryNames(categories)
 
-  const { data: txns } = await supabase
+  const { data: txns, error: txnsError } = await supabase
     .from('transactions')
     .select('id, amount, date, user_category, pfc_primary, pfc_detailed, reimbursable_amount')
     .eq('removed', false)
     .gte('date', monthStart)
     .lt('date', nextMonthStart)
+  // Every bar would read empty — indistinguishable from a month where nothing was spent (#46).
+  if (txnsError) throw new Error(`could not read transactions: ${txnsError.message}`)
 
-  const { data: budgets } = await supabase.from('budgets').select('category, monthly_limit')
+  const { data: budgets, error: budgetsError } = await supabase
+    .from('budgets')
+    .select('category, monthly_limit')
+  if (budgetsError) throw new Error(`could not read budgets: ${budgetsError.message}`)
 
   // The reimbursable map is built straight from this page's own transaction rows — see
   // buildSpendContext.

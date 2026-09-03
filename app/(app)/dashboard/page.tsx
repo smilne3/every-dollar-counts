@@ -41,16 +41,26 @@ export default async function DashboardPage({
   // arriving") so it isn't lost on the redirect. Next 16: searchParams is async.
   const notice = (await searchParams)?.notice
   const supabase = await createClient()
-  const { data: accountsData } = await supabase.from('accounts').select('*').order('name').order('account_id')
+  const { data: accountsData, error: accountsError } = await supabase
+    .from('accounts')
+    .select('*')
+    .order('name')
+    .order('account_id')
+  // Zero accounts renders "Connect your first account". A household with eleven of them being told
+  // it has none is not a smaller failure than an error message, it is a more convincing one (#46).
+  if (accountsError) throw new Error(`could not read accounts: ${accountsError.message}`)
   const accounts = accountsData ?? []
 
   // Any bank that isn't syncing has to be visible on the main screen. Stale numbers that look
   // fine are the failure this whole migration exists to prevent.
-  const { data: membershipRow } = await supabase
+  const { data: membershipRow, error: membershipError } = await supabase
     .from('memberships')
     .select('household_id')
     .limit(1)
     .single()
+  // Without this, the banks list and the home value both silently vanish, and net worth quietly
+  // drops by the value of the house.
+  if (membershipError) throw new Error(`could not read your household: ${membershipError.message}`)
   const items = membershipRow ? await listItemsForHousehold(membershipRow.household_id) : []
   const manualAssets = membershipRow ? await listManualAssets(membershipRow.household_id) : []
   const home = manualAssets.find((a) => a.name === 'Home') ?? null
@@ -85,21 +95,28 @@ export default async function DashboardPage({
 
   const currency = accounts[0]?.iso_currency_code ?? 'USD'
 
-  const { data: catsData } = await supabase
+  const { data: catsData, error: catsError } = await supabase
     .from('categories')
     .select('id, name, pfc_primary, sort_order')
     .order('sort_order')
+  // The sharpest one on this page. With no categories nothing maps to Income or Transfer, so the
+  // exclusions in monthlyFlows never fire and a paycheck is counted as negative spending: measured
+  // on real rows, "Spent" reads -$1,796.70 and "Saved" +$1,796.70 where the truth is $3,929.35 and
+  // $1,796.70. A failed read must not become a plausible number (#46).
+  if (catsError) throw new Error(`could not read categories: ${catsError.message}`)
   const categories = (catsData ?? []) as Category[]
   const pfcMap = pfcToName(categories)
 
   const months = lastNMonths(now, 6)
   const sixStart = `${months[0].key}-01`
 
-  const { data: flowTxns } = await supabase
+  const { data: flowTxns, error: flowError } = await supabase
     .from('transactions')
     .select('id, amount, date, user_category, pfc_primary, pfc_detailed, reimbursable_amount')
     .eq('removed', false)
     .gte('date', sixStart)
+  // #46: "the query failed" and "you spent nothing this month" must never render identically.
+  if (flowError) throw new Error(`could not read transactions: ${flowError.message}`)
 
   // Net worth DOES include this. A reimbursable expense takes the cash out of the account today and
   // brings it back later, so counting only the cash side would report money you are going to get
@@ -119,7 +136,12 @@ export default async function DashboardPage({
   const saved = income - spent
   const thisMonthLabel = new Intl.DateTimeFormat('en-US', { month: 'long' }).format(now)
 
-  const { data: budgetRows } = await supabase.from('budgets').select('category, monthly_limit')
+  const { data: budgetRows, error: budgetsError } = await supabase
+    .from('budgets')
+    .select('category, monthly_limit')
+  // A failed read here reads as "you have not set any budgets", so the tile's budget footnote
+  // disappears rather than reporting that it could not be worked out.
+  if (budgetsError) throw new Error(`could not read budgets: ${budgetsError.message}`)
   const limits: Record<string, number> = {}
   for (const b of budgetRows ?? []) limits[b.category as string] = Number(b.monthly_limit || 0)
   const totalBudget = Object.values(limits).reduce((s, v) => s + v, 0)
@@ -129,13 +151,15 @@ export default async function DashboardPage({
   const monthTxns = allRows.filter((t) => monthKey(t.date) === thisMonthKey)
   const trackedSpend = budgetedSpend(spendByCategory(monthTxns, ctx), limits)
 
-  const { data: recentTxns } = await supabase
+  const { data: recentTxns, error: recentError } = await supabase
     .from('transactions')
     .select('id, name, merchant_name, amount, date, user_category, pfc_primary, pfc_detailed')
     .eq('removed', false)
     .order('date', { ascending: false })
     .order('id', { ascending: false })  // #50: `date` is day-granular and ties constantly; without a unique second key Postgres may return tied rows in any order, so an UPDATE reshuffles the list under the reader.
     .limit(6)
+  // Otherwise a failed read renders "No transactions yet" to a household with 696 of them.
+  if (recentError) throw new Error(`could not read recent transactions: ${recentError.message}`)
   const recentItems = (recentTxns ?? []).map((t) => ({
     id: t.id as string,
     name: (t.merchant_name ?? t.name ?? 'Transaction') as string,
