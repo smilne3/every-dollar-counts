@@ -61,32 +61,32 @@ describe('PeriodOverPeriodChart', () => {
     render(
       <PeriodOverPeriodChart
         data={data}
-        currentLabel="Past month"
-        previousLabel="Month before"
+        currentLabel="Aug 2026"
+        previousLabel="Jul 2026"
       />
     )
-    expect(screen.getByText('Past month')).toBeTruthy()
-    expect(screen.getByText('Month before')).toBeTruthy()
+    expect(screen.getByText('Aug 2026')).toBeTruthy()
+    expect(screen.getByText('Jul 2026')).toBeTruthy()
   })
 
   // Both names reaching the legend is not enough — they have to name the RIGHT series. recharts
   // does not draw bars under jsdom, but each legend entry carries its series colour, so the
-  // swatch is what ties a label to a series. Emerald is the current window, grey the previous.
-  it('gives each window the colour its own bar is drawn in', () => {
+  // swatch is what ties a label to a series. Emerald is the later month, grey the earlier.
+  it('gives each month the colour its own bar is drawn in', () => {
     const { container } = render(
-      <PeriodOverPeriodChart data={data} currentLabel="Past month" previousLabel="Month before" />
+      <PeriodOverPeriodChart data={data} currentLabel="Aug 2026" previousLabel="Jul 2026" />
     )
     const legend = Array.from(container.querySelectorAll('.recharts-legend-item')).map((li) => [
       li.querySelector('[fill]')?.getAttribute('fill'),
       li.textContent,
     ])
-    expect(legend).toContainEqual(['#0e9f6e', 'Past month'])
-    expect(legend).toContainEqual(['#c9cec7', 'Month before'])
+    expect(legend).toContainEqual(['#0e9f6e', 'Aug 2026'])
+    expect(legend).toContainEqual(['#c9cec7', 'Jul 2026'])
   })
 
   it('puts every category it is given on the axis', () => {
     const { container } = render(
-      <PeriodOverPeriodChart data={data} currentLabel="Past month" previousLabel="Month before" />
+      <PeriodOverPeriodChart data={data} currentLabel="Aug 2026" previousLabel="Jul 2026" />
     )
     // recharts word-wraps an axis tick into <tspan>s, so compare with whitespace removed rather
     // than coupling the assertion to how it chose to break the label.

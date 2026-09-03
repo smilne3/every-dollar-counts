@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { axisTick, shortDate } from '@/lib/format'
+import { axisTick, shortDate, monthLabel } from '@/lib/format'
 
 describe('axisTick', () => {
   it('keeps half-thousand gridlines honest', () => {
@@ -42,5 +42,25 @@ describe('shortDate', () => {
   it('falls back visibly on an impossible month rather than rendering "undefined"', () => {
     expect(shortDate('2026-13-05')).toBe('2026-13-05')
     expect(shortDate('2026-99-05')).toBe('2026-99-05')
+  })
+})
+
+describe('monthLabel', () => {
+  it('names the month a whole-month window covers', () => {
+    expect(monthLabel('2026-08-01')).toBe('Aug 2026')
+    expect(monthLabel('2025-12-01')).toBe('Dec 2025')
+  })
+
+  // Formatted from the string's own parts in UTC. Built through `new Date(date)` instead, a
+  // window opening on 1 August would render as July for anyone west of Greenwich — the card
+  // would name a different month from the one its bars were summed over.
+  it('does not drift into the month before', () => {
+    expect(monthLabel('2026-01-01')).toBe('Jan 2026')
+    expect(monthLabel('2026-03-01')).toBe('Mar 2026')
+  })
+
+  it('returns the input unchanged when it cannot be read', () => {
+    expect(monthLabel('not-a-date')).toBe('not-a-date')
+    expect(monthLabel('2026-13-01')).toBe('2026-13-01')
   })
 })

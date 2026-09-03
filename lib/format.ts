@@ -36,3 +36,17 @@ export function shortDate(date: string): string {
   if (!m || m > 12 || !d) return date
   return `${MONTH_LABELS[m - 1]} ${d}`
 }
+
+// 'YYYY-MM-DD' -> 'Aug 2026', for labelling a window that is a whole calendar month.
+//
+// Indexed straight out of MONTH_LABELS rather than formatted through a Date. Any route via
+// `new Date(date)` reads a bare date as UTC midnight, so west of Greenwich a window opening on
+// 1 August renders as July — the card would name a different month from the one its bars were
+// summed over. Building from the string's own digits removes that rather than testing for it,
+// which matters here because the suite runs east of UTC, where such a slip does not show.
+export function monthLabel(date: string): string {
+  const year = date.slice(0, 4)
+  const m = Number(date.slice(5, 7))
+  if (!/^\d{4}$/.test(year) || !m || m > 12) return date
+  return `${MONTH_LABELS[m - 1]} ${year}`
+}

@@ -1,5 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import { rollingMonths, type Txn } from '@/lib/budget'
+import { lastCompleteMonths, type Txn } from '@/lib/budget'
 import { trendsView } from '@/lib/trends'
 import { type Category } from '@/lib/categories'
 import { buildSpendContext } from '@/lib/spend-context'
@@ -8,17 +8,17 @@ import { PeriodOverPeriodChart } from '@/components/PeriodOverPeriodChart'
 import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
 
-// Trends always shows a FULL month ending today; Budgets shows the calendar month so far. That is
-// the whole of #67: a window that opens on the 1st is, for its first fortnight, almost entirely
-// the mortgage — true, unchanging, and not what anyone opened this page to learn.
+// Trends reports the last month that has FINISHED; Budgets reports the calendar month so far.
+// That is the whole of #67: a month still in progress is, for its first fortnight, almost
+// entirely the mortgage — true, unchanging, and not what anyone opened this page to learn.
 //
-// The two pages therefore answer different questions on purpose — "where does my money actually
-// go" against "am I on track this month" — and every label here names its window with real dates
-// so that difference reads as intent rather than as a bug.
+// The two pages therefore answer different questions on purpose — "where does my money go"
+// against "am I on track this month" — so every label here names its month outright, and the page
+// deliberately says nothing about the month you are currently in.
 export default async function TrendsPage() {
   const supabase = await createClient()
 
-  const windows = rollingMonths(new Date())
+  const windows = lastCompleteMonths(new Date())
 
   const { data: cats, error: catsError } = await supabase
     .from('categories')
@@ -52,27 +52,27 @@ export default async function TrendsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Trends"
-        subtitle="Where your money goes over the past month, and how that compares with the month before."
+        subtitle="Where your money went last month, and how that compares with the month before."
       />
 
       <Card className="p-5">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
           <h2 className="text-base font-semibold text-ink">Where the money went</h2>
-          <span className="text-xs text-faint">Past month · {view.spend.dates}</span>
+          <span className="text-xs text-faint">{view.spend.label}</span>
         </div>
         <div className="mt-3">
           {view.spend.rows.length ? (
             <SpendByCategoryChart data={view.spend.rows} />
           ) : (
-            <p className="text-sm text-muted">No spending recorded in the past month.</p>
+            <p className="text-sm text-muted">No spending recorded in {view.spend.label}.</p>
           )}
         </div>
       </Card>
 
       <Card className="p-5">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-          <h2 className="text-base font-semibold text-ink">Past month vs the month before</h2>
-          <span className="text-xs text-faint">{view.compare.dates}</span>
+          <h2 className="text-base font-semibold text-ink">Compared with the month before</h2>
+          <span className="text-xs text-faint">{view.compare.label}</span>
         </div>
         <div className="mt-3">
           {view.compare.rows.length ? (
@@ -82,7 +82,7 @@ export default async function TrendsPage() {
               previousLabel={view.compare.previousLabel}
             />
           ) : (
-            <p className="text-sm text-muted">Not enough data yet to compare periods.</p>
+            <p className="text-sm text-muted">Not enough data yet to compare months.</p>
           )}
         </div>
       </Card>
