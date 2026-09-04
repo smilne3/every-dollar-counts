@@ -10,6 +10,18 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    # Majors arrive unsolicited otherwise. Excluding them from the routine group below only
+    # controls GROUPING — Dependabot still opens an individual PR per major, which is how eslint
+    # 9->10, plaid 43->46 and react-plaid-link 4->5 all landed failing CI on the same evening. A
+    # major is a migration to schedule, not a bump to review.
+    #
+    # Worth knowing what this costs: ignore conditions apply to security updates too, so if the
+    # only fix for an advisory were a major, no PR would be opened for it. The Dependabot ALERT
+    # still fires either way and stays visible in the Security tab, so nothing goes unreported —
+    # it just has to be actioned deliberately, which for a Plaid SDK is what you want anyway.
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
     groups:
       # Anything with an advisory behind it, on its own, so it can be merged on its own.
       security:
