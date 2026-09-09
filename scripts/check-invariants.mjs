@@ -78,7 +78,6 @@ const CLOCK_ALLOWED = new Map([
   ['app/(app)/dashboard/page.tsx', 'Fixed by #73 — see its plan, Task 7.'],
   ['app/(app)/budgets/page.tsx', 'Fixed by #73 — see its plan, Task 8.'],
   ['lib/dashboard.ts', 'Fixed by #73 — lastNMonths moves to a day string, Task 6.'],
-  ['lib/budget.ts', 'Fixed by #73 — lastCompleteMonths moves to a day string, Task 5.'],
 ])
 
 for (const { path, text } of files) {

@@ -194,7 +194,7 @@ describe('inRange', () => {
 
 describe('lastCompleteMonths', () => {
   // 2 September 2026 — the date in #67's screenshot.
-  const w = lastCompleteMonths(new Date(2026, 8, 2))
+  const w = lastCompleteMonths('2026-09-02')
 
   it('reports the last month that has actually finished', () => {
     expect(w.current).toEqual({ from: '2026-08-01', to: '2026-08-31' })
@@ -207,35 +207,41 @@ describe('lastCompleteMonths', () => {
   // A month is complete when it has ended, not when it is nearly over — otherwise the page would
   // flip to a still-settling month on its last day, which is the shape of bug #67 was about.
   it('does not treat the current month as complete on its last day', () => {
-    expect(lastCompleteMonths(new Date(2026, 8, 30)).current).toEqual({
+    expect(lastCompleteMonths('2026-09-30').current).toEqual({
       from: '2026-08-01',
       to: '2026-08-31',
     })
   })
 
   it('knows how long February is', () => {
-    expect(lastCompleteMonths(new Date(2024, 2, 10)).current.to).toBe('2024-02-29') // leap
-    expect(lastCompleteMonths(new Date(2026, 2, 10)).current.to).toBe('2026-02-28')
+    expect(lastCompleteMonths('2024-03-10').current.to).toBe('2024-02-29') // leap
+    expect(lastCompleteMonths('2026-03-10').current.to).toBe('2026-02-28')
   })
 
   it('crosses a year boundary correctly', () => {
-    const jan = lastCompleteMonths(new Date(2026, 0, 5))
+    const jan = lastCompleteMonths('2026-01-05')
     expect(jan.current).toEqual({ from: '2025-12-01', to: '2025-12-31' })
     expect(jan.previous).toEqual({ from: '2025-11-01', to: '2025-11-30' })
   })
 
-  // An invalid Date would stringify to 'NaN-NaN-NaN' — String(NaN).padStart(2,'0') is 'NaN', so
-  // padding does not catch it — and go to Postgres as a date filter. Fail where it is legible.
-  it('refuses an invalid date instead of building a NaN window', () => {
-    expect(() => lastCompleteMonths(new Date('nonsense'))).toThrow(/invalid Date/)
+  it('refuses a malformed day instead of building a NaN window', () => {
+    expect(() => lastCompleteMonths('nonsense')).toThrow(/expected 'YYYY-MM-DD'/)
+    expect(() => lastCompleteMonths('2026-13-01')).toThrow(/expected 'YYYY-MM-DD'/)
   })
 
-  const everyDay = (fn: (now: Date) => string | null): string[] => {
+  // Sweeps every day from 2024-01-01 to 2030-12-31 as a STRING. The previous version rebuilt
+  // "today" from now.getFullYear()/getMonth()/getDate(), which is exactly the server-clock read
+  // #73 removed — an oracle that would have had to be wrong in the same way as the code to agree
+  // with it.
+  const everyDay = (fn: (today: string) => string | null): string[] => {
     const bad: string[] = []
-    const stop = new Date(2031, 0, 1)
-    for (const d = new Date(2024, 0, 1); d < stop; d.setDate(d.getDate() + 1)) {
-      const complaint = fn(new Date(d))
+    const cursor = new Date(Date.UTC(2024, 0, 1))
+    const stop = Date.UTC(2031, 0, 1)
+    while (cursor.getTime() < stop) {
+      const today = cursor.toISOString().slice(0, 10)
+      const complaint = fn(today)
       if (complaint) bad.push(complaint)
+      cursor.setUTCDate(cursor.getUTCDate() + 1)
     }
     return bad
   }
@@ -246,11 +252,8 @@ describe('lastCompleteMonths', () => {
       d.setUTCDate(d.getUTCDate() + 1)
       return d.toISOString().slice(0, 10)
     }
-    const bad = everyDay((now) => {
-      const { current, previous } = lastCompleteMonths(now)
-      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
-        now.getDate()
-      ).padStart(2, '0')}`
+    const bad = everyDay((today) => {
+      const { current, previous } = lastCompleteMonths(today)
       if (nextDay(previous.to) !== current.from) return `${today}: not contiguous`
       if (!(current.to < today)) return `${today}: current window is not finished`
       if (current.from.slice(8) !== '01' || previous.from.slice(8) !== '01') {
@@ -293,8 +296,8 @@ describe('lastCompleteMonths', () => {
     ['due the 31st, brought forward to Friday', 31, -1],
   ])('holds exactly one occurrence of a bill %s', (_label, dueDay, shift) => {
     const posts = postings(dueDay, shift)
-    const bad = everyDay((now) => {
-      const { current, previous } = lastCompleteMonths(now)
+    const bad = everyDay((today) => {
+      const { current, previous } = lastCompleteMonths(today)
       return held(posts, current) === 1 && held(posts, previous) === 1 ? null : 'x'
     })
     expect(bad).toEqual([])
@@ -306,8 +309,8 @@ describe('lastCompleteMonths', () => {
   // recurring commitment rather than a dated row is #64's job, not this window's.
   it('is still fooled by a bill that posts outside its own calendar month', () => {
     const posts = postings(31, 1)
-    const bad = everyDay((now) => {
-      const { current, previous } = lastCompleteMonths(now)
+    const bad = everyDay((today) => {
+      const { current, previous } = lastCompleteMonths(today)
       return held(posts, current) === 1 && held(posts, previous) === 1 ? null : 'x'
     })
     expect(bad.length).toBeGreaterThan(0)
