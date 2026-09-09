@@ -75,7 +75,6 @@ for (const { path, text } of files) {
 // getUTC* paired with a Date.UTC construction is fine: the two cancel and no local zone is involved.
 // ---------------------------------------------------------------------------
 const CLOCK_ALLOWED = new Map([
-  ['app/(app)/dashboard/page.tsx', 'Fixed by #73 — see its plan, Task 7.'],
   ['app/(app)/budgets/page.tsx', 'Fixed by #73 — see its plan, Task 8.'],
 ])
 
