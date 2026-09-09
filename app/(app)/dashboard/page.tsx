@@ -25,6 +25,8 @@ import { listManualAssets } from '@/lib/manual-assets'
 import { budgetedSpend, spendByCategory, monthKey, type Txn } from '@/lib/budget'
 import { buildSpendContext } from '@/lib/spend-context'
 import { fetchReceivable } from '@/lib/receivable'
+import { todayIn } from '@/lib/clock'
+import { householdTimezone } from '@/lib/household'
 
 function greeting(hour: number): string {
   if (hour < 12) return 'Good morning'
@@ -107,7 +109,7 @@ export default async function DashboardPage({
   const categories = (catsData ?? []) as Category[]
   const pfcMap = pfcToName(categories)
 
-  const months = lastNMonths(now, 6)
+  const months = lastNMonths(todayIn(await householdTimezone()), 6)
   const sixStart = `${months[0].key}-01`
 
   const { data: flowTxns, error: flowError } = await supabase

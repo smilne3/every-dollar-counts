@@ -57,12 +57,24 @@ export function cashOnHand(accounts: Acct[]): number {
 
 
 // The last `n` months (chronological), each as { key: 'YYYY-MM', label: 'Jul' }.
-export function lastNMonths(now: Date, n: number): { key: string; label: string }[] {
+//
+// Takes the household's own calendar day (see lib/clock.ts). It used to take a Date and read its
+// year and month straight off it, which projects the instant through the RUNTIME's zone — so on
+// a UTC server it rolled to a new month four hours early for a US Eastern household, and the
+// dashboard's "Spent in September" tile showed a fresh ~$0 month while August was still running
+// (#73).
+export function lastNMonths(today: string, n: number): { key: string; label: string }[] {
+  const year = Number(today.slice(0, 4))
+  const month = Number(today.slice(5, 7))
+  if (!year || !month || month > 12) {
+    throw new Error(`lastNMonths: expected 'YYYY-MM-DD', got '${today}'`)
+  }
   const out: { key: string; label: string }[] = []
   for (let i = n - 1; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-    out.push({ key, label: MONTH_LABELS[d.getMonth()] })
+    // Constructed in UTC and read back in UTC, so the two cancel and no local zone is involved.
+    const d = new Date(Date.UTC(year, month - 1 - i, 1))
+    const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
+    out.push({ key, label: MONTH_LABELS[d.getUTCMonth()] })
   }
   return out
 }
