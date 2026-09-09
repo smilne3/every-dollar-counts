@@ -127,4 +127,14 @@ describe('Dashboard clock', () => {
     expect(text).toContain('Good morning')
     expect(text).toContain('Thursday, September 3')
   })
+
+  // The empty-account state has its own PageHeader, built the same way but reached by a different
+  // branch (accounts.length === 0) — a regression there would not be caught by any test above,
+  // which all render with the one seeded account from beforeEach.
+  it('greets by the household\'s hour on the empty-account state too', async () => {
+    results.accounts = { data: [], error: null }
+    const text = textOf(await render())
+    expect(text).toContain('Good evening')
+    expect(text).not.toContain('Good morning')
+  })
 })
