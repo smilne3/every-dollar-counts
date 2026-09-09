@@ -6,14 +6,22 @@ import { buildSpendContext } from '@/lib/spend-context'
 import { BudgetEditor } from '@/components/BudgetEditor'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { buttonClass } from '@/components/ui/Button'
+import { todayIn } from '@/lib/clock'
+import { householdTimezone } from '@/lib/household'
 
 export default async function BudgetsPage() {
   const supabase = await createClient()
 
-  const now = new Date()
-  const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
-  const next = new Date(now.getFullYear(), now.getMonth() + 1, 1)
-  const nextMonthStart = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-01`
+  // The household's month, not the server's: at 8pm US Eastern the server is already tomorrow, so
+  // on the last evening of a month every bar on this page emptied four hours early (#73).
+  const today = todayIn(await householdTimezone())
+  const year = Number(today.slice(0, 4))
+  const month = Number(today.slice(5, 7))
+  const monthStart = `${today.slice(0, 7)}-01`
+  // Constructed in UTC and read back in UTC, so the two cancel and December rolls to January
+  // without any local zone involved.
+  const next = new Date(Date.UTC(year, month, 1))
+  const nextMonthStart = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-01`
 
   const { data: cats, error: catsError } = await supabase
     .from('categories')
