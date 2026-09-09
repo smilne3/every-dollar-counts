@@ -1,6 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { lastCompleteMonths, type Txn } from '@/lib/budget'
 import { trendsView } from '@/lib/trends'
+import { todayIn } from '@/lib/clock'
+import { householdTimezone } from '@/lib/household'
 import { type Category } from '@/lib/categories'
 import { buildSpendContext } from '@/lib/spend-context'
 import { SpendByCategoryChart } from '@/components/SpendByCategoryChart'
@@ -18,7 +20,9 @@ import { PageHeader } from '@/components/ui/PageHeader'
 export default async function TrendsPage() {
   const supabase = await createClient()
 
-  const windows = lastCompleteMonths(new Date())
+  // The household's day, not the server's: at 8pm US Eastern the server is already tomorrow, and
+  // on the last evening of a month that moved this page forward a whole month early (#73).
+  const windows = lastCompleteMonths(todayIn(await householdTimezone()))
 
   const { data: cats, error: catsError } = await supabase
     .from('categories')

@@ -2,8 +2,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 // vi.hoisted for the same reason as tests/unit/trends-page.test.tsx: the static page import below
 // is linked before this file's body runs, firing the mock factory.
-const { results } = vi.hoisted(() => ({
+const { results, tz } = vi.hoisted(() => ({
   results: {} as Record<string, { data: unknown; error: { message: string } | null }>,
+  tz: { value: 'America/New_York' },
 }))
 
 // A supabase query is a builder awaited at the end, so the stub returns itself for every chained
@@ -21,6 +22,10 @@ const chainFor = (table: string) => {
 vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({ from: (table: string) => chainFor(table) }),
 }))
+vi.mock('@/lib/household', () => ({
+  DEFAULT_TIMEZONE: 'America/New_York',
+  householdTimezone: async () => tz.value,
+}))
 vi.mock('@/lib/plaid-items', () => ({ listItemsForHousehold: async () => [] }))
 vi.mock('@/lib/manual-assets', () => ({ listManualAssets: async () => [] }))
 vi.mock('@/lib/receivable', () => ({ fetchReceivable: async () => 0 }))
@@ -29,7 +34,25 @@ import DashboardPage from '@/app/(app)/dashboard/page'
 
 const render = () => DashboardPage({ searchParams: Promise.resolve({}) })
 
+// The exact moment from the #73 screenshot: 8:10pm on Wednesday 2 September in US Eastern, which
+// is already Thursday 3 September in UTC.
+const REPORTED = new Date('2026-09-03T00:10:00Z')
+
+// Walk the returned element tree and collect every string, so assertions do not depend on where
+// in the JSX a given piece of copy sits.
+function textOf(node: unknown): string {
+  if (node == null || typeof node === 'boolean') return ''
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(textOf).join(' ')
+  const el = node as { props?: { children?: unknown; title?: unknown; subtitle?: unknown; label?: unknown } }
+  if (!el.props) return ''
+  return [el.props.title, el.props.subtitle, el.props.label, el.props.children].map(textOf).join(' ')
+}
+
 beforeEach(() => {
+  vi.useFakeTimers()
+  vi.setSystemTime(REPORTED)
+  tz.value = 'America/New_York'
   // One account, so the page renders the money tiles rather than the empty state.
   results.accounts = { data: [{ id: 'a1', type: 'depository', current_balance: 100 }], error: null }
   results.memberships = { data: { household_id: 'hh-1' }, error: null }
@@ -72,5 +95,46 @@ describe('Dashboard reads', () => {
 
   it('renders when every read succeeds', async () => {
     await expect(render()).resolves.toBeTruthy()
+  })
+})
+
+describe('Dashboard clock', () => {
+  // The reported bug, exactly.
+  it('greets by the household\'s hour, not the server\'s', async () => {
+    const text = textOf(await render())
+    expect(text).toContain('Good evening')
+    expect(text).not.toContain('Good morning')
+  })
+
+  it('dates the page by the household\'s day, not the server\'s', async () => {
+    const text = textOf(await render())
+    expect(text).toContain('Wednesday, September 2')
+    expect(text).not.toContain('September 3')
+  })
+
+  // The half that actually matters: at 8pm on 31 August the server is already in September, so
+  // the tile would name a fresh month while August was still running.
+  it('names the household\'s month on the spending tile', async () => {
+    vi.setSystemTime(new Date('2026-09-01T00:10:00Z')) // 8:10pm on 31 August in New York
+    const text = textOf(await render())
+    expect(text).toContain('Spent in August')
+    expect(text).not.toContain('Spent in September')
+  })
+
+  it('follows the stored zone rather than a hardcoded one', async () => {
+    tz.value = 'Asia/Tokyo' // 9:10am on the 3rd
+    const text = textOf(await render())
+    expect(text).toContain('Good morning')
+    expect(text).toContain('Thursday, September 3')
+  })
+
+  // The empty-account state has its own PageHeader, built the same way but reached by a different
+  // branch (accounts.length === 0) — a regression there would not be caught by any test above,
+  // which all render with the one seeded account from beforeEach.
+  it('greets by the household\'s hour on the empty-account state too', async () => {
+    results.accounts = { data: [], error: null }
+    const text = textOf(await render())
+    expect(text).toContain('Good evening')
+    expect(text).not.toContain('Good morning')
   })
 })

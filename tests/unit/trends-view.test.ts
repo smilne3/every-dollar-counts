@@ -44,7 +44,7 @@ const t = (amount: number, date: string, pfc: string) => ({
 const MORTGAGE = 3929.35
 
 // On 2 September the windows are August (finished) and July.
-const NOW = new Date(2026, 8, 2)
+const NOW = '2026-09-02'
 const windows = lastCompleteMonths(NOW)
 
 const txns = [

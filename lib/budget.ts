@@ -85,26 +85,34 @@ export function inRange<T extends { date: string }>(txns: T[], w: DateWindow): T
 // own calendar month. One that crosses the boundary — 31 August falling on a Sunday and paying on
 // 1 September — belongs to August but lands in September, and no calendar window can fix that.
 // Knowing a payment is one recurring commitment rather than a dated row is #64's job.
-export function lastCompleteMonths(now: Date): { current: DateWindow; previous: DateWindow } {
-  // A window built from an invalid date would stringify to 'NaN-NaN-NaN' and reach the database
-  // as a filter. Fail here, where the cause is legible.
-  if (Number.isNaN(now.getTime())) {
-    throw new Error('lastCompleteMonths: invalid Date — cannot build a spending window')
+// Takes the household's own calendar day (see lib/clock.ts), not a Date. A Date cannot carry the
+// answer: this function has to read a year and a month, and reading them off an instant projects
+// it through the RUNTIME's zone — UTC on Vercel — which is the bug in #73. A 'YYYY-MM-DD' string
+// has already been resolved in the household's zone and cannot be re-interpreted.
+export function lastCompleteMonths(today: string): { current: DateWindow; previous: DateWindow } {
+  const year = Number(today.slice(0, 4))
+  const month = Number(today.slice(5, 7))
+  // A malformed day would build a 'NaN-NaN-NaN' window and reach the database as a filter. Fail
+  // here, where the cause is legible.
+  if (!year || !month || month > 12) {
+    throw new Error(`lastCompleteMonths: expected 'YYYY-MM-DD', got '${today}'`)
   }
+  // Constructed in UTC and read back in UTC, so the two cancel and no local zone is involved.
   // Day 0 of a month is the last day of the one before it, which is how each window learns its
   // own length without anyone hard-coding 28, 30 or 31.
   const monthWindow = (monthsBack: number): DateWindow => ({
-    from: isoDay(new Date(now.getFullYear(), now.getMonth() - monthsBack, 1)),
-    to: isoDay(new Date(now.getFullYear(), now.getMonth() - monthsBack + 1, 0)),
+    from: utcDay(new Date(Date.UTC(year, month - 1 - monthsBack, 1))),
+    to: utcDay(new Date(Date.UTC(year, month - monthsBack, 0))),
   })
   return { current: monthWindow(1), previous: monthWindow(2) }
 }
 
-// A Date's local calendar day as 'YYYY-MM-DD', to compare against transaction dates. Local
-// parts, matching how the rest of the app reads `now`; day arithmetic goes through the Date
-// constructor, which works in calendar days and so is unaffected by DST.
-function isoDay(d: Date): string {
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${d.getFullYear()}-${m}-${day}`
+// A Date's UTC calendar day as 'YYYY-MM-DD'. Only ever given Dates this module built from
+// Date.UTC parts, so the round trip is exact. Replaces the previous isoDay, which read LOCAL
+// parts — correct for its synthetic inputs and a silent UTC-parts reader the moment anything
+// handed it a real instant.
+function utcDay(d: Date): string {
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(d.getUTCDate()).padStart(2, '0')
+  return `${d.getUTCFullYear()}-${m}-${day}`
 }

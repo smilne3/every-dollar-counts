@@ -1,16 +1,28 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 // vi.hoisted for the same reason as tests/unit/manual-assets-env.test.ts: the static page import
 // below is linked before this file's body runs, firing the mock factory.
-const { results } = vi.hoisted(() => ({
+const { results, calls } = vi.hoisted(() => ({
   results: {} as Record<string, { data: unknown; error: { message: string } | null }>,
+  calls: { gte: [] as string[], lte: [] as string[] },
 }))
 
 // A supabase query is a builder that is awaited at the end, so the stub returns itself for every
-// chained method and resolves to whatever the test configured for that table.
+// chained method and resolves to whatever the test configured for that table. `.gte`/`.lte` are
+// recorded rather than just chained, since the date bounds the page hands the database are the
+// whole behaviour under test in the 'Trends month window' block below.
 const chainFor = (table: string) => {
   const chain: Record<string, unknown> = {}
-  for (const method of ['select', 'order', 'eq', 'gte', 'lte']) chain[method] = () => chain
+  for (const method of ['select', 'order', 'eq', 'limit']) chain[method] = () => chain
+  chain.gte = (_col: string, v: string) => {
+    calls.gte.push(v)
+    return chain
+  }
+  chain.lte = (_col: string, v: string) => {
+    calls.lte.push(v)
+    return chain
+  }
+  chain.maybeSingle = async () => results[table] ?? { data: null, error: null }
   chain.then = (resolve: (v: unknown) => unknown) =>
     Promise.resolve(results[table] ?? { data: [], error: null }).then(resolve)
   return chain
@@ -27,6 +39,13 @@ const ok = { data: [], error: null }
 beforeEach(() => {
   results.categories = ok
   results.transactions = ok
+  results.households = { data: { timezone: 'America/New_York' }, error: null }
+  calls.gte = []
+  calls.lte = []
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 
 describe('Trends page reads', () => {
@@ -48,5 +67,23 @@ describe('Trends page reads', () => {
 
   it('renders when both reads succeed', async () => {
     await expect(TrendsPage()).resolves.toBeTruthy()
+  })
+})
+
+describe('Trends month window', () => {
+  // At 8:10pm on 31 August the household is still in August, but the server's UTC clock has
+  // already rolled to 1 September. `todayIn('UTC')` in place of the stored zone would report
+  // August/July here — the mutation the final review proved invisible to every other guard on
+  // this branch (#73).
+  it('honours the household\'s stored zone, not the server\'s', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-01T00:10:00Z')) // 8:10pm on 31 August in New York
+    results.households = { data: { timezone: 'America/New_York' }, error: null }
+    await TrendsPage()
+    expect(calls.gte).toContain('2026-06-01')
+    expect(calls.lte).toContain('2026-07-31')
+    // Under 'UTC' these would instead be '2026-07-01' and '2026-08-31' — a whole month later.
+    expect(calls.gte).not.toContain('2026-07-01')
+    expect(calls.lte).not.toContain('2026-08-31')
   })
 })

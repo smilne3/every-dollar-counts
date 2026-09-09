@@ -8,7 +8,7 @@ import { RecentActivity } from '@/components/RecentActivity'
 import { Card } from '@/components/ui/Card'
 import { StatCard } from '@/components/ui/StatCard'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { money } from '@/lib/format'
+import { money, longDate, monthNameLong } from '@/lib/format'
 import { effectiveCategory } from '@/lib/effective-category'
 import { isCreditCardPayment } from '@/lib/categories'
 import { pfcToName, type Category } from '@/lib/categories'
@@ -25,6 +25,8 @@ import { listManualAssets } from '@/lib/manual-assets'
 import { budgetedSpend, spendByCategory, monthKey, type Txn } from '@/lib/budget'
 import { buildSpendContext } from '@/lib/spend-context'
 import { fetchReceivable } from '@/lib/receivable'
+import { todayIn, hourIn } from '@/lib/clock'
+import { householdTimezone } from '@/lib/household'
 
 function greeting(hour: number): string {
   if (hour < 12) return 'Good morning'
@@ -67,19 +69,20 @@ export default async function DashboardPage({
   const unhealthy = items.filter((i) => i.status !== 'ok')
   const needsReconnect = unhealthy.some((i) => i.status === 'needs_reconnect')
 
+  // Two different questions, two different sources. `now` is an INSTANT, and homeStale below
+  // measures elapsed milliseconds between two instants — correct in any zone. `today` and the
+  // greeting are CALENDAR values, which only mean anything in a stated zone (#73).
   const now = new Date()
+  const tz = await householdTimezone()
+  const today = todayIn(tz)
   const homeStale =
     home != null && now.getTime() - new Date(home.updated_at).getTime() > 30 * 24 * 60 * 60 * 1000
-  const dateStr = new Intl.DateTimeFormat('en-US', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-  }).format(now)
+  const dateStr = longDate(today)
 
   if (accounts.length === 0) {
     return (
       <div className="space-y-6">
-        <PageHeader title={greeting(now.getHours())} subtitle={dateStr} />
+        <PageHeader title={greeting(hourIn(tz))} subtitle={dateStr} />
         <Card className="p-8 text-center">
           <h2 className="text-lg font-semibold text-ink">Connect your first account</h2>
           <p className="mx-auto mt-1 max-w-sm text-sm text-muted">
@@ -107,7 +110,7 @@ export default async function DashboardPage({
   const categories = (catsData ?? []) as Category[]
   const pfcMap = pfcToName(categories)
 
-  const months = lastNMonths(now, 6)
+  const months = lastNMonths(today, 6)
   const sixStart = `${months[0].key}-01`
 
   const { data: flowTxns, error: flowError } = await supabase
@@ -134,7 +137,9 @@ export default async function DashboardPage({
   const spent = thisMonth.spending
   const income = thisMonth.income
   const saved = income - spent
-  const thisMonthLabel = new Intl.DateTimeFormat('en-US', { month: 'long' }).format(now)
+  // Derived from the same key as the number beside it. These used to be computed independently,
+  // so a partial fix could have had the label and the amount naming different months.
+  const thisMonthLabel = monthNameLong(months[months.length - 1].key)
 
   const { data: budgetRows, error: budgetsError } = await supabase
     .from('budgets')
@@ -218,7 +223,7 @@ export default async function DashboardPage({
       )}
 
       <PageHeader
-        title={greeting(now.getHours())}
+        title={greeting(hourIn(tz))}
         subtitle={`${dateStr} — here's where your money stands`}
         actions={
           <>

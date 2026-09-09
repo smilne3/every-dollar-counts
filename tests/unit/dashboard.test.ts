@@ -61,17 +61,29 @@ describe('cashOnHand', () => {
 })
 
 describe('lastNMonths', () => {
-  it('returns n chronological months ending at now', () => {
-    const months = lastNMonths(new Date(2026, 6, 15), 6) // Jul 2026
+  it('returns n chronological months ending at today', () => {
+    const months = lastNMonths('2026-07-15', 6) // Jul 2026
     expect(months).toHaveLength(6)
+    expect(months.map((m) => m.key)).toEqual([
+      '2026-02',
+      '2026-03',
+      '2026-04',
+      '2026-05',
+      '2026-06',
+      '2026-07',
+    ])
     expect(months[0]).toEqual({ key: '2026-02', label: 'Feb' })
     expect(months[5]).toEqual({ key: '2026-07', label: 'Jul' })
   })
 
   it('wraps across a year boundary', () => {
-    const months = lastNMonths(new Date(2026, 0, 10), 3) // Jan 2026
+    const months = lastNMonths('2026-01-10', 3) // Jan 2026
     expect(months.map((m) => m.key)).toEqual(['2025-11', '2025-12', '2026-01'])
     expect(months.map((m) => m.label)).toEqual(['Nov', 'Dec', 'Jan'])
+  })
+
+  it('refuses a malformed day instead of returning NaN keys', () => {
+    expect(() => lastNMonths('nonsense', 6)).toThrow(/expected 'YYYY-MM-DD'/)
   })
 })
 

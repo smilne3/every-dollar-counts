@@ -17,6 +17,8 @@ import { spendByCategory, monthKey, type Txn } from '@/lib/budget'
 import { type Category } from '@/lib/categories'
 import { buildSpendContext } from '@/lib/spend-context'
 import { fetchReceivable } from '@/lib/receivable'
+import { todayIn } from '@/lib/clock'
+import { householdTimezone } from '@/lib/household'
 
 const TITLES: Record<string, { title: string; subtitle: string }> = {
   'net-worth': { title: 'Net worth', subtitle: 'Everything you own, minus what you owe' },
@@ -132,8 +134,9 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
     if (catsError) throw new Error(`could not read categories: ${catsError.message}`)
     const categories = (cats ?? []) as Category[]
 
-    const now = new Date()
-    const months = lastNMonths(now, 6)
+    // The household's day, not the server's — this month key is also embedded in the outbound
+    // /transactions?...&month= links below, so a wrong month here propagates (#73).
+    const months = lastNMonths(todayIn(await householdTimezone()), 6)
     const thisKey = months[months.length - 1].key
     const { data: flowTxns, error: flowError } = await supabase
       .from('transactions')

@@ -5,6 +5,8 @@ import { BankList } from '@/components/BankList'
 import { listItemsForHousehold } from '@/lib/plaid-items'
 import { countSlotsUsed, LIFETIME_SLOTS } from '@/lib/plaid-slots'
 import { HomeValueCard } from '@/components/HomeValueCard'
+import { TimezoneCard } from '@/components/TimezoneCard'
+import { DEFAULT_TIMEZONE } from '@/lib/household'
 import { listManualAssets } from '@/lib/manual-assets'
 import { CategoryManager, type CategoryUsage } from '@/components/CategoryManager'
 import { Card } from '@/components/ui/Card'
@@ -16,7 +18,7 @@ export default async function SettingsPage() {
   const supabase = await createClient()
   const { data: households, error: householdsError } = await supabase
     .from('households')
-    .select('id, name')
+    .select('id, name, timezone')
     .limit(1)
   if (householdsError) throw new Error(`could not read your household: ${householdsError.message}`)
   const household = households?.[0]
@@ -64,6 +66,7 @@ export default async function SettingsPage() {
               You&apos;re in <strong className="font-medium text-ink">{household.name}</strong>.
             </p>
             <InvitePartnerForm householdId={household.id} />
+            <TimezoneCard current={(household.timezone as string) ?? DEFAULT_TIMEZONE} />
           </>
         ) : (
           <p className="text-sm text-muted">No household found for your account.</p>

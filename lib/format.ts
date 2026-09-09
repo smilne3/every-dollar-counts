@@ -50,3 +50,41 @@ export function monthLabel(date: string): string {
   if (!/^\d{4}$/.test(year) || !m || m > 12) return date
   return `${MONTH_LABELS[m - 1]} ${year}`
 }
+
+const MONTH_NAMES = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+]
+
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+
+// 'YYYY-MM-DD' -> 'Wednesday, September 2'.
+//
+// The weekday comes from a Date built with Date.UTC and read back with getUTCDay, so the
+// construction and the read are in the same zone and cancel out. `new Date('2026-09-02')` would
+// be UTC midnight and render as 1 September for anyone west of Greenwich.
+export function longDate(date: string): string {
+  const y = Number(date.slice(0, 4))
+  const m = Number(date.slice(5, 7))
+  const d = Number(date.slice(8, 10))
+  if (!y || !m || m > 12 || !d || d > 31) return date
+  const weekday = WEEKDAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]
+  return `${weekday}, ${MONTH_NAMES[m - 1]} ${d}`
+}
+
+// 'YYYY-MM' (or 'YYYY-MM-DD') -> 'September', for a tile that names the month in full.
+export function monthNameLong(key: string): string {
+  const m = Number(key.slice(5, 7))
+  if (!m || m > 12) return key
+  return MONTH_NAMES[m - 1]
+}
