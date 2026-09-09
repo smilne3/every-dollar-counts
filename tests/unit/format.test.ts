@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { axisTick, shortDate, monthLabel } from '@/lib/format'
+import { axisTick, shortDate, monthLabel, longDate, monthNameLong } from '@/lib/format'
 
 describe('axisTick', () => {
   it('keeps half-thousand gridlines honest', () => {
@@ -62,5 +62,42 @@ describe('monthLabel', () => {
   it('returns the input unchanged when it cannot be read', () => {
     expect(monthLabel('not-a-date')).toBe('not-a-date')
     expect(monthLabel('2026-13-01')).toBe('2026-13-01')
+  })
+})
+
+describe('longDate', () => {
+  it('names the weekday, month and day of a calendar date', () => {
+    expect(longDate('2026-09-02')).toBe('Wednesday, September 2')
+    expect(longDate('2026-01-01')).toBe('Thursday, January 1')
+  })
+
+  // The whole point: built from the string's own digits through Date.UTC, so it cannot render the
+  // day before west of Greenwich the way `new Date('2026-09-02')` would.
+  it('does not drift to the previous day', () => {
+    expect(longDate('2026-03-01')).toBe('Sunday, March 1')
+    expect(longDate('2026-12-31')).toBe('Thursday, December 31')
+  })
+
+  it('returns the input unchanged when it cannot be read', () => {
+    expect(longDate('not-a-date')).toBe('not-a-date')
+    expect(longDate('2026-13-01')).toBe('2026-13-01')
+  })
+})
+
+describe('monthNameLong', () => {
+  it('names the month of a YYYY-MM key', () => {
+    expect(monthNameLong('2026-09')).toBe('September')
+    expect(monthNameLong('2026-01')).toBe('January')
+  })
+
+  // It is handed keys from lastNMonths, which are 'YYYY-MM'; a full date must still work rather
+  // than silently returning the input, because the two shapes are easy to mix up.
+  it('accepts a full date too', () => {
+    expect(monthNameLong('2026-09-02')).toBe('September')
+  })
+
+  it('returns the input unchanged when it cannot be read', () => {
+    expect(monthNameLong('nope')).toBe('nope')
+    expect(monthNameLong('2026-99')).toBe('2026-99')
   })
 })
