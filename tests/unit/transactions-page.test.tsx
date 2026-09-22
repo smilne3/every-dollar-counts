@@ -184,7 +184,7 @@ describe('Transactions page dual layout', () => {
   // Same #46 reasoning as the dashboard and breakdown pages: "no transactions" and "we could not
   // read your transactions" must not look the same.
   it('fails loudly when the transactions read fails', async () => {
-    results.transactions = { data: null, count: null as unknown as number, error: { message: 'statement timeout' } }
+    results.transactions = { data: null, error: { message: 'statement timeout' } }
     await expect(render()).rejects.toThrow(/could not read transactions: statement timeout/)
   })
 
