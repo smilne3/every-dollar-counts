@@ -17,7 +17,7 @@
 - **The card-payment exemption is a correctness constraint, not a style choice.** Where `isCreditCardPayment` is true, no category picker, no reimbursable checkbox and no editor may be rendered — on either layout. Setting `user_category` on a card payment re-enters both legs into the totals; on a real $7,866.69 payment that is the difference between September spending of $3,949.16 and **minus** $3,917.53 (`TransactionRow.tsx:48-58`).
 - **No file under `lib/` that computes money is edited.** Not `dashboard.ts`, `budget.ts`, `reimbursements.ts`, `spend-context.ts`, `categories.ts`. `lib/transaction-presentation.ts` is new and presentational only.
 - **Sign convention is `display = -amount`.** Plaid positive means money out. This rule exists once, in `presentTransaction`, and nowhere else after Task 1.
-- **Run the whole suite, not one file, before each commit.** Baseline is 338 passing tests.
+- **Run the whole suite, not one file, before each commit.** Baseline on this branch is **327** passing tests. (`mobile-pass` branches off `main`; the 338 figure belongs to `drop-non-cashflow-transactions`, which carries 11 ingest tests this branch does not.)
 
 ---
 
@@ -198,15 +198,17 @@ Replace the amount cell's className expression with:
 Replace the share expression inside the reserved span with:
 
 ```tsx
-          {isCC ? 'between accounts' : shareAmount !== null ? `your share ${money(shareAmount)}` : ' '}
+          {isCC ? 'between accounts' : shareAmount !== null ? `your share ${money(shareAmount)}` : '\u00A0'}
 ```
+
+**That placeholder must be written as the escape `\u00A0` — backslash, u, 0, 0, A, 0 — inside quotes, never as a literal space.** A lone ASCII space collapses under `white-space: normal`, so the reserved line produces no line box, the row grows on every tick, and #50 reopens. The non-breaking space is what makes `invisible` actually reserve height, and it is invisible in source — which is how it gets silently retyped as a space. Task 1 adds a test pinning it, because nothing else in the suite distinguishes the two.
 
 Leave `isCreditCardPayment` imported only if still referenced; if not, remove the import so lint stays clean.
 
 - [ ] **Step 6: Prove nothing changed**
 
 Run: `npx vitest run && npx tsc --noEmit && npm run lint`
-Expected: 345 tests pass (338 + 7), tsc exit 0, lint exit 0. **The nine existing `transaction-row.test.tsx` assertions passing untouched is the evidence this refactor was behaviour-preserving.**
+Expected: 334 tests pass (327 + 7), tsc exit 0, lint exit 0. **The nine existing `transaction-row.test.tsx` assertions passing untouched is the evidence this refactor was behaviour-preserving.**
 
 - [ ] **Step 7: Commit**
 
@@ -400,7 +402,7 @@ Expected: PASS, 8 tests.
 - [ ] **Step 5: Run everything**
 
 Run: `npx vitest run && npx tsc --noEmit && npm run lint`
-Expected: 353 tests pass, tsc exit 0, lint exit 0.
+Expected: 343 tests pass (335 + 8), tsc exit 0, lint exit 0.
 
 - [ ] **Step 6: Commit**
 
@@ -569,7 +571,7 @@ If the dialog's contents are still not found, the `beforeAll` polyfill from Step
 - [ ] **Step 5: Run everything**
 
 Run: `npx vitest run && npx tsc --noEmit && npm run lint`
-Expected: 356 tests pass, tsc exit 0, lint exit 0.
+Expected: 346 tests pass (343 + 3), tsc exit 0, lint exit 0.
 
 - [ ] **Step 6: Commit**
 
@@ -643,7 +645,7 @@ Expected: tsc exit 0; build exit 0 with `/transactions` still listed as a route.
 - [ ] **Step 4: Run everything**
 
 Run: `npx vitest run && npm run lint && npm run check:invariants`
-Expected: 356 tests pass, lint exit 0, `invariants ok`.
+Expected: 346 tests pass, lint exit 0, `invariants ok`.
 
 - [ ] **Step 5: Look at it — the step the tests cannot do**
 
