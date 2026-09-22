@@ -34,6 +34,30 @@ describe('Dialog', () => {
     expect(evt.defaultPrevented).toBe(true)
   })
 
+  // `busy` is the shell's half of "a failed save must never be silently discarded". A caller that
+  // unmounts its children on close — TransactionCard does — would otherwise unmount a request
+  // mid-flight on Escape or the Android back gesture, and the setState carrying the failure would
+  // land on an unmounted component, which React silently no-ops.
+  //
+  // It defaults to false: ConfirmDialog (BankList, CategoryManager, GoalsList) and
+  // ReimbursableEditor pass nothing, and the test above is the proof that those are untouched.
+  describe('while busy', () => {
+    it('withholds the cancel instead of dismissing a request mid-flight', () => {
+      const onCancel = vi.fn()
+      const { container } = render(
+        <Dialog open busy title="Sheet" onCancel={onCancel} footer={null} />
+      )
+      const el = container.querySelector('dialog')!
+      const evt = new Event('cancel', { bubbles: false, cancelable: true })
+      el.dispatchEvent(evt)
+      expect(onCancel).not.toHaveBeenCalled()
+      // Still prevented: without this the DOM would close the element while React believes it is
+      // open, which is a worse version of the same bug — invisible children, still mounted.
+      expect(evt.defaultPrevented).toBe(true)
+      expect(el.open).toBe(true)
+    })
+  })
+
   // A caller that unmounts the dialog's contents as it closes — TransactionCard does, so that 200
   // closed sheets do not ship in every page's HTML — drops focus to <body> in the same commit,
   // before close() runs. The platform then has nothing to restore from: its own bookkeeping only

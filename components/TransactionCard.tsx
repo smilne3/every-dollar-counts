@@ -34,6 +34,21 @@ export function TransactionCard({
   categoryOptions: string[]
 }) {
   const [open, setOpen] = useState(false)
+  // Whether either control inside the sheet has a PATCH outstanding. Tracked per child rather than
+  // as a counter so a double-report cannot leave the sheet permanently unclosable.
+  //
+  // This exists because the sheet's children are UNMOUNTED on close (see the gate below). Both
+  // controls set their error state after the await, and React silently no-ops a setState on an
+  // unmounted component — with no client-side telemetry, a save that failed in that window was
+  // recorded nowhere and shown to nobody. Tap the tick, tap Done: one thumb movement on a phone,
+  // and the user walks away believing the mark happened.
+  //
+  // The desktop row never had this — its checkbox is mounted for the life of the page, so its
+  // error stands until the reader navigates. Closing is therefore withheld, not the error
+  // relocated: the request is allowed to land where its failure already knows how to render.
+  const [checkboxBusy, setCheckboxBusy] = useState(false)
+  const [editorBusy, setEditorBusy] = useState(false)
+  const busy = checkboxBusy || editorBusy
   // `label` is never null — presentTransaction owns the fallback so this card and the desktop row
   // cannot answer "what is this called?" differently (spec §9).
   const { label: name, display, tone, isCC, shareAmount } = presentTransaction(t)
@@ -68,8 +83,17 @@ export function TransactionCard({
       <Dialog
         open={open}
         title={name}
+        // Escape and the Android back gesture come through onCancel; `busy` makes Dialog withhold
+        // them, and Done is disabled for the same window. Both routes out, because either one
+        // unmounts the request underneath itself. The wait is one round trip, and it is exactly
+        // the precedent ReimbursableEditor already sets for its own Cancel and Save.
+        busy={busy}
         onCancel={() => setOpen(false)}
-        footer={<Button variant="secondary" onClick={() => setOpen(false)}>Done</Button>}
+        footer={
+          <Button variant="secondary" disabled={busy} onClick={() => setOpen(false)}>
+            Done
+          </Button>
+        }
       >
         {/* Mounted only while the sheet is open. PER_PAGE is 200 and both layouts render for every
             transaction, so a closed sheet per row shipped a <select> of 19 <option>s, a checkbox,
@@ -113,6 +137,7 @@ export function TransactionCard({
                     label={name}
                     pfcDetailed={t.pfc_detailed}
                     userCategory={t.user_category}
+                    onBusyChange={setCheckboxBusy}
                   />
                 </div>
 
@@ -123,6 +148,7 @@ export function TransactionCard({
                   note={t.reimbursable_note}
                   label={name}
                   date={t.date}
+                  onBusyChange={setEditorBusy}
                 />
               </div>
             )}

@@ -21,6 +21,7 @@ export function Dialog({
   children,
   footer,
   initialFocusRef,
+  busy = false,
   onCancel,
 }: {
   open: boolean
@@ -30,6 +31,10 @@ export function Dialog({
   // What takes focus when the dialog opens. Destructive dialogs point this at Cancel so a stray
   // Enter does nothing; a form points it at the first field.
   initialFocusRef?: RefObject<HTMLElement | null>
+  // Something inside is mid-flight and the dialog must not be dismissed out from under it. Only
+  // the Escape/back route is the shell's business — a caller's own footer buttons are the caller's
+  // to disable. Defaults to false, so every dialog that does not pass it behaves exactly as before.
+  busy?: boolean
   onCancel: () => void
 }) {
   const ref = useRef<HTMLDialogElement>(null)
@@ -77,6 +82,11 @@ export function Dialog({
         // hid it, because those fire `close`, which no ancestor handles.
         if (e.target !== ref.current) return
         e.preventDefault() // let React own the open state instead of the DOM closing itself
+        // preventDefault happens either way — swallowing the cancel without it would let the DOM
+        // close the element while React still believes it is open. `busy` only withholds the
+        // close itself: a caller that unmounts its children on close would otherwise unmount a
+        // request mid-flight, and the setState carrying its failure would land on nothing.
+        if (busy) return
         onCancel()
       }}
       className="m-auto w-[min(28rem,calc(100vw-2rem))] rounded-card border border-line bg-surface p-0 text-ink shadow-lg backdrop:bg-ink/40"

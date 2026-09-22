@@ -1,9 +1,12 @@
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest'
-import { render, screen, cleanup, fireEvent, within } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import { TransactionCard } from '@/components/TransactionCard'
 import { TransactionRow } from '@/components/TransactionRow'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {} }) }))
 
 // jsdom does not implement showModal()/close() on <dialog>, so Dialog's open effect cannot run
@@ -275,5 +278,116 @@ describe('TransactionCard sheet', () => {
   it('explains what a card payment is instead of offering controls', () => {
     openSheet({ pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', amount: -7866.69 })
     expect(screen.getByText(/moves between your accounts/)).toBeTruthy()
+  })
+})
+
+// Closing the sheet UNMOUNTS its children — they are gated on `open` so that 200 closed sheets do
+// not ship in every page's HTML. ReimbursableCheckbox.set() and ReimbursableEditor.save() both
+// call setError() AFTER their await, and React silently no-ops a setState on an unmounted
+// component. There is no client-side telemetry, so a save that failed in that window was recorded
+// nowhere and shown to nobody: the user taps the tick, taps Done, and believes the mark happened.
+//
+// On a phone that is one thumb movement, and it is a regression THIS branch introduced — on the
+// desktop row the checkbox is mounted for the life of the page, so its error stands until the
+// reader navigates away.
+//
+// The fix is to refuse to close while a child's mutation is in flight, which is the only way the
+// failure is guaranteed to have somewhere to render when it arrives.
+describe('TransactionCard sheet with a save in flight', () => {
+  // A fetch the test settles by hand, so "in flight" is a state the test controls rather than
+  // races. Resolving it is how the failure is delivered.
+  function pendingFetch() {
+    let settle!: (res: { ok: boolean; json: () => Promise<unknown> }) => void
+    const fetchMock = vi.fn(() => new Promise((resolve) => { settle = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+    return {
+      refuse: () => settle({ ok: false, json: async () => ({ error: 'nope' }) }),
+      accept: () => settle({ ok: true, json: async () => ({}) }),
+    }
+  }
+
+  function openSheet(overrides: Partial<typeof txn> = {}) {
+    render(
+      <TransactionCard t={{ ...txn, ...overrides }} categoryName="Food" categoryOptions={['Food', 'Grocery']} />
+    )
+    fireEvent.click(screen.getByRole('button', { name: /edit/ }))
+  }
+
+  const done = () => screen.getByRole('button', { name: 'Done' })
+  // `cancel` is Escape and the Android back gesture. It does not bubble in the DOM; React walks
+  // the fiber tree anyway, so this is dispatched on the sheet's own <dialog>.
+  const escape = () =>
+    fireEvent(
+      screen.getAllByRole('dialog')[0],
+      new Event('cancel', { bubbles: false, cancelable: true })
+    )
+
+  it('will not close on Done while a reimbursable tick is still in flight', () => {
+    pendingFetch()
+    openSheet()
+    fireEvent.click(screen.getByRole('checkbox'))
+
+    fireEvent.click(done())
+
+    // Still mounted — which is the only reason the failure below has anywhere to land.
+    expect(screen.queryByRole('checkbox')).not.toBeNull()
+  })
+
+  it('shows the failure rather than discarding it when Done is tapped mid-save', async () => {
+    const req = pendingFetch()
+    openSheet()
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(done())
+
+    req.refuse()
+
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('nope'))
+    // And the box is back where the server still has it, in front of the reader.
+    expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false)
+  })
+
+  it('will not close on Escape while a reimbursable tick is still in flight', () => {
+    pendingFetch()
+    openSheet()
+    fireEvent.click(screen.getByRole('checkbox'))
+
+    escape()
+
+    expect(screen.queryByRole('checkbox')).not.toBeNull()
+  })
+
+  it('closes again once the save has settled', async () => {
+    const req = pendingFetch()
+    openSheet()
+    fireEvent.click(screen.getByRole('checkbox'))
+    req.accept()
+    await waitFor(() => expect((done() as HTMLButtonElement).disabled).toBe(false))
+
+    fireEvent.click(done())
+
+    expect(screen.queryByRole('checkbox')).toBeNull()
+  })
+
+  // Same shape, the other child: ReimbursableEditor.save() also sets its error after the await.
+  it('will not close while the partial-amount editor is saving', () => {
+    pendingFetch()
+    openSheet()
+    fireEvent.click(screen.getByRole('button', { name: /partial reimbursable amount/ }))
+    fireEvent.change(screen.getByLabelText(/How much is coming back/), { target: { value: '40' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    fireEvent.click(done())
+
+    expect(screen.queryByRole('checkbox')).not.toBeNull()
+  })
+
+  // Nothing is in flight here, so the ordinary way out must be untouched.
+  it('still closes on Done when no save is in flight', () => {
+    openSheet()
+    expect(screen.queryByRole('checkbox')).not.toBeNull()
+
+    fireEvent.click(done())
+
+    expect(screen.queryByRole('checkbox')).toBeNull()
   })
 })
