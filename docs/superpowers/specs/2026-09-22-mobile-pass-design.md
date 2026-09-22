@@ -128,7 +128,11 @@ Amount keeps the existing sign convention (`display = -t.amount`, `TransactionRo
 
 ### 3.2 The sheet
 
-Tapping a row opens a bottom sheet containing the category picker and the reimbursable controls. **The sheet is the reason this layout was chosen over the alternatives.** The category picker offers 18 options; as an inline control in a ~130px cell it is unusable with a thumb, and as a native `select` it loses the labelling the desktop picker has. In a sheet each category is a full-width tap target.
+Tapping a row opens a sheet containing the category picker and the reimbursable controls. **The sheet is the reason this layout was chosen over the alternatives.**
+
+The reason is room, not control quality. `CategoryPicker` is already a native `<select>` (`CategoryPicker.tsx:44`) carrying an `aria-label`, and iOS renders that as a full-screen wheel — on its own it is good on a phone. What fails is that a 390px row has nowhere to put a select, a checkbox, an editor trigger *and* an amount at the same time. `Dialog`'s own comment records the second half of the problem: the table sits in `overflow-x-auto` inside a Card with `overflow-hidden`, so an anchored panel is clipped by two ancestors, "worst on the narrow screens that need it most."
+
+**The sheet therefore reuses `CategoryPicker`, `ReimbursableCheckbox` and `ReimbursableEditor` unchanged**, and is built on the existing `Dialog`. No phone-specific variant of any control is written; the sheet is a container that gives the three existing ones somewhere to live.
 
 The reimbursable checkbox and the partial editor move into the same sheet, which also resolves the problem that a compact row has nowhere to put them.
 
