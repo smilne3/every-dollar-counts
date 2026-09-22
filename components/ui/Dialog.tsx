@@ -53,6 +53,13 @@ export function Dialog({
       ref={ref}
       aria-labelledby={titleId}
       onCancel={(e) => {
+        // Only OUR <dialog>. `cancel` does not bubble in the DOM, but React attaches it to each
+        // <dialog> directly and then walks the fiber ancestor chain anyway (`accumulateTargetOnly`
+        // is true only for scroll/scrollend). A Dialog mounted inside a Dialog — which is what
+        // TransactionCard's sheet does with ReimbursableEditor — therefore closed BOTH on Escape
+        // or the Android back gesture, dumping the user back to the list mid-edit. Cancel and Save
+        // hid it, because those fire `close`, which no ancestor handles.
+        if (e.target !== ref.current) return
         e.preventDefault() // let React own the open state instead of the DOM closing itself
         onCancel()
       }}
