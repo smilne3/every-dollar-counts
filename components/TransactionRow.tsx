@@ -90,7 +90,7 @@ export function TransactionRow({
               here must fit ~19 characters — measure, do not estimate.
               An outflow's share is money out (shown negative); an inflow's untagged remainder is
               money in (shown positive) — matching the `display` convention above. */}
-          {isCC ? 'between accounts' : shareAmount !== null ? `your share ${money(shareAmount)}` : ' '}
+          {isCC ? 'between accounts' : shareAmount !== null ? `your share ${money(shareAmount)}` : ' '}
         </span>
       </td>
       {/* Its own column, under a "Reimbursable" header: the word used to be printed in every cell,

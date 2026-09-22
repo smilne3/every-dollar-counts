@@ -58,6 +58,15 @@ describe('TransactionRow amount cell', () => {
     expect(line.className.split(/\s+/)).not.toContain('hidden')
   })
 
+  // A lone ASCII space collapses under white-space: normal, so the reserved line would have no
+  // line box and the row would grow on every tick — #50 again. The non-breaking space is what
+  // makes `invisible` actually reserve height. Nothing else in the suite distinguishes them.
+  it('reserves the line with a non-breaking space, which does not collapse', () => {
+    const { container } = renderRow()
+    const line = container.querySelector('td span.block') as HTMLElement
+    expect(line.textContent).toBe(' ')
+  })
+
   // The route refuses credit-card payments (#31), so the editor must not be offered on one. The
   // guard moved out of RowMenu and into this cell, and nothing covered it.
   it('offers no editor on a credit-card payment', () => {
