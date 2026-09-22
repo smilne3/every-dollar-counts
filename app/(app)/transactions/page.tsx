@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { TransactionRow } from '@/components/TransactionRow'
+import { TransactionCard } from '@/components/TransactionCard'
 import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
@@ -210,7 +211,20 @@ export default async function TransactionsPage({
         </Card>
       ) : (
         <Card className="overflow-hidden p-0">
-          <div className="overflow-x-auto">
+          {/* Phone: the six-column table needs ~800px and gets 390, where `w-full table-fixed`
+              stops overflow-x-auto engaging and the amount is painted over the category pill.
+              Below md the same rows render as cards instead. */}
+          <div className="md:hidden">
+            {list.map((t) => (
+              <TransactionCard
+                key={t.id}
+                t={t}
+                categoryName={effectiveCategory(t, pfcMap)}
+                categoryOptions={categoryOptions}
+              />
+            ))}
+          </div>
+          <div className="hidden overflow-x-auto md:block">
             <table className="w-full table-fixed text-sm">
               <colgroup>
                 <col className="w-32" />
