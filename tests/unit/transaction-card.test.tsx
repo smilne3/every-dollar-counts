@@ -120,11 +120,11 @@ describe('TransactionCard', () => {
 // contained." §2 accepts that a row's presentation exists twice; this is the whole of what stops
 // the two meaning different things.
 //
-// Each surface is read down to the four things that carry MEANING rather than markup — the label,
-// the category, the amount text, and the tone class that says what KIND of money this is — and
-// those are compared. The previous version compared the card's entire textContent against an
-// amount scraped from the row, which the sheet's own `{date} · {money(display)}` line satisfied on
-// its own: a wrong amount in the visible row still passed, on the sheet's copy.
+// Each surface is read down to the five things that carry MEANING rather than markup — the label,
+// the category, the amount text, the share text, and the tone class that says what KIND of money
+// this is — and those are compared. The previous version compared the card's entire textContent
+// against an amount scraped from the row, which the sheet's own `{date} · {money(display)}` line
+// satisfied on its own: a wrong amount in the visible row still passed, on the sheet's copy.
 describe('phone card and desktop row agree', () => {
   const TONES = ['text-emerald', 'text-muted', 'text-ink']
 
@@ -138,7 +138,20 @@ describe('phone card and desktop row agree', () => {
     return found[0]
   }
 
-  type Surface = { label: string; category: string; amount: string; tone: string }
+  type Surface = { label: string; category: string; amount: string; share: string; tone: string }
+
+  // The share used to be dropped by BOTH extractors — phone() split the meta line on ' · ' and
+  // took [1], desktop()'s amount regex stopped before it — so the one field where the -0 bug lived
+  // was the one field never diffed. The two files each hardcoded '-$60.00' instead, which means
+  // editing one of them to a wrong value left the suite green.
+  //
+  // Scanning the whole surface for the claim, rather than a fixed position in it, is what lets the
+  // same extractor read both: the card puts it on the meta line after the category, the row puts
+  // it in the reserved line under the figure — and that row line does double duty as the card-
+  // payment explainer, which is not a share and must not be read as one.
+  function shareIn(text: string): string {
+    return text.match(/your share -?\$[\d,]+\.\d{2}/)?.[0] ?? ''
+  }
 
   // The visible row ONLY. The sheet mounts the same merchant name in its title and its own
   // `date · amount` line, so anything scoped to the whole card can be satisfied by the sheet.
@@ -154,6 +167,7 @@ describe('phone card and desktop row agree', () => {
       // `date · category`, with ` · your share …` appended when the transaction is marked.
       category: (meta.textContent ?? '').split(' · ')[1] ?? '',
       amount: amount.textContent ?? '',
+      share: shareIn(meta.textContent ?? ''),
       tone: toneOf(amount),
     }
   }
@@ -172,6 +186,7 @@ describe('phone card and desktop row agree', () => {
       category: picker ? picker.value : (cells[2].textContent ?? '').trim(),
       // The amount cell also holds the always-reserved share line beneath the figure.
       amount: (cells[3].textContent ?? '').match(/^-?\$[\d,]+\.\d{2}/)?.[0] ?? '',
+      share: shareIn(cells[3].textContent ?? ''),
       tone: toneOf(cells[3]),
     }
   }
@@ -188,17 +203,22 @@ describe('phone card and desktop row agree', () => {
     { name: 'income inflow', o: { amount: -2772.63, pfc_detailed: 'INCOME_WAGES' } },
     { name: 'credit-card payment', o: { amount: -7866.69, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' } },
     { name: 'partly-marked charge', o: { reimbursable_amount: 40 } },
+    // Ticking the box marks the WHOLE amount, so this is the commonest marked state there is — and
+    // the most recently fixed regression in this codebase: the remainder is zero, and negating a
+    // zero gave -0, which Intl renders as "-$0.00".
+    { name: 'fully-marked charge', o: { reimbursable_amount: 100 } },
     // M5: the two surfaces used to disagree here — the card said "Transaction", the row rendered
     // the empty label — because presentTransaction returned null and each decided for itself.
     { name: 'transaction with no merchant and no name', o: { merchant_name: null, name: null } },
   ]
 
   for (const c of cases) {
-    it(`agree on label, category, amount and tone for a ${c.name}`, () => {
+    it(`agree on label, category, amount, share and tone for a ${c.name}`, () => {
       const [card, row] = bothWays(c.o)
       expect(card.label).toBe(row.label)
       expect(card.category).toBe(row.category)
       expect(card.amount).toBe(row.amount)
+      expect(card.share).toBe(row.share)
       expect(card.tone).toBe(row.tone)
     })
   }
@@ -215,6 +235,20 @@ describe('phone card and desktop row agree', () => {
     expect(card.tone).toBe('text-muted')
     expect(row.tone).toBe('text-muted')
     expect(card.amount).toBe('$7,866.69')
+  })
+
+  // Spelled out for the same reason as the card-payment case above: agreeing on '-$0.00' would
+  // satisfy the loop while both surfaces were wrong, and this is the exact string the fix removed.
+  it('both read a fully-marked share as zero rather than minus zero', () => {
+    const [card, row] = bothWays({ amount: 100, reimbursable_amount: 100 })
+    expect(card.share).toBe('your share $0.00')
+    expect(row.share).toBe('your share $0.00')
+  })
+
+  it('both state the same share on a partly-marked charge', () => {
+    const [card, row] = bothWays({ amount: 100, reimbursable_amount: 40 })
+    expect(card.share).toBe('your share -$60.00')
+    expect(row.share).toBe('your share -$60.00')
   })
 
   it('both offer the real category on an ordinary charge', () => {
