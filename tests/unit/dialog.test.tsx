@@ -41,6 +41,8 @@ describe('Dialog', () => {
   //
   // It defaults to false: ConfirmDialog (BankList, CategoryManager, GoalsList) and
   // ReimbursableEditor pass nothing, and the test above is the proof that those are untouched.
+  // ConfirmDialog's own `busy` is a different switch — it greys out Cancel and Confirm and is
+  // deliberately not forwarded, so those three dialogs keep the Escape they have always had.
   describe('while busy', () => {
     it('withholds the cancel instead of dismissing a request mid-flight', () => {
       const onCancel = vi.fn()

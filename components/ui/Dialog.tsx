@@ -34,6 +34,12 @@ export function Dialog({
   // Something inside is mid-flight and the dialog must not be dismissed out from under it. Only
   // the Escape/back route is the shell's business — a caller's own footer buttons are the caller's
   // to disable. Defaults to false, so every dialog that does not pass it behaves exactly as before.
+  //
+  // NOT the same switch as ConfirmDialog's own `busy`, which only greys out Cancel and Confirm and
+  // is deliberately not forwarded here: BankList, CategoryManager and GoalsList all set it during
+  // a delete, and forwarding it would silently take Escape away from three dialogs that have
+  // always had it. Whether a destructive confirm should also hold Escape is a separate question
+  // from this one, which is about children being unmounted underneath a request.
   busy?: boolean
   onCancel: () => void
 }) {
