@@ -1,5 +1,5 @@
 import { money } from '@/lib/format'
-import { isCreditCardPayment } from '@/lib/categories'
+import { presentTransaction, TONE_CLASS } from '@/lib/transaction-presentation'
 import { CategoryPicker } from './CategoryPicker'
 import { ReimbursableCheckbox } from './ReimbursableCheckbox'
 import { ReimbursableEditor } from './ReimbursableEditor'
@@ -27,17 +27,10 @@ export function TransactionRow({
   categoryName: string
   categoryOptions: string[]
 }) {
-  // Plaid: amount > 0 means money OUT. Show spending as negative.
-  const display = -t.amount
+  // Meaning (sign convention, colour rule, card-payment exemption) lives once in
+  // lib/transaction-presentation.ts so the phone card can't drift from this table.
+  const { label, display, tone, isCC, shareAmount } = presentTransaction(t)
   const marked = Number(t.reimbursable_amount ?? 0)
-  // What this row actually contributes once the reimbursable mark is removed — shown alongside the
-  // real bank amount so the row still reconciles with the statement.
-  const share = Math.max(0, Math.abs(t.amount) - marked)
-  const label = t.merchant_name ?? t.name
-  // Guards #31, same as ReimbursableCheckbox: the route refuses credit-card payments, so the partial
-  // editor must not be offered on one either — reuse the one predicate rather than
-  // letting a second copy drift from it.
-  const isCC = isCreditCardPayment({ pfc_detailed: t.pfc_detailed, user_category: t.user_category })
 
   return (
     <tr className="border-b border-line transition-colors hover:bg-surface-2">
@@ -73,9 +66,7 @@ export function TransactionRow({
           arriving, so a $7,866.69 card payment read as income. Muted says "this is not new money"
           without hiding a transaction that genuinely happened on the statement. */}
       <td
-        className={`px-4 py-3 text-right font-medium tabular-nums ${
-          isCC ? 'text-muted' : display < 0 ? 'text-ink' : 'text-emerald'
-        }`}
+        className={`px-4 py-3 text-right font-medium tabular-nums ${TONE_CLASS[tone]}`}
       >
         {money(display)}
         {/* ALWAYS rendered, merely hidden when unmarked. Conditionally mounting this line meant
@@ -99,11 +90,7 @@ export function TransactionRow({
               here must fit ~19 characters — measure, do not estimate.
               An outflow's share is money out (shown negative); an inflow's untagged remainder is
               money in (shown positive) — matching the `display` convention above. */}
-          {isCC
-            ? 'between accounts'
-            : marked > 0
-              ? `your share ${money(t.amount < 0 ? share : -share)}`
-              : '\u00A0'}
+          {isCC ? 'between accounts' : shareAmount !== null ? `your share ${money(shareAmount)}` : ' '}
         </span>
       </td>
       {/* Its own column, under a "Reimbursable" header: the word used to be printed in every cell,
