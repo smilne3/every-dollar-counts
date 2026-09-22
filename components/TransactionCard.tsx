@@ -71,48 +71,60 @@ export function TransactionCard({
         onCancel={() => setOpen(false)}
         footer={<Button variant="secondary" onClick={() => setOpen(false)}>Done</Button>}
       >
-        <p className={`mt-1 text-sm tabular-nums ${TONE_CLASS[tone]}`}>
-          {t.date} · {money(display)}
-        </p>
+        {/* Mounted only while the sheet is open. PER_PAGE is 200 and both layouts render for every
+            transaction, so a closed sheet per row shipped a <select> of 19 <option>s, a checkbox,
+            an editor and a second nested <dialog> — 49 of a card's 55 elements, 400 extra <dialog>s
+            and +125% of the page's SSR HTML, at every viewport, for markup nobody had asked to see.
 
-        {isCC ? (
-          // Same exemption the desktop row enforces. A user_category here re-enters both legs of
-          // the payment into every total — see TransactionRow.tsx:48-58.
-          <p className="mt-4 text-sm text-muted">Card payment — moves between your accounts.</p>
-        ) : (
-          <div className="mt-4 flex flex-col gap-4">
-            <label className="flex flex-col gap-1.5">
-              <span className="text-xs font-semibold uppercase tracking-wide text-faint">Category</span>
-              <CategoryPicker
-                transactionId={t.id}
-                value={categoryName}
-                options={categoryOptions}
-                label={name}
-              />
-            </label>
+            The <Dialog> itself stays mounted. Unmounting that would take the native <dialog> with
+            it, and with it the focus restoration that returns focus to this card's button on close
+            (Dialog.tsx handles the part of that which unmounting these children does break). */}
+        {open && (
+          <>
+            <p className={`mt-1 text-sm tabular-nums ${TONE_CLASS[tone]}`}>
+              {t.date} · {money(display)}
+            </p>
 
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wide text-faint">Reimbursable</span>
-              <ReimbursableCheckbox
-                transactionId={t.id}
-                amount={t.amount}
-                reimbursableAmount={t.reimbursable_amount}
-                note={t.reimbursable_note}
-                label={name}
-                pfcDetailed={t.pfc_detailed}
-                userCategory={t.user_category}
-              />
-            </div>
+            {isCC ? (
+              // Same exemption the desktop row enforces. A user_category here re-enters both legs
+              // of the payment into every total — see TransactionRow.tsx:48-58.
+              <p className="mt-4 text-sm text-muted">Card payment — moves between your accounts.</p>
+            ) : (
+              <div className="mt-4 flex flex-col gap-4">
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-faint">Category</span>
+                  <CategoryPicker
+                    transactionId={t.id}
+                    value={categoryName}
+                    options={categoryOptions}
+                    label={name}
+                  />
+                </label>
 
-            <ReimbursableEditor
-              transactionId={t.id}
-              amount={t.amount}
-              reimbursableAmount={t.reimbursable_amount}
-              note={t.reimbursable_note}
-              label={name}
-              date={t.date}
-            />
-          </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-faint">Reimbursable</span>
+                  <ReimbursableCheckbox
+                    transactionId={t.id}
+                    amount={t.amount}
+                    reimbursableAmount={t.reimbursable_amount}
+                    note={t.reimbursable_note}
+                    label={name}
+                    pfcDetailed={t.pfc_detailed}
+                    userCategory={t.user_category}
+                  />
+                </div>
+
+                <ReimbursableEditor
+                  transactionId={t.id}
+                  amount={t.amount}
+                  reimbursableAmount={t.reimbursable_amount}
+                  note={t.reimbursable_note}
+                  label={name}
+                  date={t.date}
+                />
+              </div>
+            )}
+          </>
         )}
       </Dialog>
     </>

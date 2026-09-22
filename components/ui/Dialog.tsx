@@ -33,6 +33,9 @@ export function Dialog({
   onCancel: () => void
 }) {
   const ref = useRef<HTMLDialogElement>(null)
+  // What had focus before the dialog took it. The platform normally remembers this for us; see
+  // the close branch below for the one case where it cannot.
+  const opener = useRef<HTMLElement | null>(null)
   // Generated, not hardcoded: two dialogs mounted at once would otherwise share one element id and
   // the second would take its accessible name from the first one's heading.
   const titleId = useId()
@@ -41,10 +44,23 @@ export function Dialog({
     const d = ref.current
     if (!d) return
     if (open && !d.open) {
+      // Read BEFORE showModal(), which moves focus into the dialog.
+      opener.current = document.activeElement as HTMLElement | null
       d.showModal()
       initialFocusRef?.current?.focus()
     } else if (!open && d.open) {
+      const previous = opener.current
+      opener.current = null
       d.close()
+      // close() restores focus to the opener by itself, and where it does this is a no-op. It does
+      // NOT when focus has already left the dialog — which is what happens when a caller unmounts
+      // the dialog's contents in the same commit that closes it. TransactionCard does exactly that,
+      // so that 200 closed sheets do not ship in every page's HTML, and since showModal() puts
+      // focus on the first focusable child, that is the ordinary Escape path rather than a corner
+      // of one. The platform's other route back is transient activation, which Escape does not
+      // grant. Left alone, focus lands on <body> and the next Tab starts at the top of the page.
+      const active = document.activeElement
+      if ((active === null || active === document.body) && previous?.isConnected) previous.focus()
     }
   }, [open, initialFocusRef])
 

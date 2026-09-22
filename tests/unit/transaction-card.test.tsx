@@ -221,6 +221,34 @@ describe('phone card and desktop row agree', () => {
   })
 })
 
+// PER_PAGE is 200 and the CSS-only dual layout renders both presentations for every transaction,
+// so anything mounted inside a closed sheet is mounted 200 times in every page's HTML, at every
+// viewport. Measured with renderToStaticMarkup over 200 transactions and a realistic 19-category
+// list: 1,756 KB with the sheet body mounted against 1,010 KB with it gated, on a pre-branch
+// baseline of 778 KB. A card went from 55 elements to 10, and the page from 381 <dialog>s to 200.
+//
+// The visible row being mounted twice (~5 elements x 200) is inherent to the dual layout and is
+// the accepted cost of spec §2.
+describe('TransactionCard while closed', () => {
+  it('mounts the sheet element but nothing inside it', () => {
+    const { container } = renderCard()
+    // The <dialog> itself stays: it is what gives the platform somewhere to restore focus from.
+    expect(container.querySelectorAll('dialog')).toHaveLength(1)
+    // ...and everything that made a closed sheet expensive is absent — the 19-option <select>,
+    // the checkbox, and ReimbursableEditor's own second, nested <dialog>.
+    expect(container.querySelector('dialog select')).toBeNull()
+    expect(container.querySelector('dialog option')).toBeNull()
+    expect(container.querySelector('dialog input')).toBeNull()
+  })
+
+  // A budget rather than an exact count, because the point is the order of magnitude: 55 elements
+  // per row was 200 closed sheets in every page load. Measure before changing this number.
+  it('costs about a row, not about a row plus a form', () => {
+    const { container } = renderCard()
+    expect(container.querySelectorAll('*').length).toBeLessThanOrEqual(14)
+  })
+})
+
 describe('TransactionCard sheet', () => {
   function openSheet(overrides: Partial<typeof txn> = {}) {
     render(

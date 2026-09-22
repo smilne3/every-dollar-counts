@@ -34,6 +34,45 @@ describe('Dialog', () => {
     expect(evt.defaultPrevented).toBe(true)
   })
 
+  // A caller that unmounts the dialog's contents as it closes — TransactionCard does, so that 200
+  // closed sheets do not ship in every page's HTML — drops focus to <body> in the same commit,
+  // before close() runs. The platform then has nothing to restore from: its own bookkeeping only
+  // fires while focus is still inside the dialog, and Escape grants no transient activation, which
+  // is its other route back. showModal() focuses the first focusable child, so this is the ordinary
+  // Escape path, not a corner of one.
+  //
+  // jsdom implements neither showModal()'s focus nor close()'s restoration (see the stand-ins
+  // above), so what this pins is the shell's own fallback rather than the platform's.
+  it('puts focus back on the opener when its contents unmount as it closes', () => {
+    function Vanishing() {
+      const [open, setOpen] = useState(false)
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            Open
+          </button>
+          <Dialog open={open} title="Sheet" onCancel={() => setOpen(false)} footer={null}>
+            {open && <input aria-label="Amount" />}
+          </Dialog>
+        </>
+      )
+    }
+    const { container } = render(<Vanishing />)
+    const opener = container.querySelector('button') as HTMLElement
+    opener.focus()
+    fireEvent.click(opener)
+
+    // Stand in for showModal()'s own "focus the first focusable child", which jsdom does not do.
+    const field = container.querySelector('input') as HTMLElement
+    field.focus()
+    expect(document.activeElement).toBe(field)
+
+    cancel(container.querySelector('dialog') as Element)
+
+    expect(container.querySelector('input')).toBeNull()
+    expect(document.activeElement).toBe(opener)
+  })
+
   // TransactionCard mounts ReimbursableEditor — itself a Dialog — INSIDE the sheet's Dialog, so
   // the editor's <dialog> is a fiber descendant of the sheet's. Native `cancel` does not bubble,
   // but React dispatches it up the fiber tree regardless (`accumulateTargetOnly` is true only for
