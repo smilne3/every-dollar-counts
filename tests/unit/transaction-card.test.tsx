@@ -1,10 +1,23 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest'
+import { render, screen, cleanup, fireEvent, within } from '@testing-library/react'
 import { TransactionCard } from '@/components/TransactionCard'
 import { TransactionRow } from '@/components/TransactionRow'
 
 afterEach(cleanup)
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {} }) }))
+
+// jsdom does not implement showModal()/close() on <dialog>, so Dialog's open effect cannot run
+// without these. Copied verbatim from tests/unit/confirm-dialog.test.tsx:11-18, which needs them
+// for the same reason. Real modal behaviour — focus trap, Escape, backdrop — is the platform's
+// job and is verified in the browser (Task 4, Step 5), not here.
+beforeAll(() => {
+  HTMLDialogElement.prototype.showModal = function () {
+    this.open = true
+  }
+  HTMLDialogElement.prototype.close = function () {
+    this.open = false
+  }
+})
 
 const txn = {
   id: 't1',
@@ -25,10 +38,15 @@ function renderCard(overrides: Partial<typeof txn> = {}) {
 }
 
 describe('TransactionCard', () => {
+  // Scoped to the row itself: the sheet (Task 3) mounts a dialog with the same merchant name in
+  // its title, present in the DOM even while closed (native <dialog> hides it with `display:
+  // none`, which `getByRole` respects but a plain `getByText` does not). Unscoped, this test would
+  // fail on "Found multiple elements" rather than on anything meaningful.
   it('shows the merchant and the display amount', () => {
     renderCard()
-    expect(screen.getByText('Joe S Den')).toBeTruthy()
-    expect(screen.getByText('-$100.00')).toBeTruthy()
+    const row = screen.getByRole('button', { name: /Joe S Den/ })
+    expect(within(row).getByText('Joe S Den')).toBeTruthy()
+    expect(within(row).getByText('-$100.00')).toBeTruthy()
   })
 
   it('puts date and category on one muted meta line', () => {
@@ -48,9 +66,19 @@ describe('TransactionCard', () => {
     expect(screen.queryByText(/your share/)).toBeNull()
   })
 
-  it('opens a sheet when tapped', () => {
+  it('renders the whole row as a button, named for the merchant', () => {
     renderCard()
     expect(screen.getByRole('button', { name: /Joe S Den/ })).toBeTruthy()
+  })
+
+  // A card payment moves money between your own accounts — see lib/transaction-presentation.ts.
+  // Painting it emerald (the colour this app uses for money arriving) made a real $7,866.69
+  // payment read as income (#31). TONE_CLASS is exercised directly elsewhere; this asserts the
+  // same guarantee at this component's own boundary.
+  it('never paints a card payment amount as income', () => {
+    renderCard({ amount: -7866.69, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' })
+    const amountEl = screen.getByText('$7,866.69')
+    expect(amountEl.className).not.toContain('text-emerald')
   })
 })
 
@@ -79,4 +107,33 @@ describe('phone card and desktop row agree', () => {
       expect(cardText).toContain(amount as string)
     })
   }
+})
+
+describe('TransactionCard sheet', () => {
+  function openSheet(overrides: Partial<typeof txn> = {}) {
+    render(
+      <TransactionCard t={{ ...txn, ...overrides }} categoryName="Food" categoryOptions={['Food', 'Grocery']} />
+    )
+    fireEvent.click(screen.getByRole('button', { name: /edit/ }))
+  }
+
+  it('offers the category picker on an ordinary charge', () => {
+    openSheet()
+    expect(screen.getByRole('combobox')).toBeTruthy()
+  })
+
+  // The constraint this whole plan is most at risk of breaking. Setting user_category on a card
+  // payment re-enters both legs into the totals: on a real $7,866.69 payment that is September
+  // spending of $3,949.16 versus MINUS $3,917.53.
+  it('offers no picker, checkbox or editor on a credit-card payment', () => {
+    openSheet({ pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', amount: -7866.69 })
+    expect(screen.queryByRole('combobox')).toBeNull()
+    expect(screen.queryByRole('checkbox')).toBeNull()
+    expect(screen.queryByRole('button', { name: /partial reimbursable amount/ })).toBeNull()
+  })
+
+  it('explains what a card payment is instead of offering controls', () => {
+    openSheet({ pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', amount: -7866.69 })
+    expect(screen.getByText(/moves between your accounts/)).toBeTruthy()
+  })
 })
