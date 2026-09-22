@@ -1,8 +1,16 @@
 import { isCreditCardPayment } from './categories'
 
-// What a transaction MEANS, separate from how any one surface draws it. The desktop <tr> and the
-// phone card have different markup and must not have different meaning: the sign convention, the
-// colour rule and the card-payment exemption live here once, so a change reaches both or neither.
+// What a transaction MEANS, separate from how any one surface draws it. The desktop <tr>
+// (TransactionRow) and the phone card (TransactionCard) have different markup and must not have
+// different meaning: for those two, the sign convention, the colour rule and the card-payment
+// exemption live here once, so a change reaches both or neither.
+//
+// Scoped to that pair deliberately. components/RecentActivity.tsx is a KNOWN third copy — it flips
+// the sign itself (line 25) and carries a tone ternary structurally identical to TONE_CLASS (lines
+// 34 and 52) — and it does not go through here. It renders a different, dashboard-sized list from
+// a different shape (ActivityItem, with the card-payment call already made upstream as
+// `internalTransfer`), so consolidating it is a separate piece of work, not an oversight. Anyone
+// changing the rules below has to change that file too.
 export type PresentableTxn = {
   amount: number
   name: string | null

@@ -86,8 +86,8 @@ describe('TransactionCard', () => {
 
   // The aria-label REPLACES the button's accessible name rather than augmenting it, so anything
   // the meta line shows a sighted user has to be repeated into it or a screen-reader user hears
-  // merchant + amount and nothing else. Cutting it back to exactly that left all 347 tests green,
-  // which is why this now asserts the content rather than only that a name exists.
+  // merchant + amount and nothing else. Cutting it back to exactly that left the whole suite
+  // green, which is why this now asserts the content rather than only that a name exists.
   it('carries the category and the share in its accessible name', () => {
     renderCard({ reimbursable_amount: 40 })
     const name = screen.getByRole('button', { name: /Joe S Den/ }).getAttribute('aria-label') ?? ''
@@ -413,6 +413,30 @@ describe('TransactionCard sheet with a save in flight', () => {
     fireEvent.click(done())
 
     expect(screen.queryByRole('checkbox')).not.toBeNull()
+  })
+
+  // Holding someone inside a sheet they cannot leave would be a worse bug than the one above, so
+  // the state that withholds the exit is tied to the controls that could have set it existing. A
+  // refresh turning this row into a card payment removes both of them.
+  it('does not lock the sheet shut when the controls disappear mid-flight', () => {
+    pendingFetch()
+    const { rerender } = render(
+      <TransactionCard t={txn} categoryName="Food" categoryOptions={['Food']} />
+    )
+    fireEvent.click(screen.getByRole('button', { name: /edit/ }))
+    fireEvent.click(screen.getByRole('checkbox'))
+    expect((done() as HTMLButtonElement).disabled).toBe(true)
+
+    rerender(
+      <TransactionCard
+        t={{ ...txn, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', amount: -7866.69 }}
+        categoryName="Food"
+        categoryOptions={['Food']}
+      />
+    )
+
+    expect(screen.queryByRole('checkbox')).toBeNull()
+    expect((done() as HTMLButtonElement).disabled).toBe(false)
   })
 
   // Nothing is in flight here, so the ordinary way out must be untouched.

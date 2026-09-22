@@ -48,10 +48,14 @@ export function TransactionCard({
   // relocated: the request is allowed to land where its failure already knows how to render.
   const [checkboxBusy, setCheckboxBusy] = useState(false)
   const [editorBusy, setEditorBusy] = useState(false)
-  const busy = checkboxBusy || editorBusy
   // `label` is never null — presentTransaction owns the fallback so this card and the desktop row
   // cannot answer "what is this called?" differently (spec §9).
   const { label: name, display, tone, isCC, shareAmount } = presentTransaction(t)
+  // Gated on isCC as well, so that a refresh which turns this row INTO a card payment — removing
+  // both controls from the sheet — cannot leave a stale "in flight" behind and lock the sheet shut
+  // for good. Holding someone inside a sheet they cannot leave is a worse bug than the one this
+  // is here to prevent, so the state that withholds the exit is tied to the controls existing.
+  const busy = !isCC && (checkboxBusy || editorBusy)
   const categoryLabel = isCC ? 'Card payment' : categoryName
   const shareLabel = shareAmount !== null ? `, your share ${money(shareAmount)}` : ''
 
