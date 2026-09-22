@@ -57,6 +57,46 @@ describe('presentTransaction', () => {
     expect(presentTransaction({ ...base, amount: -100, reimbursable_amount: 40 }).shareAmount).toBe(60)
   })
 
+  // A NaN here used to read as "nothing is marked": `marked > 0` is false, shareAmount comes out
+  // null, and both surfaces then draw a broken value as a perfectly ordinary one. The reader has
+  // no way at all to tell it from a transaction nobody ever ticked.
+  //
+  // Not reachable today — the column is numeric with a CHECK and the only writer clamps — but this
+  // module's whole job is being the authoritative answer, and it added no validation over the
+  // pattern it consolidated. Throwing is the choice this repo already makes when it cannot vouch
+  // for a number: the transactions page throws rather than let "no transactions" and "we could not
+  // read your transactions" look the same (#46). It takes out the list, which is the point; a
+  // wrong share the household believes is the worse outcome.
+  describe('an unreadable reimbursable_amount', () => {
+    const unreadable = [
+      { what: 'a non-numeric string', value: 'forty' as unknown as number },
+      { what: 'NaN itself', value: NaN },
+      { what: 'Infinity', value: Infinity },
+    ]
+
+    for (const { what, value } of unreadable) {
+      it(`refuses ${what} rather than reporting the transaction as unmarked`, () => {
+        expect(() => presentTransaction({ ...base, reimbursable_amount: value })).toThrow(
+          /reimbursable_amount/
+        )
+      })
+    }
+
+    // The message has to be enough to find the row and see what was in it. An error naming neither
+    // is only marginally more useful than the silent wrong render it replaced.
+    it('names the transaction and the value it could not read', () => {
+      expect(() =>
+        presentTransaction({ ...base, reimbursable_amount: 'forty' as unknown as number })
+      ).toThrow(/Joe S Den.*forty|forty.*Joe S Den/)
+    })
+
+    // The guard must not widen into the ordinary cases: null and 0 are how "unmarked" is spelled.
+    it('still treats null and zero as simply unmarked', () => {
+      expect(presentTransaction({ ...base, reimbursable_amount: null }).shareAmount).toBeNull()
+      expect(presentTransaction({ ...base, reimbursable_amount: 0 }).shareAmount).toBeNull()
+    })
+  })
+
   // Ticking the checkbox marks the WHOLE amount, so a zero share is the commonest state there is,
   // not an edge case. Negating a zero remainder produces -0, which Intl renders as "-$0.00" — on
   // the card's meta line and in its accessible name both.

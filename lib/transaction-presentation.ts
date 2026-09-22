@@ -29,7 +29,28 @@ export type PresentedTxn = {
 export function presentTransaction(t: PresentableTxn): PresentedTxn {
   // Plaid: amount > 0 means money OUT. Show spending as negative.
   const display = -t.amount
+  // Plaid always sends `name`, so the fallback is the belt-and-braces case rather than the common
+  // one — but it is the case where the two surfaces used to diverge.
+  const label = t.merchant_name ?? t.name ?? 'Transaction'
   const marked = Number(t.reimbursable_amount ?? 0)
+  // An unreadable amount MUST NOT pass as "unmarked". Left alone, `marked > 0` is false for NaN,
+  // shareAmount comes out null, and both surfaces draw a broken value as a perfectly ordinary
+  // one — indistinguishable, to the reader, from a transaction nobody ever ticked. Infinity is
+  // worse still: it is > 0, so the remainder clamps to zero and the row cheerfully reports "your
+  // share $0.00" on a charge that is entirely unaccounted for.
+  //
+  // Not reachable today: the column is `numeric` with a CHECK, and the only writer clamps. But
+  // this module's stated job is being the authoritative answer, and it inherited no validation
+  // from the pattern it consolidated. Throwing rather than inventing a third rendering is the
+  // choice this codebase already makes when it cannot vouch for a figure — see the transactions
+  // page, which throws rather than let "no transactions" and "we could not read your
+  // transactions" look the same (#46). It does take out the whole list; a wrong share the
+  // household believes is the outcome that is worse.
+  if (!Number.isFinite(marked)) {
+    throw new Error(
+      `reimbursable_amount is not a number on "${label}": ${String(t.reimbursable_amount)}`
+    )
+  }
   const isCC = isCreditCardPayment({ pfc_detailed: t.pfc_detailed, user_category: t.user_category })
   // The remainder, signed to match `display`. Lifted from spendableAmount (lib/reimbursements.ts),
   // INCLUDING its zero-normalisation: without the `=== 0` arm, negating a zero remainder yields
@@ -39,9 +60,7 @@ export function presentTransaction(t: PresentableTxn): PresentedTxn {
   const remainder = Math.max(0, Math.abs(t.amount) - marked)
   const share = remainder === 0 ? 0 : t.amount < 0 ? remainder : -remainder
   return {
-    // Plaid always sends `name`, so the fallback is the belt-and-braces case rather than the
-    // common one — but it is the case where the two surfaces used to diverge.
-    label: t.merchant_name ?? t.name ?? 'Transaction',
+    label,
     display,
     // A card payment is neither spending nor income — both legs are already excluded from every
     // total. Painting the crediting leg emerald made $7,866.69 read as income (#31).
