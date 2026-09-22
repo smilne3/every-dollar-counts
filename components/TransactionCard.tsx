@@ -73,8 +73,10 @@ export function TransactionCard({
       >
         {/* Mounted only while the sheet is open. PER_PAGE is 200 and both layouts render for every
             transaction, so a closed sheet per row shipped a <select> of 19 <option>s, a checkbox,
-            an editor and a second nested <dialog> — 49 of a card's 55 elements, 400 extra <dialog>s
-            and +125% of the page's SSR HTML, at every viewport, for markup nobody had asked to see.
+            an editor and ReimbursableEditor's own second, nested <dialog> — 45 of a card's 55
+            elements, at every viewport, for markup nobody had asked to see. Measured with
+            renderToStaticMarkup over 200 transactions: 1,756 KB against 1,010 KB gated, on a
+            pre-branch baseline of 778 KB, and 381 <dialog> elements against 200.
 
             The <Dialog> itself stays mounted. Unmounting that would take the native <dialog> with
             it, and with it the focus restoration that returns focus to this card's button on close

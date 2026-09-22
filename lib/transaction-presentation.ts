@@ -15,9 +15,9 @@ export type PresentableTxn = {
 export type PresentedTxn = {
   // Never null. It used to be, and the two surfaces then each invented their own answer: the card
   // showed "Transaction", the desktop row rendered the empty label into the merchant cell and
-  // spelled the control labels three further ways ('transaction', and `undefined` for the picker).
-  // A merchant's name is meaning, not markup, so the fallback belongs here with the rest of it —
-  // one answer, and the §9 parity test can pin it.
+  // spelled its control labels two further ways ('transaction' for the checkbox and the editor,
+  // `undefined` for the picker). A merchant's name is meaning, not markup, so the fallback belongs
+  // here with the rest of it — one answer, which the §9 parity test pins.
   label: string
   display: number
   tone: 'out' | 'in' | 'neutral'
