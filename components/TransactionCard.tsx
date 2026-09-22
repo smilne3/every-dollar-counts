@@ -34,8 +34,9 @@ export function TransactionCard({
   categoryOptions: string[]
 }) {
   const [open, setOpen] = useState(false)
-  const { label, display, tone, isCC, shareAmount } = presentTransaction(t)
-  const name = label ?? 'Transaction'
+  // `label` is never null — presentTransaction owns the fallback so this card and the desktop row
+  // cannot answer "what is this called?" differently (spec §9).
+  const { label: name, display, tone, isCC, shareAmount } = presentTransaction(t)
   const categoryLabel = isCC ? 'Card payment' : categoryName
   const shareLabel = shareAmount !== null ? `, your share ${money(shareAmount)}` : ''
 

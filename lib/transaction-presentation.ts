@@ -13,7 +13,12 @@ export type PresentableTxn = {
 }
 
 export type PresentedTxn = {
-  label: string | null
+  // Never null. It used to be, and the two surfaces then each invented their own answer: the card
+  // showed "Transaction", the desktop row rendered the empty label into the merchant cell and
+  // spelled the control labels three further ways ('transaction', and `undefined` for the picker).
+  // A merchant's name is meaning, not markup, so the fallback belongs here with the rest of it —
+  // one answer, and the §9 parity test can pin it.
+  label: string
   display: number
   tone: 'out' | 'in' | 'neutral'
   isCC: boolean
@@ -34,7 +39,9 @@ export function presentTransaction(t: PresentableTxn): PresentedTxn {
   const remainder = Math.max(0, Math.abs(t.amount) - marked)
   const share = remainder === 0 ? 0 : t.amount < 0 ? remainder : -remainder
   return {
-    label: t.merchant_name ?? t.name,
+    // Plaid always sends `name`, so the fallback is the belt-and-braces case rather than the
+    // common one — but it is the case where the two surfaces used to diverge.
+    label: t.merchant_name ?? t.name ?? 'Transaction',
     display,
     // A card payment is neither spending nor income — both legs are already excluded from every
     // total. Painting the crediting leg emerald made $7,866.69 read as income (#31).

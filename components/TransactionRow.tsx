@@ -37,7 +37,7 @@ export function TransactionRow({
       <td className="px-4 py-3 whitespace-nowrap text-sm text-muted">{t.date}</td>
       {/* Truncated rather than wrapped: a fixed column would otherwise give one long merchant a
           two-line row and leave the table's rhythm uneven. `title` keeps the full name reachable. */}
-      <td className="truncate px-4 py-3 font-medium text-ink" title={label ?? undefined}>
+      <td className="truncate px-4 py-3 font-medium text-ink" title={label}>
         {label}
       </td>
       {/* No category picker on a card payment. Setting user_category makes isCreditCardPayment
@@ -56,7 +56,7 @@ export function TransactionRow({
             transactionId={t.id}
             value={categoryName}
             options={categoryOptions}
-            label={label ?? undefined}
+            label={label}
           />
         )}
       </td>
@@ -101,7 +101,7 @@ export function TransactionRow({
           amount={t.amount}
           reimbursableAmount={t.reimbursable_amount}
           note={t.reimbursable_note}
-          label={label ?? 'transaction'}
+          label={label}
           pfcDetailed={t.pfc_detailed}
           userCategory={t.user_category}
         />
@@ -116,7 +116,7 @@ export function TransactionRow({
             amount={t.amount}
             reimbursableAmount={t.reimbursable_amount}
             note={t.reimbursable_note}
-            label={label ?? 'transaction'}
+            label={label}
             date={t.date}
           />
         )}
