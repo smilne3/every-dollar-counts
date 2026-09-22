@@ -5,6 +5,23 @@ import { syncItem } from '@/lib/sync'
 import { clampReimbursable } from '@/lib/reimbursements'
 import { assertEnvMatchesDatabase } from '@/lib/app-env'
 
+// Account types whose transactions are balance-sheet, not household cash flow. A mortgage's
+// BALANCE belongs in netWorth() and keeps being stored by storeAccounts below; its TRANSACTIONS
+// do not belong in income or spending. The monthly PAYMENT row mirrors money already counted as
+// it left the funding account, and an escrow disbursement (CITY TAX PMT) is the servicer
+// forwarding money paid to it months earlier -- which Plaid tags INCOME_TAX_REFUND at LOW
+// confidence, so lib/dashboard.ts books it as income and overstates the month.
+//
+// A DENYLIST, not an allowlist, for the reason 017_app_env.sql spells out: filtering that fails
+// toward real transactions vanishing is the worse failure, because an empty month is
+// indistinguishable from a quiet one. An unrecognised type -- a type Plaid adds later, or an
+// account whose row has not been stored yet -- keeps flowing and stays visible.
+const NON_CASHFLOW_ACCOUNT_TYPES = new Set(['loan', 'investment'])
+
+export function isCashFlowAccount(type: string | null | undefined): boolean {
+  return !NON_CASHFLOW_ACCOUNT_TYPES.has(type ?? '')
+}
+
 // Fetch a Plaid item's accounts and upsert them (also refreshes cached balances).
 export async function storeAccounts(householdId: string, plaidItemId: string, accessToken: string) {
   // Before the network call, not after: a wrong-environment write must cost nothing (#23).
@@ -81,7 +98,25 @@ export async function syncAndStore(item: {
     item.cursor ?? undefined
   )
 
-  const upserts = [...added, ...modified].map((t) => transactionUpsertRow(t, item.household_id))
+  // Which of this item's accounts carry cash flow. Read from the accounts table, not Plaid:
+  // every caller runs storeAccounts first, and the type never changes once written.
+  //
+  // An unreadable answer THROWS rather than being treated as "nothing to exclude" -- that
+  // fallback would let a mortgage row straight into the income total, which is the bug this
+  // filter exists to stop. Throwing leaves the cursor untouched, so Plaid re-sends the batch on
+  // the next sync: the same recovery every other write error in this function relies on.
+  const { data: acctRows, error: acctErr } = await supabaseAdmin
+    .from('accounts')
+    .select('account_id, type')
+    .eq('plaid_item_id', item.id)
+  if (acctErr) throw new Error(`account-type lookup failed: ${acctErr.message}`)
+  const nonCashFlow = new Set(
+    (acctRows ?? []).filter((a) => !isCashFlowAccount(a.type)).map((a) => a.account_id)
+  )
+
+  const upserts = [...added, ...modified]
+    .filter((t) => !nonCashFlow.has(t.account_id))
+    .map((t) => transactionUpsertRow(t, item.household_id))
 
   // A `modified` transaction can arrive with a SMALLER amount than the one already stored (an
   // authorisation settling lower). If the stored mark now exceeds it, the upsert violates the
