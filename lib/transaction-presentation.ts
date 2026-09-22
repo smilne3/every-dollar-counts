@@ -26,7 +26,13 @@ export function presentTransaction(t: PresentableTxn): PresentedTxn {
   const display = -t.amount
   const marked = Number(t.reimbursable_amount ?? 0)
   const isCC = isCreditCardPayment({ pfc_detailed: t.pfc_detailed, user_category: t.user_category })
-  const share = Math.max(0, Math.abs(t.amount) - marked)
+  // The remainder, signed to match `display`. Lifted from spendableAmount (lib/reimbursements.ts),
+  // INCLUDING its zero-normalisation: without the `=== 0` arm, negating a zero remainder yields
+  // -0, which Intl renders as "-$0.00". Ticking the checkbox marks the full amount, so that is the
+  // state most marked transactions are in — the meta line and the card's accessible name both read
+  // "your share -$0.00". `-0 === 0` is true, so nothing short of the rendered string catches it.
+  const remainder = Math.max(0, Math.abs(t.amount) - marked)
+  const share = remainder === 0 ? 0 : t.amount < 0 ? remainder : -remainder
   return {
     label: t.merchant_name ?? t.name,
     display,
@@ -34,7 +40,7 @@ export function presentTransaction(t: PresentableTxn): PresentedTxn {
     // total. Painting the crediting leg emerald made $7,866.69 read as income (#31).
     tone: isCC ? 'neutral' : display < 0 ? 'out' : 'in',
     isCC,
-    shareAmount: marked > 0 ? (t.amount < 0 ? share : -share) : null,
+    shareAmount: marked > 0 ? share : null,
   }
 }
 

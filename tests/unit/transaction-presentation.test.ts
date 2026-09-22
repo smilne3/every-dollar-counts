@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { money } from '@/lib/format'
 import { presentTransaction } from '@/lib/transaction-presentation'
 
 const base = {
@@ -54,5 +55,21 @@ describe('presentTransaction', () => {
   it('signs the share to match the display convention', () => {
     expect(presentTransaction({ ...base, amount: 100, reimbursable_amount: 40 }).shareAmount).toBe(-60)
     expect(presentTransaction({ ...base, amount: -100, reimbursable_amount: 40 }).shareAmount).toBe(60)
+  })
+
+  // Ticking the checkbox marks the WHOLE amount, so a zero share is the commonest state there is,
+  // not an edge case. Negating a zero remainder produces -0, which Intl renders as "-$0.00" — on
+  // the card's meta line and in its accessible name both.
+  //
+  // `-0 === 0` is true and `expect(-0).toBe(0)` passes (toBe is Object.is, but Vitest's diff for
+  // -0 vs 0 is the only thing that would tell you), so the sign has to be asserted through
+  // something that can actually see it: the rendered string, and Object.is.
+  it('normalises a fully-marked transaction to a share of positive zero', () => {
+    const out = presentTransaction({ ...base, amount: 100, reimbursable_amount: 100 })
+    expect(money(out.shareAmount as number)).toBe('$0.00')
+    expect(Object.is(out.shareAmount, -0)).toBe(false)
+
+    const inflow = presentTransaction({ ...base, amount: -100, reimbursable_amount: 100 })
+    expect(money(inflow.shareAmount as number)).toBe('$0.00')
   })
 })

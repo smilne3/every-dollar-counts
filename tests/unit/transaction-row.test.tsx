@@ -42,8 +42,17 @@ describe('TransactionRow amount cell', () => {
   })
 
   it('shows the share once the transaction is marked', () => {
+    renderRow({ reimbursable_amount: 40 })
+    expect(screen.getByText(/your share -\$60\.00/)).toBeTruthy()
+  })
+
+  // Ticking the box marks the WHOLE amount, so this is the state most marked rows are in. The
+  // remainder is zero, and negating a zero gave -0, which Intl renders as "-$0.00". This test
+  // used to pass the fully-marked amount and assert only /your share/, so it exercised the bug
+  // without ever seeing it.
+  it('renders a fully-marked share as zero, not as minus zero', () => {
     renderRow({ reimbursable_amount: 100 })
-    expect(screen.getByText(/your share/)).toBeTruthy()
+    expect(screen.getByText('your share $0.00')).toBeTruthy()
   })
 
   // jsdom computes no layout, so this asserts the mechanism rather than the pixels: only

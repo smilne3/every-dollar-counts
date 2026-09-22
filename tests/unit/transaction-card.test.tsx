@@ -61,6 +61,16 @@ describe('TransactionCard', () => {
     expect(screen.getByText(/your share -\$60\.00/)).toBeTruthy()
   })
 
+  // Ticking the checkbox marks the WHOLE amount, so the zero-remainder case is the commonest
+  // marked state, not an edge one. Negating a zero remainder gave -0, which Intl renders as
+  // "-$0.00" — on the meta line and in the accessible name both.
+  it('renders a fully-marked share as zero, not as minus zero', () => {
+    renderCard({ reimbursable_amount: 100 })
+    const row = screen.getByRole('button', { name: /Joe S Den/ })
+    expect(within(row).getByText(/your share \$0\.00/)).toBeTruthy()
+    expect(row.getAttribute('aria-label')).toContain('your share $0.00')
+  })
+
   it('omits the share line when nothing is marked', () => {
     renderCard()
     expect(screen.queryByText(/your share/)).toBeNull()
