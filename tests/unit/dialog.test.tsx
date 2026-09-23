@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest'
 import { useState } from 'react'
-import { render, cleanup, fireEvent } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import { Dialog } from '@/components/ui/Dialog'
 
 afterEach(cleanup)
@@ -32,6 +32,31 @@ describe('Dialog', () => {
     container.querySelector('dialog')!.dispatchEvent(evt)
     expect(onCancel).toHaveBeenCalledTimes(1)
     expect(evt.defaultPrevented).toBe(true)
+  })
+
+  // TransactionCard passes no initialFocusRef, and showModal() natively focuses the first
+  // focusable descendant — the CategoryPicker <select>. On Android Chrome, focusing a <select>
+  // can pop its list open as a side effect of nothing more than showModal() running. A caller
+  // that wants a specific target still gets it (see the "while busy" describe below and
+  // ConfirmDialog's own test, which pins Cancel); a caller with no opinion gets the heading
+  // instead of whatever happens to be first in the DOM.
+  //
+  // jsdom's showModal() stub (above) does not implement the browser's own default-focus step, so
+  // this pins the shell's OWN fallback — the explicit .focus() Dialog runs after showModal() —
+  // not the platform's. That is also why this asserts the heading itself has focus, rather than
+  // merely that the select does not: nothing in jsdom would give the select focus in the first
+  // place, so "not the select" would pass even with the old code that focuses nothing at all.
+  it('focuses its own heading, not the first focusable child, when no initialFocusRef is given', () => {
+    render(
+      <Dialog open title="Loan Payments" onCancel={vi.fn()} footer={null}>
+        <select aria-label="Category">
+          <option>Loan Payments</option>
+        </select>
+      </Dialog>
+    )
+    const heading = screen.getByRole('heading', { name: 'Loan Payments' })
+    expect(document.activeElement).toBe(heading)
+    expect(document.activeElement).not.toBe(screen.getByRole('combobox'))
   })
 
   // `busy` is the shell's half of "a failed save must never be silently discarded". A caller that

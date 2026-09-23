@@ -47,6 +47,14 @@ export function Dialog({
   // What had focus before the dialog took it. The platform normally remembers this for us; see
   // the close branch below for the one case where it cannot.
   const opener = useRef<HTMLElement | null>(null)
+  // Where focus goes when a caller has no opinion. Without an initialFocusRef, showModal() itself
+  // focuses the first focusable descendant in tree order — whatever happens to come first in
+  // `children`, not the heading. On TransactionCard's sheet that is the CategoryPicker <select>,
+  // and on Android Chrome merely focusing a <select> can pop its list open with no tap at all.
+  // Focusing the heading instead is conventional modal practice and what screen readers expect: a
+  // caller with no `initialFocusRef` gets somewhere inert rather than whatever its own markup
+  // happens to put first.
+  const titleRef = useRef<HTMLHeadingElement>(null)
   // Generated, not hardcoded: two dialogs mounted at once would otherwise share one element id and
   // the second would take its accessible name from the first one's heading.
   const titleId = useId()
@@ -58,7 +66,8 @@ export function Dialog({
       // Read BEFORE showModal(), which moves focus into the dialog.
       opener.current = document.activeElement as HTMLElement | null
       d.showModal()
-      initialFocusRef?.current?.focus()
+      const target = initialFocusRef?.current ?? titleRef.current
+      target?.focus()
     } else if (!open && d.open) {
       const previous = opener.current
       opener.current = null
@@ -102,7 +111,11 @@ export function Dialog({
           against the right edge (#49). Where a dialog is opened from has nothing to do with how it
           should read, so the shell pins it rather than each caller remembering to. */}
       <div className="p-5 text-left">
-        <h2 id={titleId} className="text-base font-semibold text-ink">
+        {/* tabIndex={-1}: focusable by script (so the effect above and the browser's own
+            showModal() default-focus step can both land here) without joining Tab order — a
+            heading is not a control, so a keyboard user tabbing through the dialog should still
+            start at the first real one. */}
+        <h2 ref={titleRef} tabIndex={-1} id={titleId} className="text-base font-semibold text-ink">
           {title}
         </h2>
         {children}
