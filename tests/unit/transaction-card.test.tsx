@@ -287,9 +287,14 @@ describe('TransactionCard while closed', () => {
 })
 
 describe('TransactionCard sheet', () => {
-  function openSheet(overrides: Partial<typeof txn> = {}) {
+  function openSheet(overrides: Partial<typeof txn> = {}, props: { accountName?: string } = {}) {
     render(
-      <TransactionCard t={{ ...txn, ...overrides }} categoryName="Food" categoryOptions={['Food', 'Grocery']} />
+      <TransactionCard
+        t={{ ...txn, ...overrides }}
+        categoryName="Food"
+        categoryOptions={['Food', 'Grocery']}
+        {...props}
+      />
     )
     fireEvent.click(screen.getByRole('button', { name: /edit/ }))
   }
@@ -312,6 +317,66 @@ describe('TransactionCard sheet', () => {
   it('explains what a card payment is instead of offering controls', () => {
     openSheet({ pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', amount: -7866.69 })
     expect(screen.getByText(/moves between your accounts/)).toBeTruthy()
+  })
+
+  // The owner's own feedback, verbatim: "when I tap a transaction, I expect to see the more
+  // tiles. THEN select from drop down if I want to reclassify." showModal() natively focuses the
+  // first focusable descendant, which used to be the CategoryPicker <select> — and on Android
+  // Chrome, merely focusing a <select> can pop its list open with no tap at all. This is the
+  // regression test at the level the owner actually experienced it: opening the sheet must not
+  // put focus anywhere near the picker.
+  it('does not put focus on the category picker when the sheet opens', () => {
+    openSheet()
+    const heading = screen.getByRole('heading', { name: 'Joe S Den' })
+    expect(document.activeElement).toBe(heading)
+    expect(document.activeElement).not.toBe(screen.getByRole('combobox'))
+  })
+
+  // Information before controls: the sheet used to jump straight from `{date} · {amount}` to the
+  // Category label and picker. The detail block gives something to read before being asked to
+  // edit anything.
+  //
+  // Scoped to the open dialog throughout: the row itself stays mounted behind the sheet and
+  // already shows the same amount, so an unscoped getByText('-$100.00') would match both and
+  // throw on "found multiple elements" rather than testing anything.
+  describe('detail block', () => {
+    it('shows amount and date as label-value rows before the controls', () => {
+      openSheet()
+      const sheet = within(screen.getByRole('dialog'))
+      expect(sheet.getByText('Amount')).toBeTruthy()
+      expect(sheet.getByText('Date')).toBeTruthy()
+      // txn.date is '2026-08-29'.
+      expect(sheet.getByText('Aug 29')).toBeTruthy()
+      expect(sheet.getByText('-$100.00')).toBeTruthy()
+    })
+
+    it('shows the account row when an account name is supplied', () => {
+      openSheet({}, { accountName: '360 Checking' })
+      const sheet = within(screen.getByRole('dialog'))
+      expect(sheet.getByText('Account')).toBeTruthy()
+      expect(sheet.getByText('360 Checking')).toBeTruthy()
+    })
+
+    // The owner cut Plaid's original category from the design; nothing here must reintroduce it.
+    it('omits the account row rather than rendering it empty when no name is supplied', () => {
+      openSheet()
+      const sheet = within(screen.getByRole('dialog'))
+      expect(sheet.queryByText('Account')).toBeNull()
+    })
+
+    // The card-payment exemption governs the CONTROLS, not the information above them — the
+    // detail block is still owed to a card payment.
+    it('still shows the detail block, including the account, on a card payment', () => {
+      openSheet(
+        { pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', amount: -7866.69 },
+        { accountName: '360 Checking' }
+      )
+      const sheet = within(screen.getByRole('dialog'))
+      expect(sheet.getByText('Amount')).toBeTruthy()
+      expect(sheet.getByText('Date')).toBeTruthy()
+      expect(sheet.getByText('Account')).toBeTruthy()
+      expect(sheet.getByText('360 Checking')).toBeTruthy()
+    })
   })
 })
 

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { money } from '@/lib/format'
+import { money, shortDate } from '@/lib/format'
 import { presentTransaction, TONE_CLASS } from '@/lib/transaction-presentation'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
@@ -28,10 +28,15 @@ export function TransactionCard({
   t,
   categoryName,
   categoryOptions,
+  accountName,
 }: {
   t: Txn
   categoryName: string
   categoryOptions: string[]
+  // Optional so the component degrades rather than breaks when the page's account lookup has
+  // nothing for this transaction's account_id: the Account row is omitted below rather than
+  // rendered empty or with the raw Plaid id.
+  accountName?: string
 }) {
   const [open, setOpen] = useState(false)
   // Whether either control inside the sheet has a PATCH outstanding. Tracked per child rather than
@@ -111,9 +116,27 @@ export function TransactionCard({
             (Dialog.tsx handles the part of that which unmounting these children does break). */}
         {open && (
           <>
-            <p className={`mt-1 text-sm tabular-nums ${TONE_CLASS[tone]}`}>
-              {t.date} · {money(display)}
-            </p>
+            {/* Information before controls (owner feedback: the sheet used to jump straight from
+                a one-line summary to the Category picker). Label-value rows, not Plaid's original
+                category — that was proposed and the owner cut it; it does not belong here in any
+                form. Present for a card payment too: the exemption below governs the controls,
+                not what there is to read above them. */}
+            <dl className="mt-1 space-y-1.5 text-sm">
+              <div className="flex items-baseline justify-between gap-4">
+                <dt className="text-muted">Amount</dt>
+                <dd className={`font-medium tabular-nums ${TONE_CLASS[tone]}`}>{money(display)}</dd>
+              </div>
+              <div className="flex items-baseline justify-between gap-4">
+                <dt className="text-muted">Date</dt>
+                <dd className="text-ink">{shortDate(t.date)}</dd>
+              </div>
+              {accountName && (
+                <div className="flex items-baseline justify-between gap-4">
+                  <dt className="text-muted">Account</dt>
+                  <dd className="truncate text-ink">{accountName}</dd>
+                </div>
+              )}
+            </dl>
 
             {isCC ? (
               // Same exemption the desktop row enforces. A user_category here re-enters both legs
