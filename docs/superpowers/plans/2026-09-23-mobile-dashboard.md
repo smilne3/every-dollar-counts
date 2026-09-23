@@ -182,7 +182,9 @@ describe('StatCard', () => {
   it('hides the rounded figure from md up and the exact figure below it', () => {
     render(<StatCard label="Cash on hand" amount={34920.49} />)
     expect(screen.getByText('$34,920').className).toContain('md:hidden')
-    expect(screen.getByText('$34,920.49').className).toContain('hidden')
+    // `md:inline`, not `hidden` — 'hidden' is a substring of 'md:hidden', so asserting it here
+    // would pass against the rounded span too and distinguish nothing.
+    expect(screen.getByText('$34,920.49').className).toContain('md:inline')
   })
 
   it('defaults to compact when no variant is given', () => {
