@@ -42,8 +42,17 @@ describe('TransactionRow amount cell', () => {
   })
 
   it('shows the share once the transaction is marked', () => {
+    renderRow({ reimbursable_amount: 40 })
+    expect(screen.getByText(/your share -\$60\.00/)).toBeTruthy()
+  })
+
+  // Ticking the box marks the WHOLE amount, so this is the state most marked rows are in. The
+  // remainder is zero, and negating a zero gave -0, which Intl renders as "-$0.00". This test
+  // used to pass the fully-marked amount and assert only /your share/, so it exercised the bug
+  // without ever seeing it.
+  it('renders a fully-marked share as zero, not as minus zero', () => {
     renderRow({ reimbursable_amount: 100 })
-    expect(screen.getByText(/your share/)).toBeTruthy()
+    expect(screen.getByText('your share $0.00')).toBeTruthy()
   })
 
   // jsdom computes no layout, so this asserts the mechanism rather than the pixels: only
@@ -56,6 +65,15 @@ describe('TransactionRow amount cell', () => {
     expect(line).not.toBeNull()
     expect(line.className).toContain('invisible')
     expect(line.className.split(/\s+/)).not.toContain('hidden')
+  })
+
+  // A lone ASCII space collapses under white-space: normal, so the reserved line would have no
+  // line box and the row would grow on every tick — #50 again. The non-breaking space is what
+  // makes `invisible` actually reserve height. Nothing else in the suite distinguishes them.
+  it('reserves the line with a non-breaking space, which does not collapse', () => {
+    const { container } = renderRow()
+    const line = container.querySelector('td span.block') as HTMLElement
+    expect(line.textContent).toBe(' ')
   })
 
   // The route refuses credit-card payments (#31), so the editor must not be offered on one. The

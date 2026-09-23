@@ -22,6 +22,7 @@ export function ReimbursableEditor({
   note,
   label,
   date,
+  onBusyChange,
 }: {
   transactionId: string
   amount: number
@@ -29,6 +30,11 @@ export function ReimbursableEditor({
   note: string | null
   label: string
   date: string
+  // Told whenever a PATCH starts and stops — same contract, and for the same reason, as
+  // ReimbursableCheckbox's. A host that unmounts this on close (the phone sheet) has to be able to
+  // refuse to close over a request whose failure has not arrived yet. The desktop row passes
+  // nothing and is unaffected.
+  onBusyChange?: (busy: boolean) => void
 }) {
   const router = useRouter()
   const full = Math.abs(amount)
@@ -51,8 +57,14 @@ export function ReimbursableEditor({
     setOpen(true)
   }
 
+  // One place to change both, so the host's view of "in flight" cannot drift from this form's own.
+  function working(now: boolean) {
+    setBusy(now)
+    onBusyChange?.(now)
+  }
+
   async function save(next: number | null) {
-    setBusy(true)
+    working(true)
     setError(null)
     try {
       const res = await fetch('/api/reimbursable', {
@@ -76,7 +88,7 @@ export function ReimbursableEditor({
     } catch {
       setError('That could not be saved.')
     } finally {
-      setBusy(false)
+      working(false)
     }
   }
 

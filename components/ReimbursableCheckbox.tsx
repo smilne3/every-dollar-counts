@@ -13,6 +13,7 @@ export function ReimbursableCheckbox({
   label,
   pfcDetailed = null,
   userCategory = null,
+  onBusyChange,
 }: {
   transactionId: string
   amount: number
@@ -21,6 +22,12 @@ export function ReimbursableCheckbox({
   label: string
   pfcDetailed?: string | null
   userCategory?: string | null
+  // Told whenever a PATCH starts and stops, so a host that can UNMOUNT this control — the phone
+  // sheet, whose children are gated on `open` — can refuse to close over a request in flight. The
+  // error below is set after the await, and React silently no-ops a setState on an unmounted
+  // component, so without somewhere for it to land a failed save is discarded before it is shown.
+  // Optional: the desktop row is mounted for the life of the page and passes nothing.
+  onBusyChange?: (busy: boolean) => void
 }) {
   const router = useRouter()
   const [busy, setBusy] = useState(false)
@@ -48,8 +55,14 @@ export function ReimbursableCheckbox({
   const full = Math.abs(amount)
   const partial = marked > 0 && marked < full
 
+  // One place to change both, so the host's view of "in flight" cannot drift from the control's own.
+  function working(now: boolean) {
+    setBusy(now)
+    onBusyChange?.(now)
+  }
+
   async function set(next: number | null) {
-    setBusy(true)
+    working(true)
     setError(null)
     setOptimistic(next ?? 0)
     try {
@@ -75,7 +88,7 @@ export function ReimbursableCheckbox({
       setOptimistic(null)
       setError('That could not be saved.')
     } finally {
-      setBusy(false)
+      working(false)
     }
   }
 
