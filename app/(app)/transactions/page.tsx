@@ -20,6 +20,9 @@ type RealRow = {
   user_category: string | null
   pfc_primary: string | null
   pfc_detailed: string | null
+  // Selected below alongside everything else; carried in the type now because the phone sheet's
+  // Account row (TransactionCard's accountName prop) is keyed off it.
+  account_id: string
   reimbursable_amount: number | null
   reimbursable_note: string | null
 }
@@ -54,6 +57,20 @@ export default async function TransactionsPage({
   const categories = (cats ?? []) as Category[]
   const pfcMap = pfcToName(categories)
   const categoryOptions = categories.map((c) => c.name)
+
+  // account_id -> name, for the phone sheet's Account row (TransactionCard's accountName prop —
+  // see spec: "when I tap a transaction, I expect to see the more tiles"). Twelve accounts is
+  // nothing to fetch on every load. Not the same query as the single-account read below, which
+  // names ONE account for the filter chip when drilling in from a Net Worth / Cash row — this one
+  // reads every account so each row can look its own up.
+  const { data: accountRows, error: accountRowsError } = await supabase
+    .from('accounts')
+    .select('account_id, name')
+  if (accountRowsError) throw new Error(`could not read account names: ${accountRowsError.message}`)
+  const accountNameById = new Map<string, string>()
+  for (const a of accountRows ?? []) {
+    if (a.name) accountNameById.set(a.account_id, a.name)
+  }
 
   // The transactions query's SQL date filter.
   let monthStart: string | null = null
@@ -221,6 +238,7 @@ export default async function TransactionsPage({
                 t={t}
                 categoryName={effectiveCategory(t, pfcMap)}
                 categoryOptions={categoryOptions}
+                accountName={accountNameById.get(t.account_id)}
               />
             ))}
           </div>

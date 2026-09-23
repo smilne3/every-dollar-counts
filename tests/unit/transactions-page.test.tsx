@@ -49,6 +49,7 @@ const txn = (over: Record<string, unknown> = {}) => ({
   user_category: null,
   pfc_primary: 'FOOD_AND_DRINK',
   pfc_detailed: null,
+  account_id: 'acc-1',
   reimbursable_amount: null,
   reimbursable_note: null,
   ...over,
@@ -57,6 +58,10 @@ const txn = (over: Record<string, unknown> = {}) => ({
 beforeEach(() => {
   results.categories = {
     data: [{ id: 'c1', name: 'Food', pfc_primary: 'FOOD_AND_DRINK', sort_order: 1 }],
+    error: null,
+  }
+  results.accounts = {
+    data: [{ account_id: 'acc-1', name: '360 Checking' }],
     error: null,
   }
   results.transactions = {
@@ -191,5 +196,39 @@ describe('Transactions page dual layout', () => {
   it('fails loudly when the categories read fails', async () => {
     results.categories = { data: null, error: { message: 'permission denied' } }
     await expect(render()).rejects.toThrow(/could not read categories: permission denied/)
+  })
+
+  // TransactionRow renders the desktop table, which is not changing — only the phone sheet
+  // (TransactionCard) gets an account name, keyed off the transaction's own account_id against a
+  // household-wide accounts query.
+  describe('account names', () => {
+    it("hands each card its transaction's account name, keyed by account_id", async () => {
+      const { cards } = await branches()
+      expect(cards.map((c) => c.props?.accountName)).toEqual([
+        '360 Checking',
+        '360 Checking',
+        '360 Checking',
+      ])
+    })
+
+    // Degrades sensibly rather than rendering the raw Plaid id or an empty row — that is
+    // TransactionCard's job (see its own tests); the page's job is to hand it `undefined` rather
+    // than guessing.
+    it("omits the name when a transaction's account is not in the map", async () => {
+      results.transactions.data = [txn({ id: 't1', account_id: 'acc-unknown' })]
+      results.transactions.count = 1
+      const { cards } = await branches()
+      expect(cards[0].props?.accountName).toBeUndefined()
+    })
+
+    it('never hands the account name to the desktop row', async () => {
+      const { rows } = await branches()
+      expect(rows.every((r) => !('accountName' in (r.props ?? {})))).toBe(true)
+    })
+
+    it('fails loudly when the accounts read fails', async () => {
+      results.accounts = { data: null, error: { message: 'permission denied' } }
+      await expect(render()).rejects.toThrow(/could not read account names: permission denied/)
+    })
   })
 })
