@@ -39,7 +39,7 @@ export function TransactionCard({
   accountName?: string
 }) {
   const [open, setOpen] = useState(false)
-  // Whether either control inside the sheet has a PATCH outstanding. Tracked per child rather than
+  // Whether any control inside the sheet has a write outstanding. Tracked per child rather than
   // as a counter so a double-report cannot leave the sheet permanently unclosable.
   //
   // This exists because the sheet's children are UNMOUNTED on close (see the gate below). Both
@@ -51,6 +51,7 @@ export function TransactionCard({
   // The desktop row never had this — its checkbox is mounted for the life of the page, so its
   // error stands until the reader navigates. Closing is therefore withheld, not the error
   // relocated: the request is allowed to land where its failure already knows how to render.
+  const [pickerBusy, setPickerBusy] = useState(false)
   const [checkboxBusy, setCheckboxBusy] = useState(false)
   const [editorBusy, setEditorBusy] = useState(false)
   // `label` is never null — presentTransaction owns the fallback so this card and the desktop row
@@ -60,7 +61,7 @@ export function TransactionCard({
   // both controls from the sheet — cannot leave a stale "in flight" behind and lock the sheet shut
   // for good. Holding someone inside a sheet they cannot leave is a worse bug than the one this
   // is here to prevent, so the state that withholds the exit is tied to the controls existing.
-  const busy = !isCC && (checkboxBusy || editorBusy)
+  const busy = !isCC && (pickerBusy || checkboxBusy || editorBusy)
   const categoryLabel = isCC ? 'Card payment' : categoryName
   const shareLabel = shareAmount !== null ? `, your share ${money(shareAmount)}` : ''
 
@@ -151,6 +152,7 @@ export function TransactionCard({
                     value={categoryName}
                     options={categoryOptions}
                     label={name}
+                    onBusyChange={setPickerBusy}
                   />
                 </label>
 
