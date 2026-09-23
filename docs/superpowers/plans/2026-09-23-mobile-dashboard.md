@@ -197,9 +197,13 @@ describe('StatCard', () => {
 
   // The "Saved this month" tile turns red when negative. That rule used to live in the caller's
   // JSX, which is why the caller had to pre-format the figure in the first place.
+  //
+  // Asserted on `hero`, where the figure is a direct child of the toned wrapper. On a compact tile
+  // getByText returns the inner md:hidden/hidden span, which carries no tone — the tone is declared
+  // once on the wrapper so the rounded and exact strings cannot end up different colours.
   it('paints a coral figure when asked', () => {
-    render(<StatCard label="Saved" amount={-120} tone="coral" />)
-    expect(screen.getByText('-$120').className).toContain('text-coral')
+    render(<StatCard label="Saved" amount={-120} variant="hero" tone="coral" />)
+    expect(screen.getByText('-$120.00').className).toContain('text-coral')
   })
 
   it('renders a footnote when given one', () => {
