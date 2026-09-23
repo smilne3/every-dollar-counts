@@ -5,8 +5,13 @@ import { CategoryPicker } from '@/components/CategoryPicker'
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  refresh.mockClear()
 })
-vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {} }) }))
+// A real spy, not a bare closure. With `refresh: () => {}` no test can tell whether the list is ever
+// told to reload, so deleting the call — or making it run on the failure path, where it races the
+// optimistic revert — leaves the suite green.
+const refresh = vi.hoisted(() => vi.fn())
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }))
 
 const props = {
   transactionId: 't1',
@@ -39,6 +44,42 @@ describe('CategoryPicker', () => {
     fireEvent.change(select(), { target: { value: 'Shopping' } })
 
     expect(select().value).toBe('Shopping')
+  })
+
+  // The only thing preventing a second change while the first is outstanding. Two overlapping saves
+  // break the busy contract: the first response reports not-busy while the second is still in
+  // flight, so the sheet becomes closable and unmounts the picker — the exact #97 discard.
+  it('cannot be changed again while a save is in flight', () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+
+    render(<CategoryPicker {...props} />)
+    fireEvent.change(select(), { target: { value: 'Shopping' } })
+
+    expect(select().disabled).toBe(true)
+  })
+
+  it('tells the page to reload once the save lands', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
+
+    render(<CategoryPicker {...props} />)
+    fireEvent.change(select(), { target: { value: 'Shopping' } })
+
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+  })
+
+  // A refresh on a refused save would race the revert: the server's value arrives and overwrites
+  // the category the user is being shown an error about.
+  it('does not reload the page when the save is refused', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: false, json: async () => ({ error: 'nope' }) }))
+    )
+
+    render(<CategoryPicker {...props} />)
+    fireEvent.change(select(), { target: { value: 'Shopping' } })
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy())
+    expect(refresh).not.toHaveBeenCalled()
   })
 
   // The #97 bug. The picker awaited the request and never looked at it, so a 400, an expired

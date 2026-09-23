@@ -43,6 +43,7 @@ export function CategoryPicker({
     setVal(category)
     working(true)
     setError(null)
+    let saved = false
     try {
       const res = await fetch('/api/transactions/categorize', {
         method: 'POST',
@@ -60,7 +61,7 @@ export function CategoryPicker({
         setError(body.error ?? 'That could not be saved.')
         return
       }
-      router.refresh()
+      saved = true
     } catch {
       // Same reasoning as the !res.ok branch — the request never landed, so the value must not stand.
       setVal(previous)
@@ -70,13 +71,18 @@ export function CategoryPicker({
       // would strand the user on the wrong category with no way to try again.
       working(false)
     }
+    // Outside the try, deliberately. A throw from router.refresh() is not a failed save, and inside
+    // the catch it would revert the value and show an error on a write the server has already
+    // accepted — this component's own bug, inverted.
+    if (saved) router.refresh()
   }
 
-  // A fragment, deliberately: a wrapper would establish a new box around the <select> and change
-  // its width in both surfaces at once. The desktop cell sizes the picker to its content, the phone
-  // sheet's `flex flex-col` label stretches it full width, and neither of those is this component's
-  // decision to make. `block` on the error gives it its own line in the table cell and is a no-op
-  // in the sheet, where flex items are blockified anyway.
+  // A fragment, deliberately. The sheet's `flex flex-col` label (TransactionCard.tsx) makes the
+  // <select> a flex item, which is what stretches it to full width; a wrapper would take its place
+  // as that flex item and the picker would collapse to its content. The desktop <td>
+  // (TransactionRow.tsx) sizes it to content either way. Which width is right is the surface's
+  // decision, not this component's, so it introduces no box of its own. `block` on the error gives
+  // it its own line in the table cell and is a no-op in the sheet, where flex items are blockified.
   return (
     <>
       <select

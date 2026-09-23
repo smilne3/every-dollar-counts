@@ -3,10 +3,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // app/api/reimbursable/route.ts is the ONLY writer of reimbursable_amount / reimbursable_note. It
 // holds three load-bearing guards — refuse a credit-card payment (#31), refuse a `removed`
 // transaction, and fail CLOSED (500, never a misleading 404 or a silent success) on a read error —
-// none of which had any regression protection before this test. There are no route tests anywhere
-// else in this repo; this establishes the pattern: mock @/lib/supabase/server the same shape
+// none of which had any regression protection before this test. This established the pattern that
+// tests/unit/categorize-route.test.ts now also follows: mock @/lib/supabase/server the same shape
 // tests/unit/ingest-reimbursable.test.ts mocks @/lib/supabase/admin, build a real Request, and call
-// the exported handler directly.
+// the exported handler directly. That file carries the pattern further — its mock projects the
+// selected columns and makes update() reachable only through .eq(), because mutation testing showed
+// this simpler mock lets a narrowed select and an unscoped update both pass. Worth copying back
+// here: the same two mutations survive against this file.
 vi.mock('@/lib/supabase/server', () => ({
   createClient: vi.fn(),
 }))

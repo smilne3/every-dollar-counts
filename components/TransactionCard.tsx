@@ -42,14 +42,14 @@ export function TransactionCard({
   // Whether any control inside the sheet has a write outstanding. Tracked per child rather than
   // as a counter so a double-report cannot leave the sheet permanently unclosable.
   //
-  // This exists because the sheet's children are UNMOUNTED on close (see the gate below). Both
+  // This exists because the sheet's children are UNMOUNTED on close (see the gate below). All three
   // controls set their error state after the await, and React silently no-ops a setState on an
   // unmounted component — with no client-side telemetry, a save that failed in that window was
   // recorded nowhere and shown to nobody. Tap the tick, tap Done: one thumb movement on a phone,
   // and the user walks away believing the mark happened.
   //
-  // The desktop row never had this — its checkbox is mounted for the life of the page, so its
-  // error stands until the reader navigates. Closing is therefore withheld, not the error
+  // The desktop row never had this — its controls are mounted for the life of the page, so their
+  // errors stand until the reader navigates. Closing is therefore withheld, not the error
   // relocated: the request is allowed to land where its failure already knows how to render.
   const [pickerBusy, setPickerBusy] = useState(false)
   const [checkboxBusy, setCheckboxBusy] = useState(false)
@@ -57,8 +57,8 @@ export function TransactionCard({
   // `label` is never null — presentTransaction owns the fallback so this card and the desktop row
   // cannot answer "what is this called?" differently (spec §9).
   const { label: name, display, tone, isCC, shareAmount } = presentTransaction(t)
-  // Gated on isCC as well, so that a refresh which turns this row INTO a card payment — removing
-  // both controls from the sheet — cannot leave a stale "in flight" behind and lock the sheet shut
+  // Gated on isCC as well, so that a refresh which turns this row INTO a card payment — replacing
+  // all three controls with the explanatory line — cannot leave a stale "in flight" behind and lock the sheet shut
   // for good. Holding someone inside a sheet they cannot leave is a worse bug than the one this
   // is here to prevent, so the state that withholds the exit is tied to the controls existing.
   const busy = !isCC && (pickerBusy || checkboxBusy || editorBusy)
