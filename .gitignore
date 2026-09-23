@@ -48,3 +48,6 @@ preview.env
 
 # subagent-driven-development scratch (ledger, briefs, review packages)
 .superpowers/
+
+# Personal Claude Code settings; .claude/rules/ IS shared and tracked.
+.claude/settings.local.json
