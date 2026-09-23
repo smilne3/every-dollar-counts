@@ -498,13 +498,21 @@ import { AccountList } from '@/components/AccountList'
 
 afterEach(cleanup)
 
+// `subtype` is required by AccountCard's Account type — null so the card falls back to `type`,
+// which fixes what each card's name line reads and therefore what the matcher below looks for.
 const accounts = Array.from({ length: 12 }, (_, i) => ({
   id: `a${i}`,
   name: `Account ${i}`,
   type: 'depository',
+  subtype: null,
   current_balance: 100 + i,
   iso_currency_code: 'USD',
 }))
+
+// AccountCard renders `{name} · {subtype ?? type}` in ONE element, so the card's name line reads
+// "Account 4 · depository". Matching on the bare name finds nothing, and a loose /Account 1/ would
+// match Account 1, 10 and 11 at once.
+const nameLine = (i: number) => screen.getByText(`Account ${i} · depository`)
 
 describe('AccountList', () => {
   // Accounts are reference material, not the reason the page was opened (§4). Twelve cards is a
@@ -514,19 +522,19 @@ describe('AccountList', () => {
   // width so the desktop grid is byte-for-byte what it was (a Global Constraint), and `hidden`
   // below `md` keeps the extras out of the phone list and out of the accessibility tree. Same
   // shape as StatCard's dual strings in Task 2.
-  const wrapperOf = (name: string) => screen.getByText(name).closest('[data-account-extra]')
+  const wrapperOf = (i: number) => nameLine(i).closest('[data-account-extra]')
 
   it('shows the first four outright', () => {
     render(<AccountList accounts={accounts} />)
-    expect(screen.getByText('Account 0')).toBeTruthy()
-    expect(screen.getByText('Account 3')).toBeTruthy()
-    expect(wrapperOf('Account 3')).toBeNull() // not an "extra" — always visible
+    expect(nameLine(0)).toBeTruthy()
+    expect(nameLine(3)).toBeTruthy()
+    expect(wrapperOf(3)).toBeNull() // not an "extra" — always visible
   })
 
   it('keeps the rest out of the phone list until asked', () => {
     render(<AccountList accounts={accounts} />)
-    expect(wrapperOf('Account 4')!.className).toContain('hidden')
-    expect(wrapperOf('Account 4')!.className).toContain('md:contents')
+    expect(wrapperOf(4)!.className).toContain('hidden')
+    expect(wrapperOf(4)!.className).toContain('md:contents')
   })
 
   // N is whatever the household actually has, not a hardcoded twelve.
@@ -538,7 +546,7 @@ describe('AccountList', () => {
   it('reveals the rest when the control is used', () => {
     render(<AccountList accounts={accounts} />)
     fireEvent.click(screen.getByRole('button', { name: 'Show all 12' }))
-    expect(wrapperOf('Account 11')!.className).not.toContain('hidden')
+    expect(wrapperOf(11)!.className).not.toContain('hidden')
   })
 
   it('offers a way back once expanded', () => {
