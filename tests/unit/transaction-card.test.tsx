@@ -445,6 +445,32 @@ describe('TransactionCard sheet with a save in flight', () => {
     expect((screen.getByRole('checkbox') as HTMLInputElement).checked).toBe(false)
   })
 
+  // The third child, and the one that was left out (#97). CategoryPicker had no error handling at
+  // all to preserve, so it never reported itself busy and the sheet closed straight over its save.
+  // It sits in the same panel as a checkbox that does all of this correctly.
+  it('will not close on Done while a category save is still in flight', () => {
+    pendingFetch()
+    openSheet()
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Grocery' } })
+
+    fireEvent.click(done())
+
+    expect(screen.queryByRole('combobox')).not.toBeNull()
+  })
+
+  it('shows a failed category save rather than discarding it when Done is tapped mid-save', async () => {
+    const req = pendingFetch()
+    openSheet()
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Grocery' } })
+    fireEvent.click(done())
+
+    req.refuse()
+
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('nope'))
+    // And the picker is back on the category the server still has.
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('Food')
+  })
+
   it('will not close on Escape while a reimbursable tick is still in flight', () => {
     pendingFetch()
     openSheet()
