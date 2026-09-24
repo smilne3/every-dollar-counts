@@ -28,10 +28,25 @@ describe('StatCard', () => {
 
   it('hides the rounded figure from md up and the exact figure below it', () => {
     render(<StatCard label="Cash on hand" amount={34920.49} />)
-    expect(screen.getByText('$34,920').className).toContain('md:hidden')
-    // `md:inline`, not `hidden` — 'hidden' is a substring of 'md:hidden', so asserting it here
-    // would pass against the rounded span too and distinguish nothing.
-    expect(screen.getByText('$34,920.49').className).toContain('md:inline')
+    // Exact strings, not `toContain`. Substring matching has a blind spot at each end here:
+    // 'hidden' is inside 'md:hidden', and 'md:inline' survives dropping the leading 'hidden' —
+    // which would show BOTH figures on every phone and still pass. The whole class string is
+    // short and is the entire behaviour, so assert all of it.
+    expect(screen.getByText('$34,920').className).toBe('md:hidden')
+    expect(screen.getByText('$34,920.49').className).toBe('hidden md:inline')
+  })
+
+  // The desktop-unchanged constraint is this stage's hardest rule, and it is the one thing no
+  // other test here can see — jsdom does no layout, so the class strings ARE the evidence.
+  // Both variants must resolve to the pre-existing scale at md and above; only below md differs.
+  it('keeps the desktop type scale on both variants', () => {
+    const { container: hero } = render(<StatCard label="Net worth" amount={1} variant="hero" />)
+    expect(hero.querySelector('.tabular-nums')!.className).toContain('md:text-2xl')
+    expect(hero.querySelector('.tabular-nums')!.className).toContain('lg:text-3xl')
+    cleanup()
+    const { container: compact } = render(<StatCard label="Cash" amount={1} />)
+    expect(compact.querySelector('.tabular-nums')!.className).toContain('sm:text-2xl')
+    expect(compact.querySelector('.tabular-nums')!.className).toContain('lg:text-3xl')
   })
 
   it('defaults to compact when no variant is given', () => {

@@ -7,10 +7,12 @@ import { money, moneyWhole } from '@/lib/format'
 // A KPI tile: small uppercase label, big number, optional footnote. When `href` is set the whole
 // tile becomes a link that drills into a breakdown of the number.
 //
-// Takes the NUMBER, not a formatted string. It used to take a ReactNode, which meant each of the
-// four callers picked its own formatting and its own type size — and when the net worth tile
-// clipped (§1.3) the fix had to be guessed at from the outside. The tile owns both now, so the
-// rounding rule is in one place and the §9 formatting test has something to assert against.
+// Takes the NUMBER, not a formatted string. It used to take a ReactNode, and every caller passed
+// the output of money() — so by the time the tile saw the figure the cents were already baked in
+// and it could not choose between a rounded and an exact rendering at different widths. That
+// choice is the whole point of this stage, which is why the prop had to change. The tile owns the
+// formatting now, so the rounding rule is in one place and the §9 formatting test has something
+// to assert against.
 export function StatCard({
   label,
   amount,
@@ -23,7 +25,8 @@ export function StatCard({
   label: string
   amount: number
   currency?: string
-  // `hero`: full width, exact, largest type — for the figure that must never be abbreviated.
+  // `hero`: always exact, and the largest type below `md` — for the figure that must never be
+  // abbreviated. The width it needs comes from how the caller lays the tile out, not from here.
   // `compact`: rounded below `md` where the width is not there, exact from `md` up.
   variant?: 'hero' | 'compact'
   tone?: 'ink' | 'coral'
@@ -43,8 +46,9 @@ export function StatCard({
       </div>
       <div className={figureClass}>
         {variant === 'hero' ? (
-          // Always exact. This is the figure §1.3 is about: it is given the whole width precisely
-          // so that no character count can ever clip it again.
+          // Always exact, at every width — never the rounded string, whatever the character
+          // count. This is the figure §1.3 is about. Giving it room to render is the caller's
+          // half of the fix; rendering it in full is this component's half.
           money(amount, currency)
         ) : (
           // One server-rendered document serves both viewports, so the choice cannot be made in
