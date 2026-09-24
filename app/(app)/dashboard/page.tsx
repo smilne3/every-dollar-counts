@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
-import { AccountCard } from '@/components/AccountCard'
+import { AccountList } from '@/components/AccountList'
 import { LinkButton } from '@/components/LinkButton'
 import { RefreshButton } from '@/components/RefreshButton'
 import { SpendIncomeChart } from '@/components/SpendIncomeChart'
@@ -332,11 +332,7 @@ export default async function DashboardPage({
 
       <div className="space-y-3">
         <h2 className="text-base font-semibold text-ink">Accounts</h2>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {accounts.map((a) => (
-            <AccountCard key={a.id} account={a} />
-          ))}
-        </div>
+        <AccountList accounts={accounts} />
       </div>
     </div>
   )
