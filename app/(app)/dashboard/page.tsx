@@ -234,9 +234,9 @@ export default async function DashboardPage({
       />
 
       {/* Net worth leads (§4). Below `md` it is a full-width hero and the other three share one
-          row; from `md` up this is the four-across grid it has always been. Two containers rather
-          than one grid, because the hero and the row have different track counts and a single
-          grid would need a col-span that applies at exactly one breakpoint. */}
+          row; from `md` up this is the grid it has always been — two-across at `md`, four at `lg`.
+          Two containers rather than one grid, because the hero and the row have different track
+          counts and a single grid would need a col-span that applies at exactly one breakpoint. */}
       <div className="space-y-4 md:grid md:grid-cols-2 md:gap-4 md:space-y-0 lg:grid-cols-4">
         <StatCard
           label="Net worth"
@@ -257,6 +257,7 @@ export default async function DashboardPage({
             label="Cash on hand"
             amount={cash}
             currency={currency}
+            variant="compact"
             href="/breakdown/cash"
             foot={
               <span className="text-muted">
@@ -268,6 +269,7 @@ export default async function DashboardPage({
             label={`Spent in ${thisMonthLabel}`}
             amount={spent}
             currency={currency}
+            variant="compact"
             href="/breakdown/spent"
             foot={budgetFoot}
           />
@@ -275,6 +277,7 @@ export default async function DashboardPage({
             label="Saved this month"
             amount={saved}
             currency={currency}
+            variant="compact"
             tone={saved < 0 ? 'coral' : 'ink'}
             href="/breakdown/saved"
             foot={

@@ -71,6 +71,24 @@ function findStatCards(node: unknown): { props: StatCardProps }[] {
   return found
 }
 
+// Every className in the returned tree, so a structural assertion does not depend on where in
+// the JSX the element sits.
+function classNamesOf(node: unknown): string[] {
+  const out: string[] = []
+  const walk = (n: unknown) => {
+    if (n == null || typeof n !== 'object') return
+    if (Array.isArray(n)) {
+      n.forEach(walk)
+      return
+    }
+    const el = n as { props?: { className?: unknown; children?: unknown } }
+    if (typeof el.props?.className === 'string') out.push(el.props.className)
+    if (el.props?.children) walk(el.props.children)
+  }
+  walk(node)
+  return out
+}
+
 beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(REPORTED)
@@ -130,12 +148,15 @@ describe('Dashboard reads', () => {
     const hero = findStatCards(tree).find((c) => c.props.label === 'Net worth')
     expect(hero).toBeTruthy()
     expect(hero!.props.variant).toBe('hero')
+    expect(hero!.props.amount).toBeCloseTo(1182885.15, 2)
   })
 
-  // The other three round below md, which is what buys the width to fit three across.
+  // Pins which tiles are compact: exactly the three supporting figures. Filtering on `!== 'hero'`
+  // would have stayed green if every tile lost its variant. What that variant then does about
+  // rounding is stat-card.test.tsx's business, not this file's.
   it('leaves the other three tiles compact', async () => {
     const labels = findStatCards(await render())
-      .filter((c) => c.props.variant !== 'hero')
+      .filter((c) => c.props.variant === 'compact')
       .map((c) => c.props.label)
     expect(labels).toContain('Cash on hand')
     expect(labels).toContain('Saved this month')
@@ -151,6 +172,16 @@ describe('Dashboard reads', () => {
     }
     const cash = findStatCards(await render()).find((c) => c.props.label === 'Cash on hand')
     expect(cash!.props.amount).toBeCloseTo(34920.49, 2)
+  })
+
+  // The stage's entire visible payload is these two class strings and nothing else asserts them.
+  // Reverting the outer container to the old single grid, or dropping `md:contents` from the
+  // inner row — which crushes the three tiles into one cell at desktop — both passed the whole
+  // file before this test existed. jsdom computes no layout, so the strings ARE the evidence.
+  it('keeps the hero-plus-row container structure', async () => {
+    const classes = classNamesOf(await render())
+    expect(classes).toContain('space-y-4 md:grid md:grid-cols-2 md:gap-4 md:space-y-0 lg:grid-cols-4')
+    expect(classes).toContain('grid grid-cols-3 gap-3 md:contents')
   })
 })
 
