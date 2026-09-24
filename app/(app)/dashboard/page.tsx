@@ -233,10 +233,16 @@ export default async function DashboardPage({
         }
       />
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      {/* Net worth leads (§4). Below `md` it is a full-width hero and the other three share one
+          row; from `md` up this is the four-across grid it has always been. Two containers rather
+          than one grid, because the hero and the row have different track counts and a single
+          grid would need a col-span that applies at exactly one breakpoint. */}
+      <div className="space-y-4 md:grid md:grid-cols-2 md:gap-4 md:space-y-0 lg:grid-cols-4">
         <StatCard
           label="Net worth"
-          value={money(worth, currency)}
+          amount={worth}
+          currency={currency}
+          variant="hero"
           href="/breakdown/net-worth"
           foot={
             <span className="text-muted">
@@ -244,32 +250,40 @@ export default async function DashboardPage({
             </span>
           }
         />
-        <StatCard
-          label="Cash on hand"
-          value={money(cash, currency)}
-          href="/breakdown/cash"
-          foot={
-            <span className="text-muted">
-              In {depCount} account{depCount === 1 ? '' : 's'}
-            </span>
-          }
-        />
-        <StatCard
-          label={`Spent in ${thisMonthLabel}`}
-          value={money(spent, currency)}
-          href="/breakdown/spent"
-          foot={budgetFoot}
-        />
-        <StatCard
-          label="Saved this month"
-          value={<span className={saved < 0 ? 'text-coral' : 'text-ink'}>{money(saved, currency)}</span>}
-          href="/breakdown/saved"
-          foot={
-            <span className="text-muted">
-              {money(income, currency)} in · {money(spent, currency)} out
-            </span>
-          }
-        />
+        {/* The three supporting figures. `contents` from `md` up so they become direct children of
+            the grid above and take their own tracks, rather than sitting inside a nested box. */}
+        <div className="grid grid-cols-3 gap-3 md:contents">
+          <StatCard
+            label="Cash on hand"
+            amount={cash}
+            currency={currency}
+            href="/breakdown/cash"
+            foot={
+              <span className="text-muted">
+                In {depCount} account{depCount === 1 ? '' : 's'}
+              </span>
+            }
+          />
+          <StatCard
+            label={`Spent in ${thisMonthLabel}`}
+            amount={spent}
+            currency={currency}
+            href="/breakdown/spent"
+            foot={budgetFoot}
+          />
+          <StatCard
+            label="Saved this month"
+            amount={saved}
+            currency={currency}
+            tone={saved < 0 ? 'coral' : 'ink'}
+            href="/breakdown/saved"
+            foot={
+              <span className="text-muted">
+                {money(income, currency)} in · {money(spent, currency)} out
+              </span>
+            }
+          />
+        </div>
       </div>
 
       {owedToYou > 0 && (

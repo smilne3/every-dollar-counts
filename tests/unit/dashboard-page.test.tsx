@@ -49,6 +49,28 @@ function textOf(node: unknown): string {
   return [el.props.title, el.props.subtitle, el.props.label, el.props.children].map(textOf).join(' ')
 }
 
+// Collect the StatCard elements from the returned tree so tile assertions can read their props
+// directly. textOf() deliberately flattens to strings, which cannot see a `variant` or an `amount`.
+type StatCardProps = { label: string; amount: number; variant?: 'hero' | 'compact' }
+
+function findStatCards(node: unknown): { props: StatCardProps }[] {
+  const found: { props: StatCardProps }[] = []
+  const walk = (n: unknown) => {
+    if (n == null || typeof n !== 'object') return
+    if (Array.isArray(n)) {
+      n.forEach(walk)
+      return
+    }
+    const el = n as { type?: unknown; props?: { children?: unknown } }
+    if (typeof el.type === 'function' && (el.type as { name?: string }).name === 'StatCard') {
+      found.push(el as unknown as { props: StatCardProps })
+    }
+    if (el.props?.children) walk(el.props.children)
+  }
+  walk(node)
+  return found
+}
+
 beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(REPORTED)
@@ -95,6 +117,40 @@ describe('Dashboard reads', () => {
 
   it('renders when every read succeeds', async () => {
     await expect(render()).resolves.toBeTruthy()
+  })
+
+  // §4: the tiles are treated by importance, not equally. jsdom does no layout, so what is
+  // decidable here is that the hero tile exists and carries the figure that clipped twice.
+  it('gives net worth the hero tile', async () => {
+    results.accounts = {
+      data: [{ id: 'a1', type: 'depository', current_balance: 1182885.15 }],
+      error: null,
+    }
+    const tree = await render()
+    const hero = findStatCards(tree).find((c) => c.props.label === 'Net worth')
+    expect(hero).toBeTruthy()
+    expect(hero!.props.variant).toBe('hero')
+  })
+
+  // The other three round below md, which is what buys the width to fit three across.
+  it('leaves the other three tiles compact', async () => {
+    const labels = findStatCards(await render())
+      .filter((c) => c.props.variant !== 'hero')
+      .map((c) => c.props.label)
+    expect(labels).toContain('Cash on hand')
+    expect(labels).toContain('Saved this month')
+    expect(labels.some((l: string) => l.startsWith('Spent in'))).toBe(true)
+  })
+
+  // Rounding is display-only. The tile is handed the real figure and decides for itself; a
+  // pre-rounded value here would round the desktop layout too.
+  it('hands the tiles unrounded figures', async () => {
+    results.accounts = {
+      data: [{ id: 'a1', type: 'depository', current_balance: 34920.49 }],
+      error: null,
+    }
+    const cash = findStatCards(await render()).find((c) => c.props.label === 'Cash on hand')
+    expect(cash!.props.amount).toBeCloseTo(34920.49, 2)
   })
 })
 
