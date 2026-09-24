@@ -26,9 +26,10 @@ export function AccountList({ accounts }: { accounts: Account[] }) {
           <AccountCard key={a.id} account={a} />
         ))}
         {hidden.map((a) => (
-          // Present in the document at every width so the desktop grid is byte-for-byte what it
-          // was; `hidden` below `md` keeps them out of the phone list AND out of the
-          // accessibility tree until the reader asks.
+          // Present in the document at every width. The wrapper is new markup, but `md:contents`
+          // removes it from the box tree at `md` and up, leaving each card a direct grid child —
+          // so the desktop grid renders exactly as it did. `hidden` below `md` keeps the extras
+          // out of the phone list AND out of the accessibility tree until the reader asks.
           <div
             key={a.id}
             data-account-extra
@@ -41,6 +42,7 @@ export function AccountList({ accounts }: { accounts: Account[] }) {
       {canCollapse && (
         <button
           type="button"
+          aria-expanded={expanded}
           onClick={() => setExpanded((v) => !v)}
           className="text-sm font-medium text-emerald hover:text-emerald-600 md:hidden"
         >

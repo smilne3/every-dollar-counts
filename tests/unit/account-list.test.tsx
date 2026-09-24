@@ -31,9 +31,10 @@ describe('AccountList', () => {
   // lot of thumb between the reader and the end of the page.
   //
   // Asserted on the wrapper's class, not on absence: every card stays in the document at every
-  // width so the desktop grid is byte-for-byte what it was (a Global Constraint), and `hidden`
-  // below `md` keeps the extras out of the phone list and out of the accessibility tree. Same
-  // shape as StatCard's dual strings in Task 2.
+  // width, and `md:contents` takes the wrapper out of the box tree from `md` up, so the desktop
+  // grid renders exactly as it did (a Global Constraint) even though the markup around each extra
+  // is new. `hidden` below `md` keeps the extras out of the phone list and out of the
+  // accessibility tree. Same shape as StatCard's dual strings in Task 2.
   const wrapperOf = (i: number) => nameLine(i).closest('[data-account-extra]')
 
   it('shows the first four outright', () => {
@@ -55,10 +56,25 @@ describe('AccountList', () => {
     expect(screen.getByRole('button', { name: 'Show all 12' })).toBeTruthy()
   })
 
+  // `toBe('contents')`, not `not.toContain('hidden')`: an empty className also contains no
+  // `hidden`, and would drop the eight extras into one block-level wrapper. Nothing is visibly
+  // wrong until a reader who expanded on a phone crosses `md` — rotation, a tablet, a resized
+  // window — and the grid collapses to a single column. The mirror of the collapsed-state string.
   it('reveals the rest when the control is used', () => {
     render(<AccountList accounts={accounts} />)
     fireEvent.click(screen.getByRole('button', { name: 'Show all 12' }))
-    expect(wrapperOf(11)!.className).not.toContain('hidden')
+    expect(wrapperOf(11)!.className).toBe('contents')
+  })
+
+  // A disclosure control states its own state. The label changing from "Show all 12" to
+  // "Show fewer" conveys it on activation, but nothing exposes it to a reader landing on the
+  // collapsed control cold.
+  it('tells assistive tech whether it is expanded', () => {
+    render(<AccountList accounts={accounts} />)
+    const control = screen.getByRole('button', { name: 'Show all 12' })
+    expect(control.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(control)
+    expect(screen.getByRole('button', { name: 'Show fewer' }).getAttribute('aria-expanded')).toBe('true')
   })
 
   it('offers a way back once expanded', () => {
