@@ -200,9 +200,18 @@ describe('transactionLabel', () => {
     expect(transactionLabel({ name: null, merchant_name: null })).toBe('Transaction')
   })
 
-  // The seam that matters: presentTransaction must not keep its own copy of the rule.
+  // The seam that matters: presentTransaction must not keep its own copy of the rule. All three
+  // branches, because a copy that merely FLIPS the preference (`name ?? merchant_name`) agrees with
+  // this function on the fallback cases and differs only when both are set.
   it('is the same answer presentTransaction gives', () => {
-    const t = { ...base, name: 'JOE S DEN', merchant_name: null }
-    expect(presentTransaction(t).label).toBe(transactionLabel(t))
+    const cases = [
+      { name: 'JOE S DEN', merchant_name: 'Joe S Den' },
+      { name: 'CAPITAL ONE AUTOPAY', merchant_name: null },
+      { name: null, merchant_name: null },
+    ]
+    for (const c of cases) {
+      const t = { ...base, ...c }
+      expect(presentTransaction(t).label).toBe(transactionLabel(t))
+    }
   })
 })
