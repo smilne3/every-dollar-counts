@@ -10,8 +10,8 @@ import { StatCard } from '@/components/ui/StatCard'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { money, longDate, monthNameLong } from '@/lib/format'
 import { effectiveCategory } from '@/lib/effective-category'
-import { isCreditCardPayment } from '@/lib/categories'
 import { pfcToName, type Category } from '@/lib/categories'
+import { presentTransaction } from '@/lib/transaction-presentation'
 import {
   netWorth,
   cashOnHand,
@@ -158,24 +158,28 @@ export default async function DashboardPage({
 
   const { data: recentTxns, error: recentError } = await supabase
     .from('transactions')
-    .select('id, name, merchant_name, amount, date, user_category, pfc_primary, pfc_detailed')
+    .select('id, name, merchant_name, amount, date, user_category, pfc_primary, pfc_detailed, reimbursable_amount')
     .eq('removed', false)
     .order('date', { ascending: false })
     .order('id', { ascending: false })  // #50: `date` is day-granular and ties constantly; without a unique second key Postgres may return tied rows in any order, so an UPDATE reshuffles the list under the reader.
     .limit(6)
   // Otherwise a failed read renders "No transactions yet" to a household with 696 of them.
   if (recentError) throw new Error(`could not read recent transactions: ${recentError.message}`)
-  const recentItems = (recentTxns ?? []).map((t) => ({
-    id: t.id as string,
-    name: (t.merchant_name ?? t.name ?? 'Transaction') as string,
-    category: effectiveCategory(t, pfcMap),
-    date: t.date as string,
-    amount: t.amount as number,
-    // Recent activity paints inflows emerald with a leading '+'. On the leg that credits the card
-    // that reads as income arriving, which it is not (#31 already keeps both legs out of every
-    // total). The list needs to be told, so pfc_detailed is selected above for this alone.
-    internalTransfer: isCreditCardPayment(t),
-  }))
+  const recentItems = (recentTxns ?? []).map((t) => {
+    // One source of meaning. The label fallback and the card-payment call used to be made here,
+    // independently of presentTransaction, which is exactly the duplication that module exists to
+    // end. `shareAmount` is unused by this list — it shows no reimbursable state.
+    const p = presentTransaction(t as Parameters<typeof presentTransaction>[0])
+    return {
+      id: t.id as string,
+      date: t.date as string,
+      category: effectiveCategory(t, pfcMap),
+      label: p.label,
+      display: p.display,
+      tone: p.tone,
+      isCC: p.isCC,
+    }
+  })
 
   const worth = netWorth(accounts, owedToYou) + sumManualAssets(manualAssets)
   const cash = cashOnHand(accounts)

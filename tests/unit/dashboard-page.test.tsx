@@ -71,6 +71,27 @@ function findStatCards(node: unknown): { props: StatCardProps }[] {
   return found
 }
 
+// The items the page hands to <RecentActivity>. The list itself is not rendered here — this reads
+// the props off the element, which is exactly the seam the page owns.
+function recentItemsOf(node: unknown): Record<string, unknown>[] | null {
+  let found: Record<string, unknown>[] | null = null
+  const walk = (n: unknown) => {
+    if (n == null || typeof n !== 'object' || found) return
+    if (Array.isArray(n)) {
+      n.forEach(walk)
+      return
+    }
+    const el = n as { type?: unknown; props?: { items?: unknown; children?: unknown } }
+    if (typeof el.type === 'function' && (el.type as { name?: string }).name === 'RecentActivity') {
+      found = el.props?.items as Record<string, unknown>[]
+      return
+    }
+    if (el.props?.children) walk(el.props.children)
+  }
+  walk(node)
+  return found
+}
+
 // Every className in the returned tree, so a structural assertion does not depend on where in
 // the JSX the element sits.
 function classNamesOf(node: unknown): string[] {
@@ -172,6 +193,39 @@ describe('Dashboard reads', () => {
     }
     const cash = findStatCards(await render()).find((c) => c.props.label === 'Cash on hand')
     expect(cash!.props.amount).toBeCloseTo(34920.49, 2)
+  })
+
+  // The page's half of the presentTransaction fold. recent-activity.test.tsx builds its own items,
+  // so nothing else covers this map: a page that went back to handing the list the raw Plaid amount,
+  // or that re-derived the merchant fallback and the card-payment call for itself, would ship green.
+  it('hands recent activity presented rows rather than raw Plaid ones', async () => {
+    results.transactions = {
+      data: [
+        {
+          id: 'r1',
+          name: 'CAPITAL ONE AUTOPAY PYMT',
+          merchant_name: null, // so the label has to come back through presentTransaction's fallback
+          amount: -7866.69, // Plaid: negative is money in, and this leg only looks like income
+          date: '2026-09-01',
+          user_category: null,
+          pfc_primary: 'LOAN_PAYMENTS',
+          pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT',
+          reimbursable_amount: null,
+        },
+      ],
+      error: null,
+    }
+    expect(recentItemsOf(await render())).toEqual([
+      {
+        id: 'r1',
+        date: '2026-09-01',
+        category: 'Uncategorized', // no categories seeded, so PFC maps to nothing
+        label: 'CAPITAL ONE AUTOPAY PYMT',
+        display: 7866.69,
+        tone: 'neutral',
+        isCC: true,
+      },
+    ])
   })
 
   // The stage's entire visible payload is these two class strings and nothing else asserts them.
