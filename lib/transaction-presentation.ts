@@ -42,7 +42,7 @@ export type PresentedTxn = {
 }
 
 // What to call a transaction on screen. Plaid always sends `name`, so the fallbacks are the
-// belt-and-braces case rather than the common one — but they are the case where surfaces used to
+// belt-and-braces cases rather than the common one — but they are the cases where surfaces used to
 // diverge, and `app/(app)/reimbursements/page.tsx` carried its own copy of this expression in two
 // places (#106). Exported so that page can ask rather than re-derive.
 export function transactionLabel(t: { name: string | null; merchant_name: string | null }): string {
