@@ -66,7 +66,12 @@ function textOf(node: unknown): string {
 
 // Collect the StatCard elements from the returned tree so tile assertions can read their props
 // directly. textOf() deliberately flattens to strings, which cannot see a `variant` or an `amount`.
-type StatCardProps = { label: string; amount: number; variant?: 'hero' | 'compact' }
+type StatCardProps = {
+  label: string
+  amount: number
+  variant?: 'hero' | 'compact'
+  tone?: 'ink' | 'coral'
+}
 
 function findStatCards(node: unknown): { props: StatCardProps }[] {
   const found: { props: StatCardProps }[] = []
@@ -198,6 +203,45 @@ describe('Dashboard reads', () => {
     expect(labels).toContain('Cash on hand')
     expect(labels).toContain('Saved this month')
     expect(labels.some((l: string) => l.startsWith('Spent in'))).toBe(true)
+  })
+
+  // A negative month turns the "Saved this month" figure red. The rule shipped on `main` as a
+  // `<span className="text-coral">` the caller wrapped the figure in; this stage rewired it into a
+  // `tone` prop, and deleting that prop outright passed all 476 tests — the red would have gone
+  // silently. Asserted on the prop, because the colour is now the tile's to apply.
+  it('tones the saved tile by the sign of the month', async () => {
+    const outflow = {
+      id: 't1',
+      name: 'RENT',
+      merchant_name: null,
+      amount: 2400, // Plaid: positive is money out
+      date: '2026-09-01',
+      user_category: null,
+      pfc_primary: null,
+      pfc_detailed: null,
+      reimbursable_amount: null,
+    }
+    // No categories seeded, so nothing maps to Income: the outflow is pure spending, income is 0
+    // and saved comes out at -2400.
+    results.transactions = { data: [outflow], error: null }
+    const overspent = findStatCards(await render()).find((c) => c.props.label === 'Saved this month')
+    expect(overspent!.props.tone).toBe('coral')
+
+    // The other direction needs a category that maps INCOME, or the inflow reads as a refund
+    // against spending rather than as money in: saved is then +2600.
+    results.categories = {
+      data: [{ id: 'c1', name: 'Income', pfc_primary: 'INCOME', sort_order: 0 }],
+      error: null,
+    }
+    results.transactions = {
+      data: [
+        outflow,
+        { ...outflow, id: 't2', name: 'PAYROLL', amount: -5000, pfc_primary: 'INCOME' },
+      ],
+      error: null,
+    }
+    const saved = findStatCards(await render()).find((c) => c.props.label === 'Saved this month')
+    expect(saved!.props.tone).toBe('ink')
   })
 
   // Rounding is display-only. The tile is handed the real figure and decides for itself; a

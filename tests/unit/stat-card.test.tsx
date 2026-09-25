@@ -49,6 +49,21 @@ describe('StatCard', () => {
     expect(compact.querySelector('.tabular-nums')!.className).toContain('lg:text-3xl')
   })
 
+  // The md/lg segments above are what must NOT change; this pins what the stage actually
+  // delivers — the size below `md`. Mutating hero's first segment to `text-xl` passed all 476
+  // tests before this existed, which would have silently undone §4's "larger than today".
+  it('pins the figure classes of both variants, phone size included', () => {
+    const { container: hero } = render(<StatCard label="Net worth" amount={1} variant="hero" />)
+    expect(hero.querySelector('.tabular-nums')!.className).toBe(
+      'mt-2 font-semibold tracking-tight tabular-nums text-ink text-3xl md:text-2xl lg:text-3xl'
+    )
+    cleanup()
+    const { container: compact } = render(<StatCard label="Cash" amount={1} />)
+    expect(compact.querySelector('.tabular-nums')!.className).toBe(
+      'mt-2 font-semibold tracking-tight tabular-nums text-ink text-xl sm:text-2xl lg:text-3xl'
+    )
+  })
+
   it('defaults to compact when no variant is given', () => {
     render(<StatCard label="Spent" amount={8776.51} />)
     expect(screen.getByText('$8,777')).toBeTruthy()
