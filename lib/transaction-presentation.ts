@@ -2,15 +2,13 @@ import { isCreditCardPayment } from './categories'
 
 // What a transaction MEANS, separate from how any one surface draws it. The desktop <tr>
 // (TransactionRow) and the phone card (TransactionCard) have different markup and must not have
-// different meaning: for those two, the sign convention, the colour rule and the card-payment
-// exemption live here once, so a change reaches both or neither.
+// different meaning: for every surface that renders a transaction, the sign convention, the colour
+// rule and the card-payment exemption live here once, so a change reaches all of them or none.
 //
-// Scoped to that pair deliberately. components/RecentActivity.tsx is a KNOWN third copy — it flips
-// the sign itself (line 25) and carries a tone ternary structurally identical to TONE_CLASS (lines
-// 34 and 52) — and it does not go through here. It renders a different, dashboard-sized list from
-// a different shape (ActivityItem, with the card-payment call already made upstream as
-// `internalTransfer`), so consolidating it is a separate piece of work, not an oversight. Anyone
-// changing the rules below has to change that file too.
+// components/RecentActivity.tsx consumes this too, as of stage 2 of the phone pass. It renders a
+// different, dashboard-sized list and keeps its own icon palette — an outflow is coral there and
+// `text-ink` here — but it no longer flips the sign or decides what a card payment is. Those
+// answers come from this module, so a change to the rules below reaches every surface.
 export type PresentableTxn = {
   amount: number
   name: string | null
@@ -36,7 +34,13 @@ export type PresentedTxn = {
 
 export function presentTransaction(t: PresentableTxn): PresentedTxn {
   // Plaid: amount > 0 means money OUT. Show spending as negative.
-  const display = -t.amount
+  //
+  // `t.amount === 0` first: negating a zero yields -0, which Intl renders as "-$0.00" — the same
+  // trap this module already disarms for `shareAmount` below. Left alone it ALSO escapes the
+  // `display < 0` test, so a zero-amount transaction is toned as money arriving: RecentActivity
+  // prefixes a '+' and paints the chip emerald, rendering "+-$0.00" in the colour reserved for
+  // income. `-0 === 0` is true, so nothing short of the rendered string catches it.
+  const display = t.amount === 0 ? 0 : -t.amount
   // Plaid always sends `name`, so the fallback is the belt-and-braces case rather than the common
   // one — but it is the case where the two surfaces used to diverge.
   const label = t.merchant_name ?? t.name ?? 'Transaction'
@@ -71,8 +75,10 @@ export function presentTransaction(t: PresentableTxn): PresentedTxn {
     label,
     display,
     // A card payment is neither spending nor income — both legs are already excluded from every
-    // total. Painting the crediting leg emerald made $7,866.69 read as income (#31).
-    tone: isCC ? 'neutral' : display < 0 ? 'out' : 'in',
+    // total. Painting the crediting leg emerald made $7,866.69 read as income (#31). A zero amount
+    // is neither either, and must not fall through to the `in` arm the way `display < 0` alone
+    // lets it.
+    tone: isCC || display === 0 ? 'neutral' : display < 0 ? 'out' : 'in',
     isCC,
     shareAmount: marked > 0 ? share : null,
   }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { axisTick, shortDate, monthLabel, longDate, monthNameLong } from '@/lib/format'
+import { axisTick, shortDate, monthLabel, longDate, monthNameLong, moneyWhole } from '@/lib/format'
 
 describe('axisTick', () => {
   it('keeps half-thousand gridlines honest', () => {
@@ -99,5 +99,34 @@ describe('monthNameLong', () => {
   it('returns the input unchanged when it cannot be read', () => {
     expect(monthNameLong('nope')).toBe('nope')
     expect(monthNameLong('2026-99')).toBe('2026-99')
+  })
+})
+
+describe('moneyWhole', () => {
+  // The three compact tiles round for width. Cents on a phone buy nothing and cost the
+  // characters that made §1.3 clip.
+  it('drops the cents', () => {
+    expect(moneyWhole(34920.49)).toBe('$34,920')
+    expect(moneyWhole(8776.51)).toBe('$8,777')
+  })
+
+  // Rounding is for READING. A figure that rounds to nothing must not read as nothing at all,
+  // so the currency symbol and the sign both survive.
+  it('keeps the sign and the symbol on a negative figure', () => {
+    expect(moneyWhole(-5449)).toBe('-$5,449')
+  })
+
+  it('renders zero as zero, not as an empty string', () => {
+    expect(moneyWhole(0)).toBe('$0')
+  })
+
+  // money() already treats null as zero; the rounded form must not disagree with it.
+  it('treats null and undefined as zero, exactly as money() does', () => {
+    expect(moneyWhole(null)).toBe('$0')
+    expect(moneyWhole(undefined)).toBe('$0')
+  })
+
+  it('honours a non-default currency', () => {
+    expect(moneyWhole(1200, 'EUR')).toBe('€1,200')
   })
 })

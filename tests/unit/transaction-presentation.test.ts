@@ -18,6 +18,20 @@ describe('presentTransaction', () => {
     expect(presentTransaction({ ...base, amount: -250 }).display).toBe(250)
   })
 
+  // -0 is not 0 for rendering: Intl formats it "-$0.00". Object.is, because `-0 === 0` is true and
+  // a plain toBe(0) passes against the bug.
+  it('renders a zero amount as zero, not as minus zero', () => {
+    const p = presentTransaction({ ...base, amount: 0 })
+    expect(Object.is(p.display, -0)).toBe(false)
+    expect(p.display).toBe(0)
+  })
+
+  // A zero-amount transaction is neither spending nor income. Toned `in` it took the emerald the
+  // list reserves for money arriving, plus RecentActivity's leading '+'.
+  it('tones a zero amount as neither spending nor income', () => {
+    expect(presentTransaction({ ...base, amount: 0 }).tone).toBe('neutral')
+  })
+
   it('tones an outflow as ink and an inflow as emerald', () => {
     expect(presentTransaction(base).tone).toBe('out')
     expect(presentTransaction({ ...base, amount: -250 }).tone).toBe('in')

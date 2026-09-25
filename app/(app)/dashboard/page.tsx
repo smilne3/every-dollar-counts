@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
-import { AccountCard } from '@/components/AccountCard'
+import { AccountList } from '@/components/AccountList'
 import { LinkButton } from '@/components/LinkButton'
 import { RefreshButton } from '@/components/RefreshButton'
 import { SpendIncomeChart } from '@/components/SpendIncomeChart'
@@ -10,8 +10,8 @@ import { StatCard } from '@/components/ui/StatCard'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { money, longDate, monthNameLong } from '@/lib/format'
 import { effectiveCategory } from '@/lib/effective-category'
-import { isCreditCardPayment } from '@/lib/categories'
 import { pfcToName, type Category } from '@/lib/categories'
+import { presentTransaction } from '@/lib/transaction-presentation'
 import {
   netWorth,
   cashOnHand,
@@ -158,24 +158,28 @@ export default async function DashboardPage({
 
   const { data: recentTxns, error: recentError } = await supabase
     .from('transactions')
-    .select('id, name, merchant_name, amount, date, user_category, pfc_primary, pfc_detailed')
+    .select('id, name, merchant_name, amount, date, user_category, pfc_primary, pfc_detailed, reimbursable_amount')
     .eq('removed', false)
     .order('date', { ascending: false })
     .order('id', { ascending: false })  // #50: `date` is day-granular and ties constantly; without a unique second key Postgres may return tied rows in any order, so an UPDATE reshuffles the list under the reader.
     .limit(6)
   // Otherwise a failed read renders "No transactions yet" to a household with 696 of them.
   if (recentError) throw new Error(`could not read recent transactions: ${recentError.message}`)
-  const recentItems = (recentTxns ?? []).map((t) => ({
-    id: t.id as string,
-    name: (t.merchant_name ?? t.name ?? 'Transaction') as string,
-    category: effectiveCategory(t, pfcMap),
-    date: t.date as string,
-    amount: t.amount as number,
-    // Recent activity paints inflows emerald with a leading '+'. On the leg that credits the card
-    // that reads as income arriving, which it is not (#31 already keeps both legs out of every
-    // total). The list needs to be told, so pfc_detailed is selected above for this alone.
-    internalTransfer: isCreditCardPayment(t),
-  }))
+  const recentItems = (recentTxns ?? []).map((t) => {
+    // One source of meaning. The label fallback and the card-payment call used to be made here,
+    // independently of presentTransaction, which is exactly the duplication that module exists to
+    // end. `shareAmount` is unused by this list — it shows no reimbursable state.
+    const p = presentTransaction(t as Parameters<typeof presentTransaction>[0])
+    return {
+      id: t.id as string,
+      date: t.date as string,
+      category: effectiveCategory(t, pfcMap),
+      label: p.label,
+      display: p.display,
+      tone: p.tone,
+      isCC: p.isCC,
+    }
+  })
 
   const worth = netWorth(accounts, owedToYou) + sumManualAssets(manualAssets)
   const cash = cashOnHand(accounts)
@@ -233,10 +237,16 @@ export default async function DashboardPage({
         }
       />
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      {/* Net worth leads (§4). Below `md` it is a full-width hero and the other three share one
+          row; from `md` up this is the grid it has always been — two-across at `md`, four at `lg`.
+          Two containers rather than one grid, because the hero and the row have different track
+          counts and a single grid would need a col-span that applies at exactly one breakpoint. */}
+      <div className="space-y-4 md:grid md:grid-cols-2 md:gap-4 md:space-y-0 lg:grid-cols-4">
         <StatCard
           label="Net worth"
-          value={money(worth, currency)}
+          amount={worth}
+          currency={currency}
+          variant="hero"
           href="/breakdown/net-worth"
           foot={
             <span className="text-muted">
@@ -244,32 +254,43 @@ export default async function DashboardPage({
             </span>
           }
         />
-        <StatCard
-          label="Cash on hand"
-          value={money(cash, currency)}
-          href="/breakdown/cash"
-          foot={
-            <span className="text-muted">
-              In {depCount} account{depCount === 1 ? '' : 's'}
-            </span>
-          }
-        />
-        <StatCard
-          label={`Spent in ${thisMonthLabel}`}
-          value={money(spent, currency)}
-          href="/breakdown/spent"
-          foot={budgetFoot}
-        />
-        <StatCard
-          label="Saved this month"
-          value={<span className={saved < 0 ? 'text-coral' : 'text-ink'}>{money(saved, currency)}</span>}
-          href="/breakdown/saved"
-          foot={
-            <span className="text-muted">
-              {money(income, currency)} in · {money(spent, currency)} out
-            </span>
-          }
-        />
+        {/* The three supporting figures. `contents` from `md` up so they become direct children of
+            the grid above and take their own tracks, rather than sitting inside a nested box. */}
+        <div className="grid grid-cols-3 gap-3 md:contents">
+          <StatCard
+            label="Cash on hand"
+            amount={cash}
+            currency={currency}
+            variant="compact"
+            href="/breakdown/cash"
+            foot={
+              <span className="text-muted">
+                In {depCount} account{depCount === 1 ? '' : 's'}
+              </span>
+            }
+          />
+          <StatCard
+            label={`Spent in ${thisMonthLabel}`}
+            amount={spent}
+            currency={currency}
+            variant="compact"
+            href="/breakdown/spent"
+            foot={budgetFoot}
+          />
+          <StatCard
+            label="Saved this month"
+            amount={saved}
+            currency={currency}
+            variant="compact"
+            tone={saved < 0 ? 'coral' : 'ink'}
+            href="/breakdown/saved"
+            foot={
+              <span className="text-muted">
+                {money(income, currency)} in · {money(spent, currency)} out
+              </span>
+            }
+          />
+        </div>
       </div>
 
       {owedToYou > 0 && (
@@ -315,11 +336,7 @@ export default async function DashboardPage({
 
       <div className="space-y-3">
         <h2 className="text-base font-semibold text-ink">Accounts</h2>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {accounts.map((a) => (
-            <AccountCard key={a.id} account={a} />
-          ))}
-        </div>
+        <AccountList accounts={accounts} />
       </div>
     </div>
   )
