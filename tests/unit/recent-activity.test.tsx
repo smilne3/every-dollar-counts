@@ -106,6 +106,15 @@ describe('RecentActivity', () => {
     expect(screen.getByText('-$42.00').className).not.toContain('text-coral')
   })
 
+  // The rendering that catches the -0 trap: a plain toBe(0) on `display` passes against the bug,
+  // and jsdom only ever shows it as the string in the figure.
+  it('renders a zero-amount row without a plus sign or a minus zero', () => {
+    render(<RecentActivity items={[item({ amount: 0 })]} />)
+    expect(screen.getByText('$0.00')).toBeTruthy()
+    expect(screen.queryByText('+-$0.00')).toBeNull()
+    expect(screen.queryByText('-$0.00')).toBeNull()
+  })
+
   it('says so when there is nothing to show', () => {
     render(<RecentActivity items={[]} />)
     expect(screen.getByText('No transactions yet.')).toBeTruthy()
