@@ -2,9 +2,10 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 // vi.hoisted for the same reason as tests/unit/trends-page.test.tsx: the static page import below
 // is linked before this file's body runs, firing the mock factory.
-const { results, tz } = vi.hoisted(() => ({
+const { results, tz, presentation } = vi.hoisted(() => ({
   results: {} as Record<string, { data: unknown; error: { message: string } | null }>,
   tz: { value: 'America/New_York' },
+  presentation: { stampLabel: false },
 }))
 
 // A supabase query is a builder awaited at the end, so the stub returns itself for every chained
@@ -26,6 +27,20 @@ vi.mock('@/lib/household', () => ({
   DEFAULT_TIMEZONE: 'America/New_York',
   householdTimezone: async () => tz.value,
 }))
+// The real module by default. Under `stampLabel` every label gets a prefix no local expression
+// could produce, which is the ONLY way to tell "the page took p.label" apart from "the page
+// re-derived merchant_name ?? name ?? 'Transaction'": those two agree on every possible input by
+// construction, so no assertion on the value can separate them. See the test that uses it.
+vi.mock('@/lib/transaction-presentation', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/transaction-presentation')>()
+  return {
+    ...actual,
+    presentTransaction: (t: Parameters<typeof actual.presentTransaction>[0]) => {
+      const p = actual.presentTransaction(t)
+      return presentation.stampLabel ? { ...p, label: `presented:${p.label}` } : p
+    },
+  }
+})
 vi.mock('@/lib/plaid-items', () => ({ listItemsForHousehold: async () => [] }))
 vi.mock('@/lib/manual-assets', () => ({ listManualAssets: async () => [] }))
 vi.mock('@/lib/receivable', () => ({ fetchReceivable: async () => 0 }))
@@ -114,6 +129,7 @@ beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(REPORTED)
   tz.value = 'America/New_York'
+  presentation.stampLabel = false
   // One account, so the page renders the money tiles rather than the empty state.
   results.accounts = { data: [{ id: 'a1', type: 'depository', current_balance: 100 }], error: null }
   results.memberships = { data: { household_id: 'hh-1' }, error: null }
@@ -203,13 +219,28 @@ describe('Dashboard reads', () => {
       data: [
         {
           id: 'r1',
-          name: 'CAPITAL ONE AUTOPAY PYMT',
-          merchant_name: null, // so the label has to come back through presentTransaction's fallback
+          // The two label sources differ ON PURPOSE. With merchant_name null they are the same
+          // string, and re-deriving `merchant_name ?? name ?? 'Transaction'` on the page — the
+          // duplication this task removed — is then indistinguishable from taking p.label.
+          name: 'JOE S DEN',
+          merchant_name: 'Joe S Den',
           amount: -7866.69, // Plaid: negative is money in, and this leg only looks like income
           date: '2026-09-01',
           user_category: null,
           pfc_primary: 'LOAN_PAYMENTS',
           pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT',
+          reimbursable_amount: null,
+        },
+        {
+          // The other leg of the fallback: no merchant, so the raw name has to come through.
+          id: 'r2',
+          name: 'CAPITAL ONE AUTOPAY PYMT',
+          merchant_name: null,
+          amount: 42,
+          date: '2026-08-31',
+          user_category: null,
+          pfc_primary: null,
+          pfc_detailed: null,
           reimbursable_amount: null,
         },
       ],
@@ -220,12 +251,47 @@ describe('Dashboard reads', () => {
         id: 'r1',
         date: '2026-09-01',
         category: 'Uncategorized', // no categories seeded, so PFC maps to nothing
-        label: 'CAPITAL ONE AUTOPAY PYMT',
+        label: 'Joe S Den', // the merchant, not the raw name
         display: 7866.69,
         tone: 'neutral',
         isCC: true,
       },
+      {
+        id: 'r2',
+        date: '2026-08-31',
+        category: 'Uncategorized',
+        label: 'CAPITAL ONE AUTOPAY PYMT', // no merchant, so the raw name
+        display: -42,
+        tone: 'out',
+        isCC: false,
+      },
     ])
+  })
+
+  // The fixture above cannot catch the page re-deriving the label, because the expression it would
+  // re-derive — `merchant_name ?? name ?? 'Transaction'` — IS presentTransaction's rule, so both
+  // produce the same string for every input. Only the source can be distinguished, not the value:
+  // this stamps the module's answer so a locally computed label cannot impersonate it. Restoring
+  // the old duplication at page.tsx:176 fails here and nowhere else.
+  it('takes the row label from presentTransaction rather than re-deriving the same rule', async () => {
+    presentation.stampLabel = true
+    results.transactions = {
+      data: [
+        {
+          id: 'r1',
+          name: 'JOE S DEN',
+          merchant_name: 'Joe S Den',
+          amount: 42,
+          date: '2026-09-01',
+          user_category: null,
+          pfc_primary: null,
+          pfc_detailed: null,
+          reimbursable_amount: null,
+        },
+      ],
+      error: null,
+    }
+    expect(recentItemsOf(await render())![0].label).toBe('presented:Joe S Den')
   })
 
   // The stage's entire visible payload is these two class strings and nothing else asserts them.
