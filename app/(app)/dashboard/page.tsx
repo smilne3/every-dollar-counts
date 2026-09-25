@@ -177,7 +177,7 @@ export default async function DashboardPage({
       label: p.label,
       display: p.display,
       tone: p.tone,
-      isCC: p.isCC,
+      isInternal: p.isInternal,
     }
   })
 

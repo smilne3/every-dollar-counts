@@ -13,6 +13,7 @@ type Txn = {
   // What identify a credit-card payment, which the reimbursable route refuses, so the checkbox must
   // not be offered on one. Both are already selected by the page.
   user_category: string | null
+  pfc_primary: string | null
   pfc_detailed: string | null
   reimbursable_amount: number | null
   reimbursable_note: string | null

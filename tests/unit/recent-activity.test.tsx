@@ -15,6 +15,7 @@ const item = (
     name: 'JOE S DEN',
     merchant_name: 'Joe S Den',
     user_category: null,
+    pfc_primary: null as string | null,
     pfc_detailed: null,
     reimbursable_amount: null,
     ...over,
@@ -27,7 +28,7 @@ const item = (
     label: p.label,
     display: p.display,
     tone: p.tone,
-    isCC: p.isCC,
+    isInternal: p.isInternal,
   }
 }
 
@@ -113,6 +114,29 @@ describe('RecentActivity', () => {
     expect(screen.getByText('$0.00')).toBeTruthy()
     expect(screen.queryByText('+-$0.00')).toBeNull()
     expect(screen.queryByText('-$0.00')).toBeNull()
+  })
+
+  // The bug the owner spotted on their phone: a checking -> savings transfer showed the category
+  // name and, on the inflow leg, emerald with a leading '+' — their own money reading as a
+  // paycheque. isCreditCardPayment never matched it (that keys off the DETAILED category, and only
+  // for card payments), so the list had no idea it was internal.
+  it('says a transfer between your own accounts is internal, on both legs', () => {
+    render(
+      <RecentActivity
+        items={[
+          item({ id: 'in', amount: -500, pfc_primary: 'TRANSFER_IN' }),
+          item({ id: 'out', amount: 500, pfc_primary: 'TRANSFER_OUT' }),
+        ]}
+      />
+    )
+    expect(screen.getAllByText(/Between your accounts/)).toHaveLength(2)
+  })
+
+  it('does not paint a transfer into savings as money arriving', () => {
+    render(<RecentActivity items={[item({ amount: -500, pfc_primary: 'TRANSFER_IN' })]} />)
+    // No leading '+', and muted rather than the emerald reserved for real income.
+    expect(screen.queryByText('+$500.00')).toBeNull()
+    expect(screen.getByText('$500.00').className).toContain(TONE_CLASS.neutral)
   })
 
   it('says so when there is nothing to show', () => {
