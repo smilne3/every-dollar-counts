@@ -19,13 +19,17 @@ export function ReimbursementCard({
   date: string
   note?: string | null
 }) {
-  // An empty string is as good as absent: a note nobody filled in must not leave a dangling '·'.
+  // trim(), not merely truthiness: `''` is already falsy and takes the same branch without it, but
+  // a note of '   ' is NOT, and would render "Sep 1 ·    " — a separator pointing at nothing. The
+  // second trim() keeps a padded name from rendering with its padding.
   const who = note?.trim() ? note.trim() : null
   return (
-    <div className="flex items-baseline justify-between gap-3 border-b border-line px-4 py-3 last:border-b-0">
-      <div className="min-w-0">
+    <div className="flex items-start justify-between gap-3 border-b border-line px-4 py-3 last:border-b-0">
+      <div className="min-w-0 flex-1">
         <div className="truncate font-medium text-ink">{label}</div>
-        <div className="truncate text-xs text-muted">{who ? `${shortDate(date)} · ${who}` : shortDate(date)}</div>
+        <div className="mt-0.5 truncate text-xs text-muted">
+          {who ? `${shortDate(date)} · ${who}` : shortDate(date)}
+        </div>
       </div>
       <div className="shrink-0 whitespace-nowrap font-medium tabular-nums text-ink">{money(amount)}</div>
     </div>

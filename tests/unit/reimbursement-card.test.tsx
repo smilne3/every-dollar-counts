@@ -13,10 +13,16 @@ describe('ReimbursementCard', () => {
     expect(screen.getByText('$8.20')).toBeTruthy()
   })
 
-  // §6: rows expose who owes it. The note is where a name lives.
+  // §6: rows expose who owes it. The note is where a name lives. Muted and small is what makes it
+  // the second line rather than a competing first one, and it truncates for the same reason the
+  // label does (test 8) — a long name must not widen the row.
   it('puts the date and who owes it on one muted line', () => {
     render(<ReimbursementCard {...props} />)
-    expect(screen.getByText('Sep 1 · Dave')).toBeTruthy()
+    const meta = screen.getByText('Sep 1 · Dave')
+    expect(meta).toBeTruthy()
+    expect(meta.className).toContain('text-xs')
+    expect(meta.className).toContain('text-muted')
+    expect(meta.className).toContain('truncate')
   })
 
   // A mark with no note is ordinary — most are. The separator must not strand itself.
@@ -48,10 +54,14 @@ describe('ReimbursementCard', () => {
     expect(screen.getByText('Sep 1 · Dave').textContent).toBe('Sep 1 · Dave')
   })
 
-  // The figure is the reason the page exists; it must not be the thing that wraps.
+  // The figure is the reason the page exists; it must not be the thing that wraps. Both halves are
+  // load-bearing: the sibling text block carries `min-w-0 flex-1` and will happily take the room,
+  // so `whitespace-nowrap` alone would only turn wrapping into overflow.
   it('keeps the amount on one line', () => {
     render(<ReimbursementCard {...props} amount={12345.67} />)
-    expect(screen.getByText('$12,345.67').className).toContain('whitespace-nowrap')
+    const figure = screen.getByText('$12,345.67')
+    expect(figure.className).toContain('whitespace-nowrap')
+    expect(figure.className).toContain('shrink-0')
   })
 
   it('renders a long merchant name without pushing the amount off', () => {
