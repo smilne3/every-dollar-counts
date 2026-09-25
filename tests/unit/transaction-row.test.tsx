@@ -13,6 +13,7 @@ const txn = {
   merchant_name: 'Joe S Den' as string | null,
   amount: 100,
   user_category: null as string | null,
+  pfc_primary: null as string | null,
   pfc_detailed: null as string | null,
   reimbursable_amount: null as number | null,
   reimbursable_note: null as string | null,

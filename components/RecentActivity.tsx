@@ -12,7 +12,9 @@ export type ActivityItem = {
   label: string
   display: number
   tone: PresentedTxn['tone']
-  isCC: boolean
+  // Internal movement, not card-payments-only: a checking -> savings transfer is equally "your own
+  // money moving" and read as a paycheque arriving until this used the wider flag.
+  isInternal: boolean
 }
 
 // The icon's palette is NOT TONE_CLASS and deliberately so: an outflow is coral in the icon but
@@ -43,7 +45,7 @@ export function RecentActivity({ items }: { items: ActivityItem[] }) {
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-medium text-ink">{t.label}</div>
             <div className="truncate text-xs text-muted">
-              {t.isCC ? 'Between your accounts' : t.category} · {shortDate(t.date)}
+              {t.isInternal ? 'Between your accounts' : t.category} · {shortDate(t.date)}
             </div>
           </div>
           <div className={`shrink-0 text-sm font-medium tabular-nums ${TONE_CLASS[t.tone]}`}>

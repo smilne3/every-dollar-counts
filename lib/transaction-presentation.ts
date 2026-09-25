@@ -1,4 +1,4 @@
-import { isCreditCardPayment } from './categories'
+import { isCreditCardPayment, TRANSFER_PFC } from './categories'
 
 // What a transaction MEANS, separate from how any one surface draws it. The desktop <tr>
 // (TransactionRow) and the phone card (TransactionCard) have different markup and must not have
@@ -14,6 +14,7 @@ export type PresentableTxn = {
   name: string | null
   merchant_name: string | null
   user_category: string | null
+  pfc_primary: string | null
   pfc_detailed: string | null
   reimbursable_amount: number | null
 }
@@ -27,6 +28,14 @@ export type PresentedTxn = {
   label: string
   display: number
   tone: 'out' | 'in' | 'neutral'
+  // Your own money moving between your own accounts: a credit-card payment OR a transfer between
+  // two depository accounts. The superset of `isCC`, and the one that answers "should this read as
+  // money arriving or leaving?".
+  isInternal: boolean
+  // Narrower, and NOT interchangeable with isInternal. Only a card payment hides the category
+  // picker and the reimbursable controls (TransactionRow.tsx, TransactionCard.tsx), because those
+  // writes re-admit both legs into the totals. A transfer carries no such risk and must stay
+  // recategorizable — widening this would strip the picker off every transfer row.
   isCC: boolean
   // Signed like `display`, or null when the transaction carries no mark.
   shareAmount: number | null
@@ -64,6 +73,17 @@ export function presentTransaction(t: PresentableTxn): PresentedTxn {
     )
   }
   const isCC = isCreditCardPayment({ pfc_detailed: t.pfc_detailed, user_category: t.user_category })
+  // Plaid tags a checking -> savings pair TRANSFER_IN / TRANSFER_OUT, which isCreditCardPayment
+  // never matched — it keys off the DETAILED category and only for card payments. So both legs of
+  // an ordinary transfer were toned like real money: the inflow emerald with a leading '+',
+  // reading as a paycheque arriving. lib/dashboard.ts already skips transfers, so no total was
+  // ever wrong — this is the same "keeps it out of the reading" fix #31 made for the card legs.
+  //
+  // `!t.user_category` for the same reason isCreditCardPayment carries it: a human who has
+  // deliberately recategorized this row has overruled the Plaid mapping, and normal category
+  // logic applies again.
+  const isTransfer = !t.user_category && !!t.pfc_primary && TRANSFER_PFC.has(t.pfc_primary)
+  const isInternal = isCC || isTransfer
   // The remainder, signed to match `display`. Lifted from spendableAmount (lib/reimbursements.ts),
   // INCLUDING its zero-normalisation: without the `=== 0` arm, negating a zero remainder yields
   // -0, which Intl renders as "-$0.00". Ticking the checkbox marks the full amount, so that is the
@@ -74,11 +94,13 @@ export function presentTransaction(t: PresentableTxn): PresentedTxn {
   return {
     label,
     display,
-    // A card payment is neither spending nor income — both legs are already excluded from every
-    // total. Painting the crediting leg emerald made $7,866.69 read as income (#31). A zero amount
+    // Internal movement is neither spending nor income — every leg is already excluded from every
+    // total. Painting a crediting leg emerald made a $7,866.69 card payment read as income (#31),
+    // and did the same to every transfer into savings. A zero amount
     // is neither either, and must not fall through to the `in` arm the way `display < 0` alone
     // lets it.
-    tone: isCC || display === 0 ? 'neutral' : display < 0 ? 'out' : 'in',
+    tone: isInternal || display === 0 ? 'neutral' : display < 0 ? 'out' : 'in',
+    isInternal,
     isCC,
     shareAmount: marked > 0 ? share : null,
   }

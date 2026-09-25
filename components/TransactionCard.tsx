@@ -16,6 +16,7 @@ type Txn = {
   merchant_name: string | null
   amount: number
   user_category: string | null
+  pfc_primary: string | null
   pfc_detailed: string | null
   reimbursable_amount: number | null
   reimbursable_note: string | null

@@ -7,11 +7,65 @@ const base = {
   name: 'JOE S DEN',
   merchant_name: 'Joe S Den' as string | null,
   user_category: null as string | null,
+  pfc_primary: null as string | null,
   pfc_detailed: null as string | null,
   reimbursable_amount: null as number | null,
 }
 
 describe('presentTransaction', () => {
+  // Moving money between two of your OWN accounts is not income and not spending. Plaid tags a
+  // checking -> savings pair TRANSFER_IN / TRANSFER_OUT, which isCreditCardPayment never matched —
+  // it only ever matched LOAN_PAYMENTS_CREDIT_CARD_PAYMENT. So a transfer in was toned `in` and
+  // rendered emerald with a leading '+', reading as a paycheque arriving. Same failure as #31, one
+  // category family over: the totals were right all along (lib/dashboard.ts skips transfers), the
+  // READING was wrong.
+  it('treats a transfer between your own accounts as internal', () => {
+    expect(presentTransaction({ ...base, amount: -500, pfc_primary: 'TRANSFER_IN' }).isInternal).toBe(true)
+    expect(presentTransaction({ ...base, amount: 500, pfc_primary: 'TRANSFER_OUT' }).isInternal).toBe(true)
+  })
+
+  it('tones both legs of a transfer as neither spending nor income', () => {
+    expect(presentTransaction({ ...base, amount: -500, pfc_primary: 'TRANSFER_IN' }).tone).toBe('neutral')
+    expect(presentTransaction({ ...base, amount: 500, pfc_primary: 'TRANSFER_OUT' }).tone).toBe('neutral')
+  })
+
+  // A card payment is internal too — isInternal is the superset, so one flag answers "is this your
+  // own money moving?" for every surface that asks.
+  it('counts a credit-card payment as internal as well', () => {
+    const p = presentTransaction({ ...base, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' })
+    expect(p.isInternal).toBe(true)
+    expect(p.isCC).toBe(true)
+  })
+
+  // The load-bearing distinction. isCC hides the category picker and the reimbursable controls
+  // (TransactionRow.tsx:52,113 and TransactionCard.tsx:142) because those writes corrupt totals on
+  // a card payment. A transfer has no such problem and must stay recategorizable, so widening isCC
+  // would strip the picker off every transfer row.
+  it('does not make a transfer look like a card payment', () => {
+    const p = presentTransaction({ ...base, amount: -500, pfc_primary: 'TRANSFER_IN' })
+    expect(p.isInternal).toBe(true)
+    expect(p.isCC).toBe(false)
+  })
+
+  // Same override-wins contract isCreditCardPayment already honours: once a human has said what
+  // this row is, respect it.
+  it('lets a user override win over the transfer mapping', () => {
+    const p = presentTransaction({
+      ...base,
+      amount: -500,
+      pfc_primary: 'TRANSFER_IN',
+      user_category: 'Income',
+    })
+    expect(p.isInternal).toBe(false)
+    expect(p.tone).toBe('in')
+  })
+
+  it('leaves an ordinary inflow alone', () => {
+    const p = presentTransaction({ ...base, amount: -1200, pfc_primary: 'INCOME' })
+    expect(p.isInternal).toBe(false)
+    expect(p.tone).toBe('in')
+  })
+
   // Plaid: positive means money OUT. Every surface shows that as negative.
   it('flips Plaid sign for display', () => {
     expect(presentTransaction(base).display).toBe(-100)

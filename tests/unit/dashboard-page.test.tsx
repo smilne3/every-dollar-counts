@@ -298,7 +298,7 @@ describe('Dashboard reads', () => {
         label: 'Joe S Den', // the merchant, not the raw name
         display: 7866.69,
         tone: 'neutral',
-        isCC: true,
+        isInternal: true,
       },
       {
         id: 'r2',
@@ -307,7 +307,7 @@ describe('Dashboard reads', () => {
         label: 'CAPITAL ONE AUTOPAY PYMT', // no merchant, so the raw name
         display: -42,
         tone: 'out',
-        isCC: false,
+        isInternal: false,
       },
     ])
   })
