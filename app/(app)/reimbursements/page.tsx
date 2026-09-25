@@ -92,7 +92,7 @@ export default async function ReimbursementsPage() {
               return (
                 <ReimbursementCard
                   key={r.id}
-                  label={transactionLabel({ name: t?.name ?? null, merchant_name: t?.merchant_name ?? null })}
+                  label={transactionLabel(t)}
                   amount={r.remaining}
                   date={r.date}
                   note={t?.reimbursable_note}
@@ -125,7 +125,7 @@ export default async function ReimbursementsPage() {
                     <tr key={r.id} className="border-b border-line last:border-b-0">
                       <td className="px-4 py-3 whitespace-nowrap text-sm text-muted">{r.date}</td>
                       <td className="truncate px-4 py-3 font-medium text-ink">
-                        {transactionLabel({ name: t?.name ?? null, merchant_name: t?.merchant_name ?? null })}
+                        {transactionLabel(t)}
                       </td>
                       <td className="truncate px-4 py-3 text-sm text-muted">{t?.reimbursable_note}</td>
                       <td className="px-4 py-3 text-right font-medium tabular-nums text-ink">

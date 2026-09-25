@@ -200,6 +200,13 @@ describe('transactionLabel', () => {
     expect(transactionLabel({ name: null, merchant_name: null })).toBe('Transaction')
   })
 
+  // Widened for `byId.get()`, which returns `Row | undefined`. A missing row is a transaction we
+  // cannot name, which is exactly what the 'Transaction' fallback is for.
+  it('names a missing transaction rather than throwing', () => {
+    expect(transactionLabel(undefined)).toBe('Transaction')
+    expect(transactionLabel(null)).toBe('Transaction')
+  })
+
   // The seam that matters: presentTransaction must not keep its own copy of the rule. All three
   // branches, because a copy that merely FLIPS the preference (`name ?? merchant_name`) agrees with
   // this function on the fallback cases and differs only when both are set.

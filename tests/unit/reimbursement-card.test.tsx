@@ -68,4 +68,16 @@ describe('ReimbursementCard', () => {
     render(<ReimbursementCard {...props} label={'A'.repeat(60)} />)
     expect(screen.getByText('A'.repeat(60)).className).toContain('truncate')
   })
+
+  // The other half of the pair the amount test names. `truncate` cannot fire inside a flex child
+  // that sizes to its content: without `min-w-0` the text block refuses to shrink below its
+  // longest word, and without `flex-1` it never claims the row's spare width, so truncation
+  // begins at the wrong place. Both are load-bearing, and both were invisible to every assertion
+  // until this one — the long-label test above passes with this div stripped to a bare <div>.
+  it('lets the text block shrink and take the spare width', () => {
+    render(<ReimbursementCard {...props} label={'A'.repeat(60)} />)
+    const block = screen.getByText('A'.repeat(60)).parentElement!
+    expect(block.className).toContain('min-w-0')
+    expect(block.className).toContain('flex-1')
+  })
 })

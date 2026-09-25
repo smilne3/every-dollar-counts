@@ -45,8 +45,15 @@ export type PresentedTxn = {
 // belt-and-braces cases rather than the common one — but they are the cases where surfaces used to
 // diverge, and `app/(app)/reimbursements/page.tsx` carried its own copy of this expression in two
 // places (#106). Exported so that page can ask rather than re-derive.
-export function transactionLabel(t: { name: string | null; merchant_name: string | null }): string {
-  return t.merchant_name ?? t.name ?? 'Transaction'
+//
+// The parameter is widened to optional-and-nullable for `app/(app)/reimbursements/page.tsx`, whose
+// `byId.get(...)` returns `Row | undefined`. A row it cannot find is a transaction it cannot name,
+// which is precisely the case the 'Transaction' fallback already exists to answer — so the two
+// call sites there ask plainly instead of each spelling out a 96-character argument object.
+export function transactionLabel(
+  t: { name?: string | null; merchant_name?: string | null } | null | undefined
+): string {
+  return t?.merchant_name ?? t?.name ?? 'Transaction'
 }
 
 export function presentTransaction(t: PresentableTxn): PresentedTxn {

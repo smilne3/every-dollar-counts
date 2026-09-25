@@ -162,6 +162,20 @@ describe('Reimbursements page', () => {
     expect(cardsOf(await render())[0].props.note).toBe('Dave')
   })
 
+  // §6's third field, and the one nothing else pins: the card formats whatever date it is handed,
+  // so a hardcoded or borrowed one renders as a perfectly ordinary date and no other assertion
+  // notices. Both lists read it from their own row — the outstanding list from the allocation's
+  // `r.date`, the covered list from the transaction's `t.date`.
+  it('passes each row its own date', async () => {
+    const cards = cardsOf(await render())
+    const outstanding = cards.find((c) => c.props.label === 'Starbucks')
+    const covered = cards.find((c) => c.props.label === 'Home Depot')
+    expect(outstanding!.props.date).toBe('2026-09-01')
+    expect(covered!.props.date).toBe('2026-08-20')
+    // Not each other's, and not the deposits that settled them.
+    expect(outstanding!.props.date).not.toBe(covered!.props.date)
+  })
+
   // The covered list carries the FULL reimbursed figure, not a remainder — a settled expense's
   // remainder is 0, so passing the wrong one here renders every reimbursement as $0.00. This is
   // the same confusion the outstanding test above guards from the other side.
