@@ -3,6 +3,8 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
 import { money } from '@/lib/format'
 import { unreimbursedExpenses, owedToYou, type DatedReimbursableTxn } from '@/lib/reimbursements'
+import { ReimbursementCard } from '@/components/ReimbursementCard'
+import { transactionLabel } from '@/lib/transaction-presentation'
 
 type Row = DatedReimbursableTxn & {
   name: string
@@ -81,41 +83,60 @@ export default async function ReimbursementsPage() {
         </Card>
       ) : (
         <Card className="p-0">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-line text-left">
-                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-faint">
-                  Date
-                </th>
-                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-faint">
-                  Merchant
-                </th>
-                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-faint">
-                  Note
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-faint">
-                  Outstanding
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {outstanding.map((r) => {
-                const t = byId.get(r.id)
-                return (
-                  <tr key={r.id} className="border-b border-line last:border-b-0">
-                    <td className="px-4 py-3 whitespace-nowrap text-sm text-muted">{r.date}</td>
-                    <td className="truncate px-4 py-3 font-medium text-ink">
-                      {t?.merchant_name ?? t?.name ?? 'Transaction'}
-                    </td>
-                    <td className="truncate px-4 py-3 text-sm text-muted">{t?.reimbursable_note}</td>
-                    <td className="px-4 py-3 text-right font-medium tabular-nums text-ink">
-                      {money(r.remaining)}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+          {/* Below `md` the four columns have nowhere to go, so the same rows render as cards —
+              the treatment stage 1 applied to transactions (spec §3.1, §6). The figure here is
+              what is STILL OWED, which is the column this table calls "Outstanding". */}
+          <div className="md:hidden">
+            {outstanding.map((r) => {
+              const t = byId.get(r.id)
+              return (
+                <ReimbursementCard
+                  key={r.id}
+                  label={transactionLabel(t)}
+                  amount={r.remaining}
+                  date={r.date}
+                  note={t?.reimbursable_note}
+                />
+              )
+            })}
+          </div>
+          <div className="hidden md:block">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-line text-left">
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-faint">
+                    Date
+                  </th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-faint">
+                    Merchant
+                  </th>
+                  <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-faint">
+                    Note
+                  </th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-faint">
+                    Outstanding
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {outstanding.map((r) => {
+                  const t = byId.get(r.id)
+                  return (
+                    <tr key={r.id} className="border-b border-line last:border-b-0">
+                      <td className="px-4 py-3 whitespace-nowrap text-sm text-muted">{r.date}</td>
+                      <td className="truncate px-4 py-3 font-medium text-ink">
+                        {transactionLabel(t)}
+                      </td>
+                      <td className="truncate px-4 py-3 text-sm text-muted">{t?.reimbursable_note}</td>
+                      <td className="px-4 py-3 text-right font-medium tabular-nums text-ink">
+                        {money(r.remaining)}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         </Card>
       )}
 
@@ -129,41 +150,56 @@ export default async function ReimbursementsPage() {
                   {monthLabel(key)}
                 </h3>
               </div>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-line text-left">
-                    <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-faint">
-                      Date
-                    </th>
-                    <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-faint">
-                      Merchant
-                    </th>
-                    <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-faint">
-                      Note
-                    </th>
-                    {/* The FULL marked amount — not the outstanding remainder the visually similar
-                        column in the table above shows. Labelled distinctly so the two quantities
-                        are never mistaken for each other. */}
-                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-faint">
-                      Reimbursed
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {coveredByMonth.get(key)!.map((t) => (
-                    <tr key={t.id} className="border-b border-line last:border-b-0">
-                      <td className="px-4 py-3 whitespace-nowrap text-sm text-muted">{t.date}</td>
-                      <td className="truncate px-4 py-3 font-medium text-ink">
-                        {t.merchant_name ?? t.name ?? 'Transaction'}
-                      </td>
-                      <td className="truncate px-4 py-3 text-sm text-muted">{t.reimbursable_note}</td>
-                      <td className="px-4 py-3 text-right font-medium tabular-nums text-ink">
-                        {money(Number(t.reimbursable_amount))}
-                      </td>
+              {/* The FULL reimbursed figure here, not a remainder — these are settled. Same
+                  distinction the table's "Reimbursed" header draws. */}
+              <div className="md:hidden">
+                {coveredByMonth.get(key)!.map((t) => (
+                  <ReimbursementCard
+                    key={t.id}
+                    label={transactionLabel(t)}
+                    amount={Number(t.reimbursable_amount)}
+                    date={t.date}
+                    note={t.reimbursable_note}
+                  />
+                ))}
+              </div>
+              <div className="hidden md:block">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-line text-left">
+                      <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-faint">
+                        Date
+                      </th>
+                      <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-faint">
+                        Merchant
+                      </th>
+                      <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-faint">
+                        Note
+                      </th>
+                      {/* The FULL marked amount — not the outstanding remainder the visually similar
+                          column in the table above shows. Labelled distinctly so the two quantities
+                          are never mistaken for each other. */}
+                      <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-faint">
+                        Reimbursed
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {coveredByMonth.get(key)!.map((t) => (
+                      <tr key={t.id} className="border-b border-line last:border-b-0">
+                        <td className="px-4 py-3 whitespace-nowrap text-sm text-muted">{t.date}</td>
+                        <td className="truncate px-4 py-3 font-medium text-ink">
+                          {transactionLabel(t)}
+                        </td>
+                        <td className="truncate px-4 py-3 text-sm text-muted">{t.reimbursable_note}</td>
+                        <td className="px-4 py-3 text-right font-medium tabular-nums text-ink">
+                          {money(Number(t.reimbursable_amount))}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </Card>
           ))}
         </div>

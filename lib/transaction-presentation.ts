@@ -41,6 +41,21 @@ export type PresentedTxn = {
   shareAmount: number | null
 }
 
+// What to call a transaction on screen. Plaid always sends `name`, so the fallbacks are the
+// belt-and-braces cases rather than the common one — but they are the cases where surfaces used to
+// diverge, and `app/(app)/reimbursements/page.tsx` carried its own copy of this expression in two
+// places (#106). Exported so that page can ask rather than re-derive.
+//
+// The parameter is widened to optional-and-nullable for `app/(app)/reimbursements/page.tsx`, whose
+// `byId.get(...)` returns `Row | undefined`. A row it cannot find is a transaction it cannot name,
+// which is precisely the case the 'Transaction' fallback already exists to answer — so the two
+// call sites there ask plainly instead of each spelling out a 96-character argument object.
+export function transactionLabel(
+  t: { name?: string | null; merchant_name?: string | null } | null | undefined
+): string {
+  return t?.merchant_name ?? t?.name ?? 'Transaction'
+}
+
 export function presentTransaction(t: PresentableTxn): PresentedTxn {
   // Plaid: amount > 0 means money OUT. Show spending as negative.
   //
@@ -50,9 +65,7 @@ export function presentTransaction(t: PresentableTxn): PresentedTxn {
   // prefixes a '+' and paints the chip emerald, rendering "+-$0.00" in the colour reserved for
   // income. `-0 === 0` is true, so nothing short of the rendered string catches it.
   const display = t.amount === 0 ? 0 : -t.amount
-  // Plaid always sends `name`, so the fallback is the belt-and-braces case rather than the common
-  // one — but it is the case where the two surfaces used to diverge.
-  const label = t.merchant_name ?? t.name ?? 'Transaction'
+  const label = transactionLabel(t)
   const marked = Number(t.reimbursable_amount ?? 0)
   // An unreadable amount MUST NOT pass as "unmarked". Left alone, `marked > 0` is false for NaN,
   // shareAmount comes out null, and both surfaces draw a broken value as a perfectly ordinary

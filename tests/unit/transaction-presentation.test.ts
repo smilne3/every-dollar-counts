@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { money } from '@/lib/format'
-import { presentTransaction } from '@/lib/transaction-presentation'
+import { presentTransaction, transactionLabel } from '@/lib/transaction-presentation'
 
 const base = {
   amount: 100,
@@ -179,5 +179,46 @@ describe('presentTransaction', () => {
 
     const inflow = presentTransaction({ ...base, amount: -100, reimbursable_amount: 100 })
     expect(money(inflow.shareAmount as number)).toBe('$0.00')
+  })
+})
+
+describe('transactionLabel', () => {
+  // Plaid always sends `name`; `merchant_name` is the cleaner one when present. Every surface that
+  // names a transaction has to agree, or the same row reads two ways on two screens.
+  it('prefers the merchant name', () => {
+    expect(transactionLabel({ name: 'JOE S DEN', merchant_name: 'Joe S Den' })).toBe('Joe S Den')
+  })
+
+  it('falls back to the raw name when there is no merchant', () => {
+    expect(transactionLabel({ name: 'CAPITAL ONE AUTOPAY', merchant_name: null })).toBe(
+      'CAPITAL ONE AUTOPAY'
+    )
+  })
+
+  // Never empty. An empty label rendered into a merchant cell is indistinguishable from a bug.
+  it('falls back to Transaction when neither is set', () => {
+    expect(transactionLabel({ name: null, merchant_name: null })).toBe('Transaction')
+  })
+
+  // Widened for `byId.get()`, which returns `Row | undefined`. A missing row is a transaction we
+  // cannot name, which is exactly what the 'Transaction' fallback is for.
+  it('names a missing transaction rather than throwing', () => {
+    expect(transactionLabel(undefined)).toBe('Transaction')
+    expect(transactionLabel(null)).toBe('Transaction')
+  })
+
+  // The seam that matters: presentTransaction must not keep its own copy of the rule. All three
+  // branches, because a copy that merely FLIPS the preference (`name ?? merchant_name`) agrees with
+  // this function on the fallback cases and differs only when both are set.
+  it('is the same answer presentTransaction gives', () => {
+    const cases = [
+      { name: 'JOE S DEN', merchant_name: 'Joe S Den' },
+      { name: 'CAPITAL ONE AUTOPAY', merchant_name: null },
+      { name: null, merchant_name: null },
+    ]
+    for (const c of cases) {
+      const t = { ...base, ...c }
+      expect(presentTransaction(t).label).toBe(transactionLabel(t))
+    }
   })
 })
