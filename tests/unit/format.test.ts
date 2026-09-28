@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { axisTick, shortDate, monthLabel, longDate, monthNameLong, moneyWhole } from '@/lib/format'
+import { axisTick, shortDate, monthLabel, longDate, monthNameLong, moneyWhole, shortDateAcrossYears } from '@/lib/format'
 
 describe('axisTick', () => {
   it('keeps half-thousand gridlines honest', () => {
@@ -128,5 +128,31 @@ describe('moneyWhole', () => {
 
   it('honours a non-default currency', () => {
     expect(moneyWhole(1200, 'EUR')).toBe('€1,200')
+  })
+})
+
+describe('shortDateAcrossYears', () => {
+  // The outstanding reimbursements list has no window and no grouping — its own page comment says
+  // "an expense from last year is still owed" — so two rows a year apart both read "Sep 1" with
+  // nothing to tell them apart. Every other list in the app is month- or period-scoped, which is
+  // why plain shortDate is right everywhere else.
+  it('omits the year when it is the current one', () => {
+    expect(shortDateAcrossYears('2026-09-01', '2026')).toBe('Sep 1')
+  })
+
+  it('shows the year when it is not', () => {
+    expect(shortDateAcrossYears('2025-09-01', '2026')).toBe('Sep 1, 2025')
+  })
+
+  // A future-dated row is as ambiguous as an old one.
+  it('shows a future year too', () => {
+    expect(shortDateAcrossYears('2027-01-15', '2026')).toBe('Jan 15, 2027')
+  })
+
+  // shortDate hands back the input unchanged when it cannot read the date. Appending a year to
+  // that would dress up a value we could not parse.
+  it('passes an unreadable date straight through, without inventing a year', () => {
+    expect(shortDateAcrossYears('not-a-date', '2026')).toBe('not-a-date')
+    expect(shortDateAcrossYears('2026-13-01', '2026')).toBe('2026-13-01')
   })
 })

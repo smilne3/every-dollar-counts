@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
-const { results } = vi.hoisted(() => ({
+const { results, tz } = vi.hoisted(() => ({
   results: {} as Record<string, { data: unknown; error: { message: string } | null }>,
+  tz: { value: 'America/New_York' },
 }))
 
 const chainFor = (table: string) => {
@@ -14,6 +15,10 @@ const chainFor = (table: string) => {
 
 vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({ from: (table: string) => chainFor(table) }),
+}))
+vi.mock('@/lib/household', () => ({
+  DEFAULT_TIMEZONE: 'America/New_York',
+  householdTimezone: async () => tz.value,
 }))
 
 import ReimbursementsPage from '@/app/(app)/reimbursements/page'
@@ -39,7 +44,7 @@ function classNamesOf(node: unknown): string[] {
 }
 
 // Collect the ReimbursementCard elements so assertions can read their props directly.
-type CardProps = { label: string; amount: number; date: string; note?: string | null }
+type CardProps = { label: string; amount: number; date: string; note?: string | null; currentYear: string }
 function cardsOf(node: unknown): { props: CardProps }[] {
   const found: { props: CardProps }[] = []
   const walk = (n: unknown) => {
@@ -138,6 +143,28 @@ beforeEach(() => {
 })
 
 describe('Reimbursements page', () => {
+  // The #73 mistake, on a new page: the year that matters is the HOUSEHOLD's. At this instant it
+  // is already 1 January in UTC but still 31 December in New York, so a server-clock reading would
+  // hand every card the wrong year and silently qualify dates that need no qualifying.
+  it('takes the current year from the household clock, not the server', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2027-01-01T02:30:00Z'))
+    tz.value = 'America/New_York'
+    const years = cardsOf(await render()).map((c) => c.props.currentYear)
+    expect(years.length).toBeGreaterThan(0)
+    expect(new Set(years)).toEqual(new Set(['2026']))
+    vi.useRealTimers()
+  })
+
+  it('follows the stored zone rather than a hardcoded one', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2027-01-01T02:30:00Z'))
+    tz.value = 'Asia/Tokyo' // already 1 January there
+    const years = cardsOf(await render()).map((c) => c.props.currentYear)
+    expect(new Set(years)).toEqual(new Set(['2027']))
+    vi.useRealTimers()
+  })
+
   // #46's lesson, already enforced for the read: a failed query must not render as "nothing owed".
   it('fails loudly when the read fails, rather than reporting nothing outstanding', async () => {
     results.transactions = { data: null, error: { message: 'connection reset' } }
