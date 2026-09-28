@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { spendByCategory, lastCompleteMonths, monthKey } from '@/lib/budget'
-import { trendsView } from '@/lib/trends'
+import { trendsView, capCategories } from '@/lib/trends'
 import type { SpendContext } from '@/lib/spend-context'
 
 // #67: on the 2nd of the month, Trends showed two categories — the mortgage and one small charge
@@ -207,5 +207,68 @@ describe('each card names the month it actually shows', () => {
     const spend = byCategory(view.spend.rows)
     expect(spend['Food & Drink']).toBeCloseTo(461.54) // August; July is 64.20
     expect(spend['Personal Care']).toBeUndefined() // July-only category
+  })
+})
+
+describe('capCategories', () => {
+  const row = (category: string, current: number, previous: number) => ({ category, current, previous })
+
+  it('returns everything and no Other when there is nothing to fold', () => {
+    const rows = [row('A', 5, 4), row('B', 3, 2)]
+    const { shown, other } = capCategories(rows)
+    expect(shown).toEqual(rows)
+    expect(other).toBeNull()
+  })
+
+  it('keeps exactly the limit and folds the rest', () => {
+    const rows = Array.from({ length: 10 }, (_, i) => row(`C${i}`, 10 - i, 0))
+    const { shown, other } = capCategories(rows, 6)
+    expect(shown.map((r) => r.category)).toEqual(['C0', 'C1', 'C2', 'C3', 'C4', 'C5'])
+    expect(other!.category).toBe('Other')
+  })
+
+  // The assertion §9 names. Other is the remainder, both windows, or the chart lies about the size
+  // of what it is hiding.
+  it("Other's amounts are the sum of the folded rows, per window", () => {
+    const rows = [
+      row('A', 100, 90),
+      row('B', 80, 70),
+      row('C', 60, 50),
+      row('D', 40, 30),
+      row('E', 20, 10),
+      row('F', 10, 5),
+      row('G', 3, 2),
+      row('H', 1, 1),
+    ]
+    const { other } = capCategories(rows, 6)
+    expect(other!.current).toBe(4)
+    expect(other!.previous).toBe(3)
+  })
+
+  it('does not re-sort rows that arrive ordered', () => {
+    const rows = [row('Big', 100, 0), row('Small', 1, 0), row('Mid', 50, 0)]
+    expect(capCategories(rows, 3).shown.map((r) => r.category)).toEqual(['Big', 'Small', 'Mid'])
+  })
+
+  // Exactly at the limit folds nothing — an "Other" worth $0 is noise with a tap target on it.
+  it('folds nothing when the row count equals the limit', () => {
+    const rows = Array.from({ length: 6 }, (_, i) => row(`C${i}`, 1, 1))
+    expect(capCategories(rows, 6).other).toBeNull()
+  })
+
+  // Float addition on money: 0.1 + 0.2 is 0.30000000000000004, and the chart would render it.
+  it('rounds the folded sums to cents', () => {
+    const rows = [
+      ...Array.from({ length: 6 }, (_, i) => row(`C${i}`, 100 - i, 0)),
+      row('X', 0.1, 0.1),
+      row('Y', 0.2, 0.2),
+    ]
+    const { other } = capCategories(rows, 6)
+    expect(other!.current).toBe(0.3)
+    expect(other!.previous).toBe(0.3)
+  })
+
+  it('is safe on an empty list', () => {
+    expect(capCategories([], 6)).toEqual({ shown: [], other: null })
   })
 })
