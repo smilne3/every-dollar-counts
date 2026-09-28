@@ -4,9 +4,27 @@ import { ReimbursementCard } from '@/components/ReimbursementCard'
 
 afterEach(cleanup)
 
-const props = { label: 'Starbucks', amount: 8.2, date: '2026-09-01', note: 'Dave' }
+const props = { label: 'Starbucks', amount: 8.2, date: '2026-09-01', note: 'Dave', currentYear: '2026' }
 
 describe('ReimbursementCard', () => {
+  // #111. The outstanding list has no window and no grouping — its page says "an expense from last
+  // year is still owed" — so an old row must carry its year or it is indistinguishable from a row
+  // twelve months newer sitting right above it.
+  it('shows the year on a row from another year', () => {
+    render(<ReimbursementCard {...props} date="2025-09-01" />)
+    expect(screen.getByText('Sep 1, 2025 · Dave')).toBeTruthy()
+  })
+
+  it('keeps the short form for the current year', () => {
+    render(<ReimbursementCard {...props} />)
+    expect(screen.getByText('Sep 1 · Dave')).toBeTruthy()
+  })
+
+  it('shows the year even with no note to follow it', () => {
+    render(<ReimbursementCard {...props} date="2025-09-01" note={null} />)
+    expect(screen.getByText('Sep 1, 2025')).toBeTruthy()
+  })
+
   it('leads with the merchant and the amount', () => {
     render(<ReimbursementCard {...props} />)
     expect(screen.getByText('Starbucks')).toBeTruthy()

@@ -2,6 +2,8 @@ import { createClient } from '@/lib/supabase/server'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
 import { money } from '@/lib/format'
+import { todayIn } from '@/lib/clock'
+import { householdTimezone } from '@/lib/household'
 import { unreimbursedExpenses, owedToYou, type DatedReimbursableTxn } from '@/lib/reimbursements'
 import { ReimbursementCard } from '@/components/ReimbursementCard'
 import { transactionLabel } from '@/lib/transaction-presentation'
@@ -24,6 +26,13 @@ function monthLabel(key: string): string {
 
 export default async function ReimbursementsPage() {
   const supabase = await createClient()
+
+  // Which year is "this" one, for the cards below `md` (#111). The household's, not the server's —
+  // on 31 December in New York the server is already into January, and a server reading would put
+  // a year on every current row while leaving genuinely old ones unqualified. Same mistake #73 was
+  // about. householdTimezone throws rather than defaulting on a failed read, which matches how
+  // this page already treats its own query.
+  const currentYear = todayIn(await householdTimezone()).slice(0, 4)
 
   // Every marked row, both directions. No window: an expense from last year is still owed, and the
   // FIFO allocation needs the deposits that settled the older ones to be correct about the newer.
@@ -95,6 +104,7 @@ export default async function ReimbursementsPage() {
                   label={transactionLabel(t)}
                   amount={r.remaining}
                   date={r.date}
+                  currentYear={currentYear}
                   note={t?.reimbursable_note}
                 />
               )
@@ -159,6 +169,7 @@ export default async function ReimbursementsPage() {
                     label={transactionLabel(t)}
                     amount={Number(t.reimbursable_amount)}
                     date={t.date}
+                    currentYear={currentYear}
                     note={t.reimbursable_note}
                   />
                 ))}

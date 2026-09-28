@@ -49,6 +49,26 @@ export function shortDate(date: string): string {
   return `${MONTH_LABELS[m - 1]} ${d}`
 }
 
+// shortDate, qualified with the year when that year is not the current one — "Sep 1" or
+// "Sep 1, 2025". For a list that is NOT scoped to a month or a period, where two rows a year apart
+// would otherwise read identically.
+//
+// Only the reimbursements outstanding list needs this today, and it needs it because that list is
+// deliberately unbounded: see the comment on its query, "an expense from last year is still owed".
+// Every other list in the app is month- or period-scoped, so plain shortDate stays right there and
+// the phone keeps the short form in the common case (#111).
+//
+// `currentYear` is passed in rather than read from the clock here, because "the current year" is
+// the HOUSEHOLD's, not the server's — the mistake #73 was about. Callers get it from
+// todayIn(householdTimezone()).
+export function shortDateAcrossYears(date: string, currentYear: string): string {
+  const short = shortDate(date)
+  // shortDate returns its input unchanged when it cannot read the date. Appending a year to that
+  // would dress up a value we could not parse.
+  if (short === date) return short
+  return date.slice(0, 4) === currentYear ? short : `${short}, ${date.slice(0, 4)}`
+}
+
 // 'YYYY-MM-DD' -> 'Aug 2026', for labelling a window that is a whole calendar month.
 //
 // Indexed straight out of MONTH_LABELS rather than formatted through a Date. Any route via

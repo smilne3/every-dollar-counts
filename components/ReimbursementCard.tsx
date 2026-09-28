@@ -1,4 +1,4 @@
-import { money, shortDate } from '@/lib/format'
+import { money, shortDateAcrossYears } from '@/lib/format'
 
 // One marked expense, below `md`, where the four-column table has nowhere to put itself. Same shape
 // as the transactions card (spec §3.1): what it was and how much on the first line, the quieter
@@ -13,11 +13,16 @@ export function ReimbursementCard({
   amount,
   date,
   note,
+  currentYear,
 }: {
   label: string
   amount: number
   date: string
   note?: string | null
+  // The household's current year, as 'YYYY' — not the server's, which is the #73 mistake. The
+  // caller reads it from todayIn(householdTimezone()). A row from any other year carries its year,
+  // because this page's outstanding list is deliberately unbounded and ungrouped (#111).
+  currentYear: string
 }) {
   // trim(), not merely truthiness: `''` is already falsy and takes the same branch without it, but
   // a note of '   ' is NOT, and would render "Sep 1 ·    " — a separator pointing at nothing. The
@@ -28,7 +33,7 @@ export function ReimbursementCard({
       <div className="min-w-0 flex-1">
         <div className="truncate font-medium text-ink">{label}</div>
         <div className="mt-0.5 truncate text-xs text-muted">
-          {who ? `${shortDate(date)} · ${who}` : shortDate(date)}
+          {who ? `${shortDateAcrossYears(date, currentYear)} · ${who}` : shortDateAcrossYears(date, currentYear)}
         </div>
       </div>
       <div className="shrink-0 whitespace-nowrap font-medium tabular-nums text-ink">{money(amount)}</div>
