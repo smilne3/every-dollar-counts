@@ -50,7 +50,7 @@ Tasks 1 and 2 are independent. Task 3 depends on 1. Task 4 depends on 2 and 3.
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `CHART_SERIES: { readonly current: '#0e9f6e'; readonly previous: '#0369a1' }`
+- Produces: `CHART_SERIES: { readonly primary: '#0e9f6e'; readonly comparison: '#0369a1' }`
 
 **What this fixes:** `#c9cec7` measures 1.56:1 against the surface. §5.1 pairs `#0369a1` with the existing `#0e9f6e` and reports it passes all six checks in light mode and holds in dark with a single 2.94:1 WARN that the direct amount labels discharge.
 
@@ -67,8 +67,8 @@ describe('CHART_SERIES', () => {
   // has to be deliberate." These two hex values were measured together — changing either one
   // without re-measuring is what this test exists to stop.
   it('is the validated pair', () => {
-    expect(CHART_SERIES.current).toBe('#0e9f6e')
-    expect(CHART_SERIES.previous).toBe('#0369a1')
+    expect(CHART_SERIES.primary).toBe('#0e9f6e')
+    expect(CHART_SERIES.comparison).toBe('#0369a1')
   })
 
   // The value this replaced. 1.56:1 against the surface, failing two palette checks — the whole
@@ -103,8 +103,12 @@ Create `lib/chart-palette.ts`:
 // Here rather than inline in each chart so the §9 test has one thing to pin — three copies of a
 // hex literal is three places a future change can half-happen.
 export const CHART_SERIES = {
-  current: '#0e9f6e',
-  previous: '#0369a1',
+  // The brand emerald. The single series in SpendByCategoryChart and SpendIncomeChart, and the
+  // CURRENT window wherever two windows are compared.
+  primary: '#0e9f6e',
+  // The PRIOR window. Named for its role rather than its colour so a future palette change does
+  // not leave three call sites reading `CHART_SERIES.blue`.
+  comparison: '#0369a1',
 } as const
 ```
 
@@ -122,11 +126,11 @@ const EMERALD = '#0e9f6e'
 const GRAY = '#c9cec7'
 ```
 
-add `import { CHART_SERIES } from '@/lib/chart-palette'`, and change the two `<Bar>` fills to `fill={CHART_SERIES.previous}` and `fill={CHART_SERIES.current}` respectively — `previous` is the first `<Bar>`, `current` the second.
+add `import { CHART_SERIES } from '@/lib/chart-palette'`, and change the two `<Bar>` fills: the first `<Bar>` (`dataKey="previous"`) becomes `fill={CHART_SERIES.comparison}`, the second (`dataKey="current"`) becomes `fill={CHART_SERIES.primary}`.
 
-In `components/SpendByCategoryChart.tsx`, delete `const EMERALD = '#0e9f6e'`, add the same import, and change its `<Bar>` to `fill={CHART_SERIES.current}`.
+In `components/SpendByCategoryChart.tsx`, delete `const EMERALD = '#0e9f6e'`, add the same import, and change its `<Bar>` to `fill={CHART_SERIES.primary}`.
 
-In `components/SpendIncomeChart.tsx`, delete `const EMERALD = '#0e9f6e'`, add the same import, and replace every use of `EMERALD` with `CHART_SERIES.current`. Read that file first — it may use the constant in more than one place.
+In `components/SpendIncomeChart.tsx`, delete `const EMERALD = '#0e9f6e'`, add the same import, and replace every use of `EMERALD` with `CHART_SERIES.primary`. Read that file first — it may use the constant in more than one place.
 
 - [ ] **Step 6: Confirm the literal is gone**
 
@@ -402,8 +406,8 @@ Keep the existing `<BarChart>` exactly as it is and wrap it, then add the phone 
               iconSize={9}
               wrapperStyle={{ fontSize: 12, color: '#5f6b64', paddingTop: 4 }}
             />
-            <Bar dataKey="previous" name={previousLabel} fill={CHART_SERIES.previous} radius={[0, 4, 4, 0]} maxBarSize={14} isAnimationActive={false} />
-            <Bar dataKey="current" name={currentLabel} fill={CHART_SERIES.current} radius={[0, 4, 4, 0]} maxBarSize={14} isAnimationActive={false} />
+            <Bar dataKey="previous" name={previousLabel} fill={CHART_SERIES.comparison} radius={[0, 4, 4, 0]} maxBarSize={14} isAnimationActive={false} />
+            <Bar dataKey="current" name={currentLabel} fill={CHART_SERIES.primary} radius={[0, 4, 4, 0]} maxBarSize={14} isAnimationActive={false} />
           </BarChart>
         </ResponsiveContainer>
       </div>
