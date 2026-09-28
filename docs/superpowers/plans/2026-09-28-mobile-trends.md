@@ -45,7 +45,7 @@ Tasks 1 and 2 are independent. Task 3 depends on 1. Task 4 depends on 2 and 3.
 
 **Files:**
 - Create: `lib/chart-palette.ts`
-- Modify: `components/PeriodOverPeriodChart.tsx`, `components/SpendByCategoryChart.tsx`, `components/SpendIncomeChart.tsx`
+- Modify: `components/PeriodOverPeriodChart.tsx`, `components/SpendByCategoryChart.tsx`, `components/SpendIncomeChart.tsx`, `tests/unit/period-over-period-chart.test.tsx` (it asserts the old hex literals directly — retarget them at `CHART_SERIES` rather than hardcoding the new value, so the pair stays pinned in one place)
 - Test: `tests/unit/chart-palette.test.ts` (new)
 
 **Interfaces:**
@@ -134,8 +134,10 @@ In `components/SpendIncomeChart.tsx`, delete `const EMERALD = '#0e9f6e'`, add th
 
 - [ ] **Step 6: Confirm the literal is gone**
 
-Run: `grep -rn "#c9cec7" components/ lib/ app/`
-Expected: no output. Then `grep -rn "#0e9f6e" components/ lib/ app/` — the only hits should be `lib/chart-palette.ts` and `app/globals.css:15` (the CSS custom property, a separate thing that is not a chart series).
+Run: `grep -rn "'#c9cec7'" components/ lib/ app/` — the QUOTED literal, i.e. the value rather
+than a mention of it.
+Expected: no output. Note that a bare `grep -rn "#c9cec7"` will still hit `lib/chart-palette.ts`,
+because the comment above the constant names the colour it replaced on purpose. Then `grep -rn "#0e9f6e" components/ lib/ app/` — the only hits should be `lib/chart-palette.ts` and `app/globals.css:15` (the CSS custom property, a separate thing that is not a chart series).
 
 - [ ] **Step 7: Run everything**
 
@@ -608,7 +610,7 @@ npx vitest run && npx tsc --noEmit && npm run lint && npm run build && npm run c
 
 Report the actual numbers, not "should pass".
 
-- [ ] **Confirm the failing grey is gone:** `grep -rn "#c9cec7" .` excluding `node_modules` and `.next` must return nothing outside this plan and the spec.
+- [ ] **Confirm the failing grey is gone as a VALUE:** `grep -rn "'#c9cec7'" components/ lib/ app/ tests/` must return nothing. The bare hex still appears as prose in `lib/chart-palette.ts`'s comment, in this plan and in the spec — all three name it deliberately, as the thing that was replaced.
 
 - [ ] **Desktop diff check.** Load `/trends` at desktop width. The comparison chart is still vertical, still every category, same height and axes — the only visible difference is that the "prior" series is now blue rather than pale grey. Anything else is a Global Constraint violation.
 
