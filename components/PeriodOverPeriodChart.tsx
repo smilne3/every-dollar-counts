@@ -10,9 +10,7 @@ import {
   CartesianGrid,
   ResponsiveContainer,
 } from 'recharts'
-
-const EMERALD = '#0e9f6e'
-const GRAY = '#c9cec7'
+import { CHART_SERIES } from '@/lib/chart-palette'
 
 // Two equal windows side by side, per category. The keys stay `current`/`previous`; the window
 // names arrive as `name` on each Bar, which is what Legend and Tooltip display. They used to be
@@ -63,8 +61,8 @@ export function PeriodOverPeriodChart({
             iconSize={9}
             wrapperStyle={{ fontSize: 12, color: '#5f6b64', paddingTop: 4 }}
           />
-          <Bar dataKey="previous" name={previousLabel} fill={GRAY} radius={[4, 4, 0, 0]} maxBarSize={28} isAnimationActive={false} />
-          <Bar dataKey="current" name={currentLabel} fill={EMERALD} radius={[4, 4, 0, 0]} maxBarSize={28} isAnimationActive={false} />
+          <Bar dataKey="previous" name={previousLabel} fill={CHART_SERIES.comparison} radius={[4, 4, 0, 0]} maxBarSize={28} isAnimationActive={false} />
+          <Bar dataKey="current" name={currentLabel} fill={CHART_SERIES.primary} radius={[4, 4, 0, 0]} maxBarSize={28} isAnimationActive={false} />
         </BarChart>
       </ResponsiveContainer>
     </div>

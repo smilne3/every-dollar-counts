@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 import { PeriodOverPeriodChart } from '@/components/PeriodOverPeriodChart'
+import { CHART_SERIES } from '@/lib/chart-palette'
 
 // Auto-cleanup only registers when vitest runs with globals; this suite does not.
 afterEach(cleanup)
@@ -71,7 +72,10 @@ describe('PeriodOverPeriodChart', () => {
 
   // Both names reaching the legend is not enough — they have to name the RIGHT series. recharts
   // does not draw bars under jsdom, but each legend entry carries its series colour, so the
-  // swatch is what ties a label to a series. Emerald is the later month, grey the earlier.
+  // swatch is what ties a label to a series. The later month is the primary series, the earlier
+  // one the comparison. Asserted through CHART_SERIES rather than hex literals: which series a
+  // label belongs to is this test's business, and what those two colours ARE is pinned by
+  // tests/unit/chart-palette.test.ts. The earlier month was #c9cec7 here until spec §5.1.
   it('gives each month the colour its own bar is drawn in', () => {
     const { container } = render(
       <PeriodOverPeriodChart data={data} currentLabel="Aug 2026" previousLabel="Jul 2026" />
@@ -80,8 +84,8 @@ describe('PeriodOverPeriodChart', () => {
       li.querySelector('[fill]')?.getAttribute('fill'),
       li.textContent,
     ])
-    expect(legend).toContainEqual(['#0e9f6e', 'Aug 2026'])
-    expect(legend).toContainEqual(['#c9cec7', 'Jul 2026'])
+    expect(legend).toContainEqual([CHART_SERIES.primary, 'Aug 2026'])
+    expect(legend).toContainEqual([CHART_SERIES.comparison, 'Jul 2026'])
   })
 
   it('puts every category it is given on the axis', () => {

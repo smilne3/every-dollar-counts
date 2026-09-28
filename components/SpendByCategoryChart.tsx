@@ -1,8 +1,7 @@
 'use client'
 
 import { BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer } from 'recharts'
-
-const EMERALD = '#0e9f6e'
+import { CHART_SERIES } from '@/lib/chart-palette'
 
 export function SpendByCategoryChart({ data }: { data: { category: string; amount: number }[] }) {
   const rows = data.map((d) => ({ name: d.category, amount: Math.round(d.amount * 100) / 100 }))
@@ -36,7 +35,7 @@ export function SpendByCategoryChart({ data }: { data: { category: string; amoun
               boxShadow: '0 4px 12px rgba(20,35,28,0.08)',
             }}
           />
-          <Bar dataKey="amount" fill={EMERALD} radius={[0, 4, 4, 0]} isAnimationActive={false} />
+          <Bar dataKey="amount" fill={CHART_SERIES.primary} radius={[0, 4, 4, 0]} isAnimationActive={false} />
         </BarChart>
       </ResponsiveContainer>
     </div>
