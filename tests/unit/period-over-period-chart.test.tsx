@@ -66,8 +66,10 @@ describe('PeriodOverPeriodChart', () => {
         previousLabel="Jul 2026"
       />
     )
-    expect(screen.getByText('Aug 2026')).toBeTruthy()
-    expect(screen.getByText('Jul 2026')).toBeTruthy()
+    // Two instances render — the phone chart and the desktop one — and the box stub gives both a
+    // width, so each draws its own legend. Both legends have to name both windows, hence 2 each.
+    expect(screen.getAllByText('Aug 2026')).toHaveLength(2)
+    expect(screen.getAllByText('Jul 2026')).toHaveLength(2)
   })
 
   // Both names reaching the legend is not enough — they have to name the RIGHT series. recharts
@@ -86,6 +88,30 @@ describe('PeriodOverPeriodChart', () => {
     ])
     expect(legend).toContainEqual([CHART_SERIES.primary, 'Aug 2026'])
     expect(legend).toContainEqual([CHART_SERIES.comparison, 'Jul 2026'])
+  })
+
+  // §1.4: the vertical chart puts 26 bars in ~273px under 13 labels rotated -40°, which collide.
+  // Horizontal bars need no rotated labels at all, so the collision goes away by construction
+  // rather than by tuning font sizes (spec §5).
+  it('renders a phone chart and a desktop chart, gated on the breakpoint', () => {
+    const { container } = render(
+      <PeriodOverPeriodChart data={data} currentLabel="Sep" previousLabel="Aug" />
+    )
+    const classes = [...container.querySelectorAll('div')].map((d) => d.className)
+    expect(classes).toContain('md:hidden')
+    expect(classes.some((c) => c.includes('hidden') && c.includes('md:block'))).toBe(true)
+  })
+
+  // The desktop chart is unchanged, which means it keeps the rotated labels. If this ever stops
+  // being true the desktop layout has been altered by a phone-only stage.
+  it('keeps the rotated category labels on the desktop chart only', () => {
+    const { container } = render(
+      <PeriodOverPeriodChart data={data} currentLabel="Sep" previousLabel="Aug" />
+    )
+    const desktop = container.querySelector('.md\\:block')!
+    const phone = container.querySelector('.md\\:hidden')!
+    expect(desktop.innerHTML).toContain('rotate(-40')
+    expect(phone.innerHTML).not.toContain('rotate(-40')
   })
 
   it('puts every category it is given on the axis', () => {
