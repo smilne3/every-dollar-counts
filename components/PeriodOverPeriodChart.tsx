@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import {
   BarChart,
   Bar,
@@ -11,6 +12,7 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import { CHART_SERIES } from '@/lib/chart-palette'
+import { capCategories } from '@/lib/trends'
 
 // Two equal windows side by side, per category. The keys stay `current`/`previous`; the window
 // names arrive as `name` on each Bar, which is what Legend and Tooltip display. They used to be
@@ -25,9 +27,14 @@ export function PeriodOverPeriodChart({
   currentLabel: string
   previousLabel: string
 }) {
+  const [expanded, setExpanded] = useState(false)
+  // Phone only. The desktop chart has the width for every category and this stage does not change
+  // it (spec §5: the cap is "below `md`").
+  const { shown, other } = capCategories(data)
+  const phoneRows = expanded || !other ? data : [...shown, other]
   // Grows with its rows, like SpendByCategoryChart. 56 rather than that chart's 40 because each
   // category here carries two bars, not one.
-  const phoneHeight = Math.max(200, data.length * 56)
+  const phoneHeight = Math.max(200, phoneRows.length * 56)
   return (
     <>
       {/* Horizontal below `md`. recharts calls this layout="vertical" — the name describes the
@@ -36,7 +43,7 @@ export function PeriodOverPeriodChart({
           recur by construction. */}
       <div className="md:hidden" style={{ width: '100%', height: phoneHeight }}>
         <ResponsiveContainer>
-          <BarChart data={data} layout="vertical" margin={{ left: 4, right: 16 }} barGap={2}>
+          <BarChart data={phoneRows} layout="vertical" margin={{ left: 4, right: 16 }} barGap={2}>
             <CartesianGrid horizontal={false} stroke="#e6e9e3" />
             <XAxis
               type="number"
@@ -73,6 +80,16 @@ export function PeriodOverPeriodChart({
           </BarChart>
         </ResponsiveContainer>
       </div>
+      {other && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          className="mt-2 text-sm font-medium text-emerald hover:text-emerald-600 md:hidden"
+        >
+          {expanded ? 'Show fewer' : `Show all ${data.length} categories`}
+        </button>
+      )}
 
       {/* Unchanged from before this stage apart from the series colour (§5.1). The rotated labels
           stay here: at desktop width they have the room they never had on a phone. */}

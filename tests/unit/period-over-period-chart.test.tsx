@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import { PeriodOverPeriodChart } from '@/components/PeriodOverPeriodChart'
 import { CHART_SERIES } from '@/lib/chart-palette'
 
@@ -122,5 +122,86 @@ describe('PeriodOverPeriodChart', () => {
     // than coupling the assertion to how it chose to break the label.
     const squashed = (container.textContent ?? '').replace(/\s+/g, '')
     for (const d of data) expect(squashed).toContain(d.category.replace(/\s+/g, ''))
+  })
+
+  const many = Array.from({ length: 13 }, (_, i) => ({
+    category: `Cat ${i}`,
+    current: 100 - i,
+    previous: 50,
+  }))
+
+  // NOTE — the phone chart's category labels CANNOT be asserted in jsdom. Task 3 established why:
+  // the shared beforeAll stub makes the legend measure 340px, so the phone chart's plot height
+  // computes to 0 and its category ticks never render. Any `phone.innerHTML` assertion about
+  // category names therefore passes whatever the code does. The cap is pinned instead by:
+  //   - capCategories' own tests (Task 2), which own the arithmetic;
+  //   - the control's label below, which names `data.length` and only exists when a fold happened;
+  //   - the desktop assertion below, whose ticks DO render (they lay out along the width).
+  // That the phone chart draws exactly seven bars is verified on the device, not here.
+  it('leaves the desktop chart uncapped', () => {
+    const { container } = render(
+      <PeriodOverPeriodChart data={many} currentLabel="Sep" previousLabel="Aug" />
+    )
+    const desktop = container.querySelector('.md\\:block')!
+    // recharts word-wraps an axis tick into <tspan>s, so `Cat 12` never appears as a literal
+    // string in the markup — squash whitespace first, as 'puts every category it is given on the
+    // axis' above already does.
+    const squashed = (desktop.textContent ?? '').replace(/\s+/g, '')
+    expect(squashed).toContain('Cat12')
+    expect(squashed).not.toContain('Other')
+  })
+
+  // An honest jsdom foothold on the phone cap itself, found by diffing the phone wrapper's markup
+  // with and without it. The category ticks do not render (see the NOTE), but the NUMERIC axis
+  // domain does: a domain is computed from the values, not from the plot height. `Other` folds
+  // Cat 6..Cat 12 into 637 for the current window, which is larger than any single category in
+  // `many` (the largest is 100) — so a numeric tick above 100 can exist only if the folded row
+  // reached the phone chart. Hand the phone chart `data` instead of `phoneRows` and its axis tops
+  // out at $100 and this fails.
+  it('scales the phone axis to the folded Other total', () => {
+    const { container } = render(
+      <PeriodOverPeriodChart data={many} currentLabel="Sep" previousLabel="Aug" />
+    )
+    const phone = container.querySelector('.md\\:hidden')!
+    const ticks = [
+      ...phone.querySelectorAll('.recharts-xAxis-tick-labels .recharts-cartesian-axis-tick-value'),
+    ].map((t) => Number((t.textContent ?? '').replace(/[^0-9.]/g, '')))
+    expect(ticks.length).toBeGreaterThan(0)
+    expect(Math.max(...ticks)).toBeGreaterThan(100)
+  })
+
+  // This is the load-bearing cap assertion in jsdom. The control renders ONLY when capCategories
+  // returned an `other`, and its label names the full count — so it fails if the cap is bypassed,
+  // if the limit changes, or if `data.length` is read from the capped list by mistake.
+  it('offers a control naming how many are hidden', () => {
+    render(<PeriodOverPeriodChart data={many} currentLabel="Sep" previousLabel="Aug" />)
+    const control = screen.getByRole('button', { name: 'Show all 13 categories' })
+    // The cap is phone-only, so the control has to be too: the desktop chart already draws every
+    // category, and a "show all" beside it would claim to reveal something that is not hidden.
+    // Asserted on the class because jsdom applies no Tailwind, so the breakpoint has no effect
+    // here that a rendered-size assertion could see — same approach as the gating test above.
+    expect(control.className.split(/\s+/)).toContain('md:hidden')
+  })
+
+  it('expands to every category when the control is used', () => {
+    render(<PeriodOverPeriodChart data={many} currentLabel="Sep" previousLabel="Aug" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Show all 13 categories' }))
+    // Asserted on the control, not the phone chart's labels — see the NOTE above.
+    expect(screen.getByRole('button', { name: 'Show fewer' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Show all/ })).toBeNull()
+  })
+
+  it('states its expanded state for assistive tech', () => {
+    render(<PeriodOverPeriodChart data={many} currentLabel="Sep" previousLabel="Aug" />)
+    const control = screen.getByRole('button', { name: 'Show all 13 categories' })
+    expect(control.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(control)
+    expect(screen.getByRole('button', { name: 'Show fewer' }).getAttribute('aria-expanded')).toBe('true')
+  })
+
+  // Six or fewer is already everything, so a control that reveals nothing must not appear.
+  it('offers no control when nothing is hidden', () => {
+    render(<PeriodOverPeriodChart data={many.slice(0, 6)} currentLabel="Sep" previousLabel="Aug" />)
+    expect(screen.queryByRole('button', { name: /Show all/ })).toBeNull()
   })
 })
