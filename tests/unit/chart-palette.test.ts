@@ -10,8 +10,12 @@ describe('CHART_SERIES', () => {
     expect(CHART_SERIES.comparison).toBe('#0369a1')
   })
 
-  // The value this replaced. 1.56:1 against the surface, failing two palette checks — the whole
-  // reason §5.1 exists. Named here so it cannot quietly come back.
+  // The value this replaced: 1.56:1 against the surface, failing two palette checks — the whole
+  // reason §5.1 exists.
+  //
+  // Guards this object only: a third key added later holding the grey. It cannot see the grey
+  // reintroduced as an inline literal in a component — that belongs in scripts/check-invariants.mjs,
+  // and is tracked by #108's tripwire proposal.
   it('does not use the grey that failed contrast', () => {
     expect(Object.values(CHART_SERIES)).not.toContain('#c9cec7')
   })
