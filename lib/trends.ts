@@ -3,6 +3,8 @@ import { sortedSpendRows } from './breakdown'
 import { monthLabel } from './format'
 import type { SpendContext } from './spend-context'
 
+export type CompareRow = { category: string; current: number; previous: number }
+
 // Everything the Trends page renders, derived in one place so it can be tested without rendering
 // an async Server Component. The page is then only a query and some JSX.
 //
@@ -15,7 +17,7 @@ export type TrendsView = {
     label: string // 'Aug 2026'
   }
   compare: {
-    rows: { category: string; current: number; previous: number }[]
+    rows: CompareRow[]
     label: string // 'Aug 2026 vs Jul 2026'
     currentLabel: string
     previousLabel: string
@@ -64,8 +66,6 @@ export function trendsView(
   }
 }
 
-export type CompareRow = { category: string; current: number; previous: number }
-
 // The top `limit` categories, plus one synthetic "Other" carrying everything below the line.
 //
 // Below `md` the comparison chart has room for about six bars; the household's bottom 7 categories
@@ -73,7 +73,7 @@ export type CompareRow = { category: string; current: number; previous: number }
 // BOTH windows — a chart that hid $665 behind a bar sized from one window would misstate exactly
 // the thing the reader is comparing.
 //
-// `rows` arrive sorted by combined size from buildTrendsView, so "top" is just the first N. This
+// `rows` arrive sorted by combined size from trendsView, so "top" is just the first N. This
 // does not re-sort: a second sort here could disagree with the order the desktop chart draws, and
 // the two would then hide different categories.
 export function capCategories(

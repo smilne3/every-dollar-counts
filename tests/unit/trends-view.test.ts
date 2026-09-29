@@ -245,9 +245,20 @@ describe('capCategories', () => {
     expect(other!.previous).toBe(3)
   })
 
+  // Deliberately NOT in sorted order, and long enough to fold. trendsView hands these over already
+  // sorted by combined size; if this function re-sorted, it could pick a different top N than the
+  // desktop chart draws and the two would hide different categories. The early-return path cannot
+  // exercise that — this has to go through the slice.
   it('does not re-sort rows that arrive ordered', () => {
-    const rows = [row('Big', 100, 0), row('Small', 1, 0), row('Mid', 50, 0)]
-    expect(capCategories(rows, 3).shown.map((r) => r.category)).toEqual(['Big', 'Small', 'Mid'])
+    const rows = [
+      row('Big', 100, 0),
+      row('Small', 1, 0),
+      row('Mid', 50, 0),
+      row('Tiny', 0.5, 0),
+    ]
+    const { shown, other } = capCategories(rows, 3)
+    expect(shown.map((r) => r.category)).toEqual(['Big', 'Small', 'Mid'])
+    expect(other!.current).toBe(0.5)
   })
 
   // Exactly at the limit folds nothing — an "Other" worth $0 is noise with a tap target on it.
