@@ -487,18 +487,14 @@ Add to `tests/unit/period-over-period-chart.test.tsx`:
     previous: 50,
   }))
 
-  // Spec §5: the household's bottom 7 categories are $665 of $11,600 — about 6% — so six bars plus
-  // Other fits one screen while hiding very little.
-  it('caps the phone chart at six categories plus Other', () => {
-    const { container } = render(
-      <PeriodOverPeriodChart data={many} currentLabel="Sep" previousLabel="Aug" />
-    )
-    const phone = container.querySelector('.md\\:hidden')!
-    expect(phone.innerHTML).toContain('Cat 5')
-    expect(phone.innerHTML).not.toContain('Cat 6')
-    expect(phone.innerHTML).toContain('Other')
-  })
-
+  // NOTE — the phone chart's category labels CANNOT be asserted in jsdom. Task 3 established why:
+  // the shared beforeAll stub makes the legend measure 340px, so the phone chart's plot height
+  // computes to 0 and its category ticks never render. Any `phone.innerHTML` assertion about
+  // category names therefore passes whatever the code does. The cap is pinned instead by:
+  //   - capCategories' own tests (Task 2), which own the arithmetic;
+  //   - the control's label below, which names `data.length` and only exists when a fold happened;
+  //   - the desktop assertion below, whose ticks DO render (they lay out along the width).
+  // That the phone chart draws exactly seven bars is verified on the device, not here.
   it('leaves the desktop chart uncapped', () => {
     const { container } = render(
       <PeriodOverPeriodChart data={many} currentLabel="Sep" previousLabel="Aug" />
@@ -508,6 +504,9 @@ Add to `tests/unit/period-over-period-chart.test.tsx`:
     expect(desktop.innerHTML).not.toContain('Other')
   })
 
+  // This is the load-bearing cap assertion in jsdom. The control renders ONLY when capCategories
+  // returned an `other`, and its label names the full count — so it fails if the cap is bypassed,
+  // if the limit changes, or if `data.length` is read from the capped list by mistake.
   it('offers a control naming how many are hidden', () => {
     render(<PeriodOverPeriodChart data={many} currentLabel="Sep" previousLabel="Aug" />)
     expect(screen.getByRole('button', { name: 'Show all 13 categories' })).toBeTruthy()
@@ -518,8 +517,9 @@ Add to `tests/unit/period-over-period-chart.test.tsx`:
       <PeriodOverPeriodChart data={many} currentLabel="Sep" previousLabel="Aug" />
     )
     fireEvent.click(screen.getByRole('button', { name: 'Show all 13 categories' }))
-    expect(container.querySelector('.md\\:hidden')!.innerHTML).toContain('Cat 12')
+    // Asserted on the control, not the phone chart's labels — see the NOTE above.
     expect(screen.getByRole('button', { name: 'Show fewer' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Show all/ })).toBeNull()
   })
 
   it('states its expanded state for assistive tech', () => {
@@ -584,7 +584,10 @@ Expected: all clean.
 
 Mutate and confirm each is caught, restoring after every one:
 
-- pass `data` instead of `phoneRows` to the phone chart → the cap test must fail
+- pass `data` instead of `phoneRows` to the phone chart → **expect this NOT to be caught**, for the
+  reason in the NOTE above; confirm that is so and say it plainly rather than inventing an
+  assertion that appears to cover it. If you can find an honest jsdom assertion that does catch it,
+  add it and say what it is.
 - pass `phoneRows` to the desktop chart → the uncapped test must fail
 - drop `md:hidden` from the button → nothing may catch it; if so, add an assertion pinning that class and confirm it then fails
 - drop `aria-expanded` → the assistive-tech test must fail
