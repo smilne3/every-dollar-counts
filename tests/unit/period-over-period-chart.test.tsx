@@ -78,16 +78,32 @@ describe('PeriodOverPeriodChart', () => {
   // one the comparison. Asserted through CHART_SERIES rather than hex literals: which series a
   // label belongs to is this test's business, and what those two colours ARE is pinned by
   // tests/unit/chart-palette.test.ts. The earlier month was #c9cec7 here until spec §5.1.
+  //
+  // Scoped to each chart rather than flattened across the container. Task 3 gave each breakpoint
+  // its own chart and therefore its own legend, and a flat query over both is satisfied by
+  // whichever instance is still correct — which let a fill swap in ONE of them through unnoticed.
+  // Each chart has to name its series correctly on its own.
   it('gives each month the colour its own bar is drawn in', () => {
     const { container } = render(
       <PeriodOverPeriodChart data={data} currentLabel="Aug 2026" previousLabel="Jul 2026" />
     )
-    const legend = Array.from(container.querySelectorAll('.recharts-legend-item')).map((li) => [
-      li.querySelector('[fill]')?.getAttribute('fill'),
-      li.textContent,
-    ])
-    expect(legend).toContainEqual([CHART_SERIES.primary, 'Aug 2026'])
-    expect(legend).toContainEqual([CHART_SERIES.comparison, 'Jul 2026'])
+    // `div.` qualified: the disclosure button also carries `md:hidden`, and only the wrapper is
+    // meant here.
+    const legendOf = (selector: string) =>
+      Array.from(container.querySelectorAll(`${selector} .recharts-legend-item`)).map((li) => [
+        li.querySelector('[fill]')?.getAttribute('fill'),
+        li.textContent,
+      ])
+
+    const phone = legendOf('div.md\\:hidden')
+    expect(phone).toHaveLength(2)
+    expect(phone).toContainEqual([CHART_SERIES.primary, 'Aug 2026'])
+    expect(phone).toContainEqual([CHART_SERIES.comparison, 'Jul 2026'])
+
+    const desktop = legendOf('div.md\\:block')
+    expect(desktop).toHaveLength(2)
+    expect(desktop).toContainEqual([CHART_SERIES.primary, 'Aug 2026'])
+    expect(desktop).toContainEqual([CHART_SERIES.comparison, 'Jul 2026'])
   })
 
   // §1.4: the vertical chart puts 26 bars in ~273px under 13 labels rotated -40°, which collide.
@@ -130,14 +146,34 @@ describe('PeriodOverPeriodChart', () => {
     previous: 50,
   }))
 
-  // NOTE — the phone chart's category labels CANNOT be asserted in jsdom. Task 3 established why:
-  // the shared beforeAll stub makes the legend measure 340px, so the phone chart's plot height
-  // computes to 0 and its category ticks never render. Any `phone.innerHTML` assertion about
-  // category names therefore passes whatever the code does. The cap is pinned instead by:
-  //   - capCategories' own tests (Task 2), which own the arithmetic;
-  //   - the control's label below, which names `data.length` and only exists when a fold happened;
+  // NOTE — the phone chart's category LABELS cannot be asserted in jsdom, but its row COUNT can.
+  // Task 3 established the first half: the shared beforeAll stub makes the legend measure 340px, so
+  // the phone chart's plot height computes to 0 and its category ticks never render. Any
+  // `phone.innerHTML` assertion about category names therefore passes whatever the code does.
+  //
+  // The row count is a different matter. The phone wrapper's inline height is
+  // `phoneRows.length * 56`, computed in the component and never touched by the layout, so it
+  // survives the collapse — see 'shows six categories plus Other' below. Together the cap is
+  // pinned by:
+  //   - that height assertion, which sees the cap and the expansion directly;
+  //   - the axis-domain assertion below, which sees that the folded Other row reached the chart;
+  //   - capCategories' own tests (Task 2), which own the arithmetic and the default limit;
+  //   - the control's label below, which only exists when a fold happened;
   //   - the desktop assertion below, whose ticks DO render (they lay out along the width).
-  // That the phone chart draws exactly seven bars is verified on the device, not here.
+  // What remains device-only is how it LOOKS: which names are on the axis and that they are legible.
+  it('shows six categories plus Other, and all of them when expanded', () => {
+    const { container } = render(
+      <PeriodOverPeriodChart data={many} currentLabel="Sep" previousLabel="Aug" />
+    )
+    // `div.` qualified: the disclosure button also carries `md:hidden`.
+    const phoneHeight = () =>
+      (container.querySelector('div.md\\:hidden') as HTMLElement).style.height
+    // Six categories plus Other is seven rows at 56px.
+    expect(phoneHeight()).toBe('392px')
+    fireEvent.click(screen.getByRole('button', { name: 'Show all 13 categories' }))
+    expect(phoneHeight()).toBe('728px')
+  })
+
   it('leaves the desktop chart uncapped', () => {
     const { container } = render(
       <PeriodOverPeriodChart data={many} currentLabel="Sep" previousLabel="Aug" />
