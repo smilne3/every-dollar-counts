@@ -282,4 +282,14 @@ describe('capCategories', () => {
   it('is safe on an empty list', () => {
     expect(capCategories([], 6)).toEqual({ shown: [], other: null })
   })
+
+  // The default is the number the phone layout was designed around (spec §5: "the top 6"), and
+  // every other test here passes `limit` explicitly — so without this, changing the default is
+  // invisible to the suite while changing what the phone shows.
+  it('defaults to six', () => {
+    const rows = Array.from({ length: 9 }, (_, i) => row(`C${i}`, 9 - i, 0))
+    const { shown, other } = capCategories(rows)
+    expect(shown).toHaveLength(6)
+    expect(other!.category).toBe('Other')
+  })
 })

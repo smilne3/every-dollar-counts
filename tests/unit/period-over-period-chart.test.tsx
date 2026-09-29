@@ -170,9 +170,11 @@ describe('PeriodOverPeriodChart', () => {
     expect(Math.max(...ticks)).toBeGreaterThan(100)
   })
 
-  // This is the load-bearing cap assertion in jsdom. The control renders ONLY when capCategories
-  // returned an `other`, and its label names the full count — so it fails if the cap is bypassed,
-  // if the limit changes, or if `data.length` is read from the capped list by mistake.
+  // The load-bearing cap assertion in jsdom, alongside the axis test above. The control renders ONLY
+  // when capCategories returned an `other`, and its label names the full count — so it fails if the
+  // cap is bypassed entirely, or if `data.length` is read from the capped list by mistake. It does
+  // NOT pin the limit: the label names `data.length`, which reads the same for any limit below 13.
+  // The limit itself is pinned by 'defaults to six' in tests/unit/trends-view.test.ts.
   it('offers a control naming how many are hidden', () => {
     render(<PeriodOverPeriodChart data={many} currentLabel="Sep" previousLabel="Aug" />)
     const control = screen.getByRole('button', { name: 'Show all 13 categories' })
