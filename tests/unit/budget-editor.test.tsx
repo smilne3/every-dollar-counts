@@ -27,11 +27,19 @@ describe('BudgetEditor', () => {
   })
 
   // The input is the control most squeezed by the old layout — 7rem inside a 390px row.
+  //
+  // `toContain('w-full')` alone would be vacuous here: the width comes from the shared `inputClass`,
+  // which has carried `w-full` all along, so that half cannot fail. What this change actually did
+  // was move the 7rem cap behind `md`, so the pairing is pinned as a pair — `md:w-28` present AND
+  // no bare `w-28` reaching the phone. Split on whitespace because a plain `not.toContain('w-28')`
+  // over the whole string would match the `md:w-28` we are requiring.
   it('gives the limit input the full width below md', () => {
     const { container } = render(<BudgetEditor {...props} />)
     const input = container.querySelector('input[type="number"]') as HTMLElement
-    expect(input.className).toContain('w-full')
-    expect(input.className).toContain('md:w-28')
+    const classes = input.className.split(/\s+/)
+    expect(classes).toContain('w-full')
+    expect(classes).toContain('md:w-28')
+    expect(classes).not.toContain('w-28')
   })
 
   // §7 asks for "a full-width progress bar" below `md`. `max-w-xs` (20rem) capped it well short of

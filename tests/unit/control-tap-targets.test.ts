@@ -32,11 +32,19 @@ describe('control tap targets', () => {
 
   // Desktop must not change. The minimum is released at `md`, and the buttons restore the exact
   // heights they have today rather than merely dropping the floor.
+  //
+  // `md:min-h-0` on the BUTTONS is not decoration and not covered by the `md:h-*` assertions above:
+  // `min-height` beats `height` in CSS, so a button left with `min-h-[44px] md:h-8` and no release
+  // renders 44px on desktop, not the 32px it has always been — `md:h-8` present and desktop still
+  // broken. Verified by mutation: without these two lines, dropping `md:min-h-0` from either size
+  // leaves all six tests green.
   it('releases the minimum at md on every control', () => {
     expect(inputClass).toContain('md:min-h-0')
     expect(selectClass).toContain('md:min-h-0')
     expect(buttonClass('primary', 'sm')).toContain('md:h-8')
     expect(buttonClass('primary', 'md')).toContain('md:h-10')
+    expect(buttonClass('primary', 'sm')).toContain('md:min-h-0')
+    expect(buttonClass('primary', 'md')).toContain('md:min-h-0')
   })
 
   // The sm/md distinction must survive — it is what makes a compact button compact on desktop.
