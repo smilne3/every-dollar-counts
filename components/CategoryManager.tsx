@@ -58,7 +58,7 @@ export function CategoryManager({
       ))}
 
       <form
-        className="flex max-w-md gap-2 pt-3"
+        className="flex flex-wrap gap-2 pt-3 md:max-w-md md:flex-nowrap"
         onSubmit={(e) => {
           e.preventDefault()
           const n = newName.trim()
@@ -105,7 +105,7 @@ function CategoryRow({
   }
 
   return (
-    <div className="flex max-w-md items-center gap-2">
+    <div data-category-row className="flex flex-wrap items-center gap-2 md:max-w-md md:flex-nowrap">
       <input
         value={name}
         onChange={(e) => setName(e.target.value)}
