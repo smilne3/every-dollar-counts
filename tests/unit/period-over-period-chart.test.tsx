@@ -124,8 +124,8 @@ describe('PeriodOverPeriodChart', () => {
     const { container } = render(
       <PeriodOverPeriodChart data={data} currentLabel="Sep" previousLabel="Aug" />
     )
-    const desktop = container.querySelector('.md\\:block')!
-    const phone = container.querySelector('.md\\:hidden')!
+    const desktop = container.querySelector('div.md\\:block')!
+    const phone = container.querySelector('div.md\\:hidden')!
     expect(desktop.innerHTML).toContain('rotate(-40')
     expect(phone.innerHTML).not.toContain('rotate(-40')
   })
@@ -152,10 +152,15 @@ describe('PeriodOverPeriodChart', () => {
   // `phone.innerHTML` assertion about category names therefore passes whatever the code does.
   //
   // The row count is a different matter. The phone wrapper's inline height is
-  // `phoneRows.length * 56`, computed in the component and never touched by the layout, so it
-  // survives the collapse — see 'shows six categories plus Other' below. Together the cap is
-  // pinned by:
-  //   - that height assertion, which sees the cap and the expansion directly;
+  // `Math.max(200, phoneRows.length * 56)`, computed in the component and never touched by the
+  // layout, so it survives the collapse — see 'shows six categories plus Other' below. Mind the
+  // 200px floor if you recompute it for a short list: below four rows the height stops tracking the
+  // count and the assertion would no longer distinguish them. At 7 and 13 rows it is exact.
+  // Together the cap is pinned by:
+  //   - that height assertion, which reads the phone chart's ROW COUNT, before and after expanding,
+  //     off a style the component derives from `phoneRows` — not off drawn bars, since jsdom draws
+  //     none; it is the only assertion here that distinguishes a capped phone chart from an
+  //     uncapped one;
   //   - the axis-domain assertion below, which sees that the folded Other row reached the chart;
   //   - capCategories' own tests (Task 2), which own the arithmetic and the default limit;
   //   - the control's label below, which only exists when a fold happened;
@@ -178,7 +183,7 @@ describe('PeriodOverPeriodChart', () => {
     const { container } = render(
       <PeriodOverPeriodChart data={many} currentLabel="Sep" previousLabel="Aug" />
     )
-    const desktop = container.querySelector('.md\\:block')!
+    const desktop = container.querySelector('div.md\\:block')!
     // recharts word-wraps an axis tick into <tspan>s, so `Cat 12` never appears as a literal
     // string in the markup — squash whitespace first, as 'puts every category it is given on the
     // axis' above already does.
@@ -198,7 +203,7 @@ describe('PeriodOverPeriodChart', () => {
     const { container } = render(
       <PeriodOverPeriodChart data={many} currentLabel="Sep" previousLabel="Aug" />
     )
-    const phone = container.querySelector('.md\\:hidden')!
+    const phone = container.querySelector('div.md\\:hidden')!
     const ticks = [
       ...phone.querySelectorAll('.recharts-xAxis-tick-labels .recharts-cartesian-axis-tick-value'),
     ].map((t) => Number((t.textContent ?? '').replace(/[^0-9.]/g, '')))
