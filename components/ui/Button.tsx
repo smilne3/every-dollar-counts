@@ -13,9 +13,12 @@ const variants: Record<Variant, string> = {
   danger: 'text-coral border border-line hover:bg-coral-050',
 }
 
+// `h-8`/`h-10` become desktop-only and a 44px minimum applies below `md` (§7). Written as
+// `min-h-[44px] md:h-8` rather than by changing h-8 itself, so the desktop button is the height
+// it has always been and only the phone changes.
 const sizes: Record<Size, string> = {
-  sm: 'h-8 px-3 text-sm',
-  md: 'h-10 px-4 text-sm',
+  sm: 'min-h-[44px] md:h-8 md:min-h-0 px-3 text-sm',
+  md: 'min-h-[44px] md:h-10 md:min-h-0 px-4 text-sm',
 }
 
 // Shared class string so <a>/<Link>/<button> can all match the button look.
