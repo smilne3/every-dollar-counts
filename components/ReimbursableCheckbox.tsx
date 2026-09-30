@@ -104,7 +104,13 @@ export function ReimbursableCheckbox({
 
   return (
     <div className="flex flex-col items-end gap-1">
-      <label className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-emerald hover:text-emerald-600">
+      {/* §7 wants a 44px minimum tap target on every control. The box is 14x14 and this label holds
+          no text to enlarge the hit area, so on a phone the whole target was 14x14 — the smallest
+          control in the app. The minimum goes on the LABEL, which is the hit area a tap actually
+          lands on, and `justify-center` centres the box inside it, so the box still looks 14px and
+          only the reachable area grows. Released at `md`, where the desktop cell is right-aligned
+          and this label has always been content width. */}
+      <label className="flex min-h-[44px] min-w-[44px] cursor-pointer items-center justify-center gap-1.5 text-xs font-medium text-emerald hover:text-emerald-600 md:min-h-0 md:min-w-0 md:justify-start">
         <input
           type="checkbox"
           checked={marked > 0}

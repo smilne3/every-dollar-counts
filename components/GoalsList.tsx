@@ -32,7 +32,7 @@ export function GoalsList({ initialGoals }: { initialGoals: Goal[] }) {
     <div className="space-y-6">
       <Card className="p-5">
         <form
-          className="flex max-w-xl flex-wrap items-end gap-3"
+          className="flex max-w-xl flex-col gap-3 md:flex-row md:flex-wrap md:items-end"
           onSubmit={(e) => {
             e.preventDefault()
             const n = name.trim()
@@ -44,7 +44,7 @@ export function GoalsList({ initialGoals }: { initialGoals: Goal[] }) {
             }
           }}
         >
-          <label className="flex min-w-[12rem] flex-1 flex-col gap-1.5">
+          <label data-goal-name-field className="flex flex-1 flex-col gap-1.5 md:min-w-[12rem]">
             <span className={labelClass}>Goal</span>
             <input
               value={name}
@@ -53,7 +53,7 @@ export function GoalsList({ initialGoals }: { initialGoals: Goal[] }) {
               className={inputClass}
             />
           </label>
-          <label className="flex w-32 flex-col gap-1.5">
+          <label data-goal-target-field className="flex w-full flex-col gap-1.5 md:w-32">
             <span className={labelClass}>Target</span>
             <input
               type="number"

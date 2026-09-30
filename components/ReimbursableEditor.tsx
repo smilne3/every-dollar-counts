@@ -102,11 +102,15 @@ export function ReimbursableEditor({
 
   return (
     <>
+      {/* §7's 44px minimum, applied to the hit area rather than the ink. At `h-6 w-6` this was
+          24x24 — after the checkbox beside it in the phone sheet was raised, the smallest control
+          left there. The glyph stays `text-xs`; only the reachable box grows, and the exact 24x24
+          returns at `md`, where TransactionRow's right-aligned cell is unchanged. */}
       <button
         type="button"
         onClick={openEditor}
         aria-label={`Set a partial reimbursable amount for ${label}`}
-        className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-lg text-xs font-medium text-muted transition-colors hover:text-ink focus-visible:ring-2 focus-visible:ring-emerald/40 focus-visible:outline-none"
+        className="inline-flex min-h-[44px] min-w-[44px] cursor-pointer items-center justify-center rounded-lg text-xs font-medium text-muted transition-colors hover:text-ink focus-visible:ring-2 focus-visible:ring-emerald/40 focus-visible:outline-none md:h-6 md:w-6 md:min-h-0 md:min-w-0"
       >
         ⋮
       </button>

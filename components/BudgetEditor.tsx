@@ -52,11 +52,12 @@ export function BudgetEditor({
           return (
             <div
               key={c}
-              className="grid grid-cols-[1fr_auto_7rem] items-center gap-3 border-b border-line py-3 last:border-0"
+              data-budget-row
+              className="grid grid-cols-1 items-start gap-2 border-b border-line py-3 last:border-0 md:grid-cols-[1fr_auto_7rem] md:items-center md:gap-3"
             >
               <div className="min-w-0">
                 <div className="text-sm font-medium text-ink">{c}</div>
-                <div className="mt-1.5 h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-line">
+                <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-line md:max-w-xs">
                   <div
                     className={`h-1.5 rounded-full ${barColor}`}
                     style={{ width: `${lim > 0 ? ratio * 100 : 0}%` }}
@@ -76,7 +77,7 @@ export function BudgetEditor({
                 aria-label={`${c} monthly budget limit`}
                 value={limits[c]}
                 onChange={(e) => setLimits({ ...limits, [c]: e.target.value })}
-                className={`${inputClass} w-28 text-right`}
+                className={`${inputClass} w-full text-right md:w-28`}
               />
             </div>
           )

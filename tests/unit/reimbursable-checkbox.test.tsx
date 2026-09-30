@@ -117,6 +117,33 @@ describe('ReimbursableCheckbox', () => {
   })
 
 
+  // §7: a 44px minimum tap target on every form control. The box itself is 14x14 (`h-3.5 w-3.5`)
+  // and its <label> holds no text to enlarge the hit area, so before this the whole target on a
+  // phone was 14x14 — the smallest control in the app by a wide margin. The fix is on the hit area,
+  // not the ink: the label gets the 44px minimum and centres the box inside it, so the box still
+  // LOOKS 14px. Asserted on the class string because jsdom computes no layout.
+  it('gives the checkbox a 44px hit area below md without resizing the box', () => {
+    render(<ReimbursableCheckbox {...props} />)
+    const box = screen.getByRole('checkbox')
+    const label = box.closest('label') as HTMLElement
+    expect(label.className).toContain('min-h-[44px]')
+    expect(label.className).toContain('min-w-[44px]')
+    // The ink is untouched — a 44px checkbox would be a different control, not a bigger target.
+    expect(box.className).toContain('h-3.5')
+    expect(box.className).toContain('w-3.5')
+  })
+
+  // Desktop must not change: the row's cell is right-aligned and the label has always been content
+  // width there. Both minimums are released at `md`, and `md:justify-start` undoes the centring
+  // that only the phone needs.
+  it('releases the hit area at md so the desktop row is unchanged', () => {
+    render(<ReimbursableCheckbox {...props} />)
+    const label = screen.getByRole('checkbox').closest('label') as HTMLElement
+    expect(label.className).toContain('md:min-h-0')
+    expect(label.className).toContain('md:min-w-0')
+    expect(label.className).toContain('md:justify-start')
+  })
+
   // The optimistic tick must not outlive its click. The ⋮ editor writes the same field
   // through the same route, so without clearing on a prop change this box would keep claiming the
   // whole charge is coming back while the amount cell beside it showed a partial share (#50).

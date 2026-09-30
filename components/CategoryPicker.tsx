@@ -77,12 +77,18 @@ export function CategoryPicker({
     if (saved) router.refresh()
   }
 
-  // A fragment, deliberately. The sheet's `flex flex-col` label (TransactionCard.tsx) makes the
-  // <select> a flex item, which is what stretches it to full width; a wrapper would take its place
-  // as that flex item and the picker would collapse to its content. The desktop <td>
-  // (TransactionRow.tsx) sizes it to content either way. Which width is right is the surface's
-  // decision, not this component's, so it introduces no box of its own. `block` on the error gives
-  // it its own line in the table cell and is a no-op in the sheet, where flex items are blockified.
+  // A fragment, deliberately: this component contributes no box of its own, so each surface keeps
+  // full control of how the picker is placed and sized. Width now comes from `selectClass` itself,
+  // which carries `w-full md:w-auto` for the 44px phone tap target (§7) — full width in the sheet
+  // (TransactionCard.tsx), content width in the desktop <td> (TransactionRow.tsx). That `md:w-auto`
+  // is load-bearing, not tidiness: drop it and `w-full` reaches desktop and stretches the picker
+  // across the whole category column, measured at 357px in a 389px cell against 133px today.
+  //
+  // A wrapper would not change the width any more — `w-full` would fill it — but it would still
+  // insert a box between the picker and whatever layout the surface has built, and the error below
+  // would be trapped inside it rather than laying out as the surface's own child. `block` on that
+  // error gives it its own line in the table cell and is a no-op in the sheet, where flex items are
+  // blockified.
   return (
     <>
       <select

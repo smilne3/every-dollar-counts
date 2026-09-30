@@ -162,6 +162,38 @@ describe('ReimbursableEditor', () => {
     expect(screen.getByText(/also removes the note/)).toBeTruthy()
   })
 
+  // §7: a 44px minimum tap target. The trigger was `h-6 w-6` — 24x24, and once this stage raised
+  // the 14px checkbox sitting beside it in the same phone sheet (TransactionCard.tsx:174) it became
+  // the smallest control left there. Same treatment as that checkbox: the HIT AREA grows, the ink
+  // does not, so the glyph still reads as a discreet `text-xs` mark rather than becoming a 44px
+  // button. Asserted on the class string because jsdom computes no layout.
+  it('gives the trigger a 44px hit area below md without enlarging the glyph', () => {
+    render(<ReimbursableEditor {...props} />)
+    const classes = screen
+      .getByRole('button', { name: /partial reimbursable amount for Joe S Den/ })
+      .className.split(/\s+/)
+    expect(classes).toContain('min-h-[44px]')
+    expect(classes).toContain('min-w-[44px]')
+    // No bare 24px cap reaching the phone. Split on whitespace, or `md:h-6` would satisfy this.
+    expect(classes).not.toContain('h-6')
+    expect(classes).not.toContain('w-6')
+    // The ink is untouched.
+    expect(classes).toContain('text-xs')
+  })
+
+  // Desktop must not change: TransactionRow.tsx:113 puts this in a right-aligned cell where it has
+  // always occupied exactly 24x24, so both minimums are released and the fixed size comes back.
+  it('restores the trigger to exactly 24x24 at md', () => {
+    render(<ReimbursableEditor {...props} />)
+    const classes = screen
+      .getByRole('button', { name: /partial reimbursable amount for Joe S Den/ })
+      .className.split(/\s+/)
+    expect(classes).toContain('md:h-6')
+    expect(classes).toContain('md:w-6')
+    expect(classes).toContain('md:min-h-0')
+    expect(classes).toContain('md:min-w-0')
+  })
+
 
   // Found only by looking at it: the trigger lives in a `text-right` cell, and text-align inherits
   // straight into the dialog — title, sub-line and both labels were flush right. Every test passed
