@@ -29,11 +29,44 @@ describe('GoalsList', () => {
     expect(form.className).toContain('md:flex-row')
   })
 
+  // Desktop output must not change, and the stacking rewrote the one class list that decides it.
+  // Every class the form carried before is still here, with the two that only make sense on a row
+  // moved behind `md`: `flex-wrap` (meaningless on a column) and `items-end` (which on a column is
+  // the CROSS axis, so bare it would right-align and shrink-wrap both fields on a phone).
+  //
+  // `max-w-xl` is the one that would fail silently. Nothing about a phone depends on it — at 390px
+  // the form is nowhere near 36rem — so dropping it breaks only the desktop, where the form would
+  // widen to the full card. That is a Global Constraint violation no phone-shaped test can see,
+  // which is exactly why it is asserted here.
+  it('keeps every class the desktop form had, with the row-only ones behind md', () => {
+    const { container } = render(<GoalsList {...props} />)
+    const classes = (container.querySelector('form') as HTMLElement).className.split(/\s+/)
+    expect(classes).toContain('max-w-xl')
+    expect(classes).toContain('md:flex-wrap')
+    expect(classes).toContain('md:items-end')
+    // Neither row-only class may reach the phone. Split on whitespace, or the `md:` forms above
+    // would satisfy these.
+    expect(classes).not.toContain('flex-wrap')
+    expect(classes).not.toContain('items-end')
+  })
+
   it('does not floor the Goal field width below md', () => {
     const { container } = render(<GoalsList {...props} />)
     const label = container.querySelector('[data-goal-name-field]') as HTMLElement
     expect(label.className).toContain('md:min-w-[12rem]')
     expect(label.className.split(/\s+/)).not.toContain('min-w-[12rem]')
+  })
+
+  // §7 directly: a 128px Target field on a 390px screen is the other half of this row's problem,
+  // and stacking the form does not fix it by itself — a `w-32` field in a column is still 128px of
+  // a 390px width. It fills the width below `md` and the 8rem cap returns above it.
+  it('lets the Target field fill the width below md', () => {
+    const { container } = render(<GoalsList {...props} />)
+    const label = container.querySelector('[data-goal-target-field]') as HTMLElement
+    const classes = label.className.split(/\s+/)
+    expect(classes).toContain('w-full')
+    expect(classes).toContain('md:w-32')
+    expect(classes).not.toContain('w-32')
   })
 
   // Guards Ruling 3: the goal rows were already compliant and this task must not disturb them.

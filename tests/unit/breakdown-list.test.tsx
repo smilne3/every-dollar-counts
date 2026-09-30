@@ -32,6 +32,23 @@ describe('BreakdownList', () => {
     expect(shrinkable.length).toBeGreaterThan(0)
   })
 
+  // "Amount on the right" is §3.1's defining property and the whole reason Ruling 2 found this
+  // component already compliant — yet truncation and `min-w-0` alone do not produce it. Without
+  // `justify-between` the amount sits immediately after the label instead of at the right edge,
+  // and every other assertion here still passes. Reached through the text block's parent so the
+  // two halves are pinned as one row: the shrinkable block on the left, the amount pushed right.
+  it('pushes the amount to the right of the row', () => {
+    const { container } = render(<BreakdownList rows={rows} />)
+    const textBlock = [...container.querySelectorAll('div')].find((d) =>
+      d.className.split(/\s+/).includes('min-w-0')
+    ) as HTMLElement
+    const row = textBlock.parentElement as HTMLElement
+    expect(row.className).toContain('justify-between')
+    expect(row.className).toContain('items-center')
+    // The amount is that row's last child, not something nested back inside the text block.
+    expect(row.lastElementChild!.textContent).toBe('$1,234.56')
+  })
+
   it('renders a liability as a negative', () => {
     render(<BreakdownList rows={rows} />)
     expect(screen.getByText('−$78.90')).toBeTruthy()

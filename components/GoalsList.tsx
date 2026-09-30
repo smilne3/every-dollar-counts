@@ -53,7 +53,7 @@ export function GoalsList({ initialGoals }: { initialGoals: Goal[] }) {
               className={inputClass}
             />
           </label>
-          <label className="flex w-full flex-col gap-1.5 md:w-32">
+          <label data-goal-target-field className="flex w-full flex-col gap-1.5 md:w-32">
             <span className={labelClass}>Target</span>
             <input
               type="number"

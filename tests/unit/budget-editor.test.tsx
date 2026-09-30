@@ -24,6 +24,12 @@ describe('BudgetEditor', () => {
     const row = container.querySelector('[data-budget-row]') as HTMLElement
     expect(row.className).toContain('grid-cols-1')
     expect(row.className).toContain('md:grid-cols-[1fr_auto_7rem]')
+    // The tracks are not the only thing desktop gets back. The stacked row needs the tighter
+    // `gap-2` and `items-start`, so the row's original spacing and alignment now live behind `md`
+    // — and dropping either changes the desktop row (12px gaps to 8px, centred to top-aligned)
+    // while every phone-shaped assertion still passes.
+    expect(row.className).toContain('md:gap-3')
+    expect(row.className).toContain('md:items-center')
   })
 
   // The input is the control most squeezed by the old layout — 7rem inside a 390px row.
