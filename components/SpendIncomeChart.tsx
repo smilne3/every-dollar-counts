@@ -11,10 +11,10 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import { axisTick } from '@/lib/format'
+import { CHART_SERIES } from '@/lib/chart-palette'
 
 type Row = { label: string; income: number; spending: number }
 
-const EMERALD = '#0e9f6e'
 const CORAL = '#df6742'
 
 export function SpendIncomeChart({ data }: { data: Row[] }) {
@@ -56,7 +56,7 @@ export function SpendIncomeChart({ data }: { data: Row[] }) {
             iconSize={9}
             wrapperStyle={{ fontSize: 12, color: '#5f6b64', paddingTop: 4 }}
           />
-          <Bar dataKey="Income" fill={EMERALD} radius={[4, 4, 0, 0]} maxBarSize={22} isAnimationActive={false} />
+          <Bar dataKey="Income" fill={CHART_SERIES.primary} radius={[4, 4, 0, 0]} maxBarSize={22} isAnimationActive={false} />
           <Bar dataKey="Spending" fill={CORAL} radius={[4, 4, 0, 0]} maxBarSize={22} isAnimationActive={false} />
         </BarChart>
       </ResponsiveContainer>

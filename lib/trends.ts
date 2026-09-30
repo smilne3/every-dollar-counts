@@ -3,6 +3,8 @@ import { sortedSpendRows } from './breakdown'
 import { monthLabel } from './format'
 import type { SpendContext } from './spend-context'
 
+export type CompareRow = { category: string; current: number; previous: number }
+
 // Everything the Trends page renders, derived in one place so it can be tested without rendering
 // an async Server Component. The page is then only a query and some JSX.
 //
@@ -15,7 +17,7 @@ export type TrendsView = {
     label: string // 'Aug 2026'
   }
   compare: {
-    rows: { category: string; current: number; previous: number }[]
+    rows: CompareRow[]
     label: string // 'Aug 2026 vs Jul 2026'
     currentLabel: string
     previousLabel: string
@@ -60,6 +62,32 @@ export function trendsView(
       label: `${currentLabel} vs ${previousLabel}`,
       currentLabel,
       previousLabel,
+    },
+  }
+}
+
+// The top `limit` categories, plus one synthetic "Other" carrying everything below the line.
+//
+// Below `md` the comparison chart has room for about six bars; the household's bottom 7 categories
+// total $665 of $11,600, so capping hides about 6% (spec §5). Other must carry the remainder in
+// BOTH windows — a chart that hid $665 behind a bar sized from one window would misstate exactly
+// the thing the reader is comparing.
+//
+// `rows` arrive sorted by combined size from trendsView, so "top" is just the first N. This
+// does not re-sort: a second sort here could disagree with the order the desktop chart draws, and
+// the two would then hide different categories.
+export function capCategories(
+  rows: CompareRow[],
+  limit = 6
+): { shown: CompareRow[]; other: CompareRow | null } {
+  if (rows.length <= limit) return { shown: rows, other: null }
+  const rest = rows.slice(limit)
+  return {
+    shown: rows.slice(0, limit),
+    other: {
+      category: 'Other',
+      current: cents(rest.reduce((s, r) => s + r.current, 0)),
+      previous: cents(rest.reduce((s, r) => s + r.previous, 0)),
     },
   }
 }
