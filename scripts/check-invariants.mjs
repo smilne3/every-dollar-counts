@@ -93,22 +93,25 @@ for (const { path, text } of files) {
 }
 
 // ---------------------------------------------------------------------------
-// 3. Every unbounded `transactions` read is ordered.
+// 3. Every `transactions` read is bounded, or reads every page.
 //
-// #69. PostgREST truncates at 1,000 rows with a 200 OK and no error. Without an ORDER BY, Postgres
-// may return a DIFFERENT 1,000 rows on successive requests — so past the cap the numbers would move
-// between refreshes with no input having changed and nothing to say why.
+// #69. PostgREST truncates at 1,000 rows with a 200 OK and no error, so a read that matches more
+// renders the first 1,000 as though they were all of it. By 2026-10-05 Settings was counting 1,000
+// of 1,366 transactions, and the dashboard's six-month window held 908.
+//
+// An earlier version of this check accepted .order() as enough. Ordering only makes the truncated
+// set the same on every request; it is still truncated. So a read passes only if it is capped
+// (.limit, .range, a single row, a count) or goes through lib/read-all.ts's readAllRows, which
+// pages past the cap.
 // ---------------------------------------------------------------------------
 const TXN_READS_ALLOWED = new Map([
-  ['app/(app)/settings/page.tsx', '#69 — unbounded and growing; wants a grouped count, not an order.'],
-  ['app/(app)/breakdown/[metric]/page.tsx', '#69'],
-  ['app/(app)/transactions/page.tsx', 'Ranged and ordered already; the .range() call carries it.'],
-  ['app/(app)/dashboard/page.tsx', '#69'],
-  ['app/(app)/trends/page.tsx', '#69'],
-  ['app/(app)/budgets/page.tsx', '#69'],
+  [
+    'app/(app)/reimbursements/page.tsx',
+    'Marked rows only, ordered, and documented as deliberately unbounded: a household marks a ' +
+      'handful a month. Revisit if that changes.',
+  ],
+  ['lib/receivable.ts', 'Marked rows only, as reimbursements/page.tsx.'],
   ['lib/ingest.ts', 'Writes and cursor-driven pulls, not a page read.'],
-  ['app/api/reimbursable/route.ts', 'Single row by id.'],
-  ['app/api/transactions/categorize/route.ts', 'Single row by id.'],
 ])
 
 for (const { path, text } of files) {
@@ -116,26 +119,34 @@ for (const { path, text } of files) {
   const lines = text.split('\n')
   lines.forEach((line, i) => {
     if (!/\.from\(['"]transactions['"]\)/.test(line)) return
+    // readAllRows(() => supabase.from('transactions')...) pages the read itself. The call opens on
+    // this line or within the two before it.
+    const opener = lines.slice(Math.max(0, i - 2), i + 1).join('\n')
+    if (/readAllRows\(/.test(opener)) return
     // Walk forward while the statement is still chaining, and see whether it selects rows at all
-    // and whether it ever bounds itself. A write — .update(), .delete() — reads nothing and cannot
+    // and whether it ever bounds itself. A write (.update(), .delete()) reads nothing and cannot
     // truncate, so only a chain containing .select() is in scope.
+    // `depth` counts open parentheses, so a line inside a multi-line argument (a long select list)
+    // does not read as the end of the chain.
     let bounded = false
     let reads = false
+    let depth = 0
     for (let j = i; j < Math.min(i + 14, lines.length); j++) {
       const l = lines[j].trim()
+      if (j > i && depth <= 0 && l && !l.startsWith('.') && !l.startsWith(')') && !l.startsWith('//')) break
       if (/\.select\(/.test(l)) reads = true
       if (/\.(update|upsert|insert|delete)\(/.test(l)) reads = false
-      if (/\.(order|limit|range)\(/.test(l)) bounded = true
-      if (j > i && l && !l.startsWith('.') && !l.startsWith('//')) break
+      if (/\.(limit|range|single|maybeSingle)\(/.test(l) || /head:\s*true/.test(l)) bounded = true
+      depth += (l.match(/\(/g) ?? []).length - (l.match(/\)/g) ?? []).length
     }
     if (reads && !bounded) {
       report(
-        'unordered-txn-read',
+        'unbounded-txn-read',
         path,
         i + 1,
-        'reads transactions with no .order(), .limit() or .range(). PostgREST truncates at 1,000 ' +
-          'rows with a 200 OK, and without an order the truncated set can differ between ' +
-          'requests (#69).'
+        'reads transactions with no .limit(), .range() or single-row bound. PostgREST truncates ' +
+          'at 1,000 rows with a 200 OK and no error, and .order() alone does not stop that (#69). ' +
+          'Wrap the query in readAllRows (lib/read-all.ts), or bound it.'
       )
     }
   })

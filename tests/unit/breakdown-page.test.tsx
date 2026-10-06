@@ -13,7 +13,7 @@ const { results, calls, tz } = vi.hoisted(() => ({
 // than just chained, since the date bound it's given is the whole behaviour under test here.
 const chainFor = (table: string) => {
   const chain: Record<string, unknown> = {}
-  for (const m of ['select', 'order', 'eq', 'lte', 'limit', 'not']) chain[m] = () => chain
+  for (const m of ['select', 'order', 'eq', 'lte', 'limit', 'not', 'range']) chain[m] = () => chain
   chain.gte = (_col: string, v: string) => {
     calls.gte.push(v)
     return chain

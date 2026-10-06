@@ -10,7 +10,7 @@ const { results } = vi.hoisted(() => ({
 // method and resolves to whatever the test configured for that table.
 const chainFor = (table: string) => {
   const chain: Record<string, unknown> = {}
-  for (const m of ['select', 'order', 'eq', 'limit']) chain[m] = () => chain
+  for (const m of ['select', 'order', 'eq', 'limit', 'range']) chain[m] = () => chain
   chain.single = async () => results[table] ?? { data: null, error: null }
   chain.maybeSingle = async () => results[table] ?? { data: null, error: null }
   chain.then = (resolve: (v: unknown) => unknown) =>

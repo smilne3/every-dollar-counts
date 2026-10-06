@@ -9,6 +9,7 @@ import { SpendByCategoryChart } from '@/components/SpendByCategoryChart'
 import { PeriodOverPeriodChart } from '@/components/PeriodOverPeriodChart'
 import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { readAllRows } from '@/lib/read-all'
 
 // Trends reports the last month that has FINISHED; Budgets reports the calendar month so far.
 // That is the whole of #67: a month still in progress is, for its first fortnight, almost
@@ -37,12 +38,15 @@ export default async function TrendsPage() {
   // Bounded at both ends. `previous.from` is the earliest date either card reads; the upper bound
   // is what stops a row dated beyond the window being fetched at all. `inRange` is what actually
   // enforces the windows — this only keeps the query from carrying rows nothing will use.
-  const { data: txns, error: txnsError } = await supabase
-    .from('transactions')
-    .select('id, amount, date, user_category, pfc_primary, pfc_detailed, reimbursable_amount')
-    .eq('removed', false)
-    .gte('date', windows.previous.from)
-    .lte('date', windows.current.to)
+  // Paged, so a long window cannot silently pass the 1,000-row cap (#69).
+  const { data: txns, error: txnsError } = await readAllRows(() =>
+    supabase
+      .from('transactions')
+      .select('id, amount, date, user_category, pfc_primary, pfc_detailed, reimbursable_amount')
+      .eq('removed', false)
+      .gte('date', windows.previous.from)
+      .lte('date', windows.current.to)
+  )
   // #46's lesson: "the query failed" and "you spent nothing" must never render identically.
   if (txnsError) throw new Error(`could not read transactions: ${txnsError.message}`)
 

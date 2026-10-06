@@ -13,7 +13,7 @@ const { results, calls } = vi.hoisted(() => ({
 // whole behaviour under test in the 'Trends month window' block below.
 const chainFor = (table: string) => {
   const chain: Record<string, unknown> = {}
-  for (const method of ['select', 'order', 'eq', 'limit']) chain[method] = () => chain
+  for (const method of ['select', 'order', 'eq', 'limit', 'range']) chain[method] = () => chain
   chain.gte = (_col: string, v: string) => {
     calls.gte.push(v)
     return chain

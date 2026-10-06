@@ -27,6 +27,7 @@ import { buildSpendContext } from '@/lib/spend-context'
 import { fetchReceivable } from '@/lib/receivable'
 import { todayIn, hourIn } from '@/lib/clock'
 import { householdTimezone } from '@/lib/household'
+import { readAllRows } from '@/lib/read-all'
 
 function greeting(hour: number): string {
   if (hour < 12) return 'Good morning'
@@ -113,11 +114,15 @@ export default async function DashboardPage({
   const months = lastNMonths(today, 6)
   const sixStart = `${months[0].key}-01`
 
-  const { data: flowTxns, error: flowError } = await supabase
-    .from('transactions')
-    .select('id, amount, date, user_category, pfc_primary, pfc_detailed, reimbursable_amount')
-    .eq('removed', false)
-    .gte('date', sixStart)
+  // Six months of history passes PostgREST's 1,000-row cap (908 rows on 2026-10-05), so this pages
+  // rather than silently dropping transactions from the chart and the tiles (#69).
+  const { data: flowTxns, error: flowError } = await readAllRows(() =>
+    supabase
+      .from('transactions')
+      .select('id, amount, date, user_category, pfc_primary, pfc_detailed, reimbursable_amount')
+      .eq('removed', false)
+      .gte('date', sixStart)
+  )
   // #46: "the query failed" and "you spent nothing this month" must never render identically.
   if (flowError) throw new Error(`could not read transactions: ${flowError.message}`)
 
