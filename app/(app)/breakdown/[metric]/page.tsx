@@ -9,7 +9,7 @@ import {
   cashOnHand,
   lastNMonths,
   monthlyFlows,
-  averageSaved,
+  savedAverage,
   AVERAGE_SAVED_MONTHS,
   sumManualAssets,
   type FlowTxn,
@@ -22,7 +22,7 @@ import { fetchReceivable } from '@/lib/receivable'
 import { todayIn } from '@/lib/clock'
 import { householdTimezone } from '@/lib/household'
 import { readAllRows } from '@/lib/read-all'
-import { historyStartMonth } from '@/lib/history-start'
+import { historyStart } from '@/lib/history-start'
 import { monthNameLong } from '@/lib/format'
 
 const TITLES: Record<string, { title: string; subtitle: string }> = {
@@ -62,9 +62,12 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
   const header = TITLES[metric]
   let rows: BreakdownRow[] = []
   let total: { label: string; amount: number; currency: string } | undefined
-  // Saved only: the average over complete months, under this month's own figures (#126).
-  // `undefined` on other metrics; `null` when there is not yet a complete month to average.
-  let average: { rows: BreakdownRow[]; total: NonNullable<typeof total>; count: number } | null | undefined
+  // Saved only: the average over complete months, under this month's own figures (#126), or the
+  // reason there is none. `undefined` on other metrics.
+  let average:
+    | { rows: BreakdownRow[]; total: NonNullable<typeof total>; count: number }
+    | { reason: string }
+    | undefined
 
   if (metric === 'net-worth') {
     const g = groupAccountsByKind(accounts)
@@ -198,12 +201,10 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
       ]
       total = { label: 'Saved this month', amount: m.income - m.spending, currency }
 
-      // The same rule as the dashboard tile, over the same flows, so the two cannot disagree.
-      const avg = averageSaved(flows, {
-        currentKey: thisKey,
-        historyStartKey: await historyStartMonth(),
-      })
-      average = avg && {
+      // The same window (AVERAGE_SAVED_MONTHS + 1), savedAverage and historyStart as the dashboard
+      // tile, so the two cannot disagree.
+      const avg = savedAverage(flows, thisKey, await historyStart())
+      average = avg.kind === 'unavailable' ? { reason: avg.reason } : {
         rows: [...avg.months].reverse().map((mo) => ({
           key: mo.key,
           label: monthNameLong(mo.key),
@@ -225,7 +226,7 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
       </Card>
       {average !== undefined && (
         <Card className="p-5">
-          {average ? (
+          {'rows' in average ? (
             <>
               <h2 className="mb-3 text-base font-semibold text-ink">
                 {`Average saved, last ${average.count} month${average.count === 1 ? '' : 's'}`}
@@ -233,9 +234,7 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
               <BreakdownList rows={average.rows} total={average.total} />
             </>
           ) : (
-            <p className="text-sm text-muted">
-              Not enough history yet for an average. It starts after your first full month.
-            </p>
+            <p className="text-sm text-muted">{average.reason}</p>
           )}
         </Card>
       )}

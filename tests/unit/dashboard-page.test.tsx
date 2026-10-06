@@ -2,7 +2,11 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 // vi.hoisted for the same reason as tests/unit/trends-page.test.tsx: the static page import below
 // is linked before this file's body runs, firing the mock factory.
-const { results, tz, presentation, paged } = vi.hoisted(() => ({
+const { results, tz, presentation, paged, history } = vi.hoisted(() => ({
+  // What lib/history-start answers. Mocked so these tests can tell a page that takes the history
+  // start from historyStart apart from one that guesses it from its own transaction read: this
+  // stub serves the whole fixture to every query, so the two would otherwise always agree.
+  history: { value: { kind: 'none' } as { kind: 'ready'; month: string } | { kind: 'pending'; bank: string } | { kind: 'none' } },
   results: {} as Record<string, { data: unknown; error: { message: string } | null }>,
   // When set, `transactions` is served by a PostgREST-like stub that caps each response at 1,000
   // rows, so the test can tell a paged read from a plain one (#69).
@@ -59,9 +63,13 @@ vi.mock('@/lib/transaction-presentation', async (importOriginal) => {
 vi.mock('@/lib/plaid-items', () => ({ listItemsForHousehold: async () => [] }))
 vi.mock('@/lib/manual-assets', () => ({ listManualAssets: async () => [] }))
 vi.mock('@/lib/receivable', () => ({ fetchReceivable: async () => 0 }))
+vi.mock('@/lib/history-start', () => ({ historyStart: async () => history.value }))
 
 import { pagedTable } from '../stubs/postgrest-pages'
 import DashboardPage from '@/app/(app)/dashboard/page'
+import BreakdownPage from '@/app/(app)/breakdown/[metric]/page'
+import { BreakdownList } from '@/components/BreakdownList'
+import { moneyWhole } from '@/lib/format'
 
 const render = () => DashboardPage({ searchParams: Promise.resolve({}) })
 
@@ -159,41 +167,123 @@ beforeEach(() => {
   results.transactions = { data: [], error: null }
   results.budgets = { data: [], error: null }
   paged.transactions = null
+  history.value = { kind: 'none' }
 })
 
 describe('Dashboard average savings (#126)', () => {
-  // REPORTED is 2026-09-03, so September is in progress. History starts 2026-02-15, so February is
-  // partial. March to August qualify: March saves $8,000 and the other five $2,000 each, so the
-  // mean is $3,000. Without March (a window one month short) it would read $2,000.
+  // REPORTED is 2026-09-02 in New York, so September is in progress. The fixture runs March to
+  // September: March saves $8,000 and April to August $2,000 each.
   const month = (m: string, income: number, spend: number) => [
     { id: `${m}-in`, amount: -income, date: `2026-${m}-10`, user_category: null, pfc_primary: 'INCOME', pfc_detailed: null, reimbursable_amount: null },
     { id: `${m}-out`, amount: spend, date: `2026-${m}-12`, user_category: null, pfc_primary: 'FOOD_AND_DRINK', pfc_detailed: null, reimbursable_amount: null },
   ]
   const income = { data: [{ id: 'c1', name: 'Income', pfc_primary: 'INCOME', sort_order: 0 }], error: null }
-  const savedFoot = async () =>
-    textOf(findStatCards(await render()).find((c) => c.props.label === 'Saved this month')!.props.foot)
+  const fixture = (savings: Record<string, number> = {}) => ({
+    data: [
+      // $10,000 in each month; spending is whatever leaves the month's saving.
+      ...['03', '04', '05', '06', '07', '08'].flatMap((m) => month(m, 10000, 10000 - (savings[m] ?? (m === '03' ? 8000 : 2000)))),
+      ...month('09', 0, 5000),
+    ],
+    error: null,
+  })
+  const savedTile = async () => findStatCards(await render()).find((c) => c.props.label === 'Saved this month')!
+  const avgLine = async () => {
+    const foot = (await savedTile()).props.foot
+    const spans = (foot as { props: { children: unknown[] } }).props.children.filter(Boolean) as {
+      props: { className: string; children: string }
+    }[]
+    return spans.find((sp) => typeof sp.props.children === 'string' && sp.props.children.startsWith('Avg'))
+  }
 
-  it('shows the mean saving over the complete months on the Saved tile', async () => {
+  // History from February: March to August qualify, (8,000 + 5 x 2,000) / 6. A window one month
+  // short would drop March and read $2,000.
+  it('shows the mean over the complete months, and how many', async () => {
     results.categories = income
-    results.transactions = {
-      // The stub ignores ordering, so the earliest row goes first, where an ascending read puts it.
-      data: [
-        ...month('02', 500, 4000).map((t) => ({ ...t, date: t.date.replace('-10', '-15').replace('-12', '-16') })),
-        ...month('03', 9000, 1000),
-        ...['04', '05', '06', '07', '08'].flatMap((m) => month(m, 3000, 1000)),
-        ...month('09', 0, 5000),
-      ],
-      error: null,
-    }
-    expect(await savedFoot()).toContain('Avg $3,000/mo')
+    results.transactions = fixture()
+    history.value = { kind: 'ready', month: '2026-02' }
+    expect((await avgLine())!.props.children).toBe('Avg $3,000/mo · 6 mo')
   })
 
-  // The in-progress month and the partial first month would each drag the figure down; with them
-  // in, this fixture averages well under $2,000.
-  it('is absent when no complete month follows the first one', async () => {
+  // The start comes from historyStart, not from the earliest row the page happened to read: here
+  // the page read rows from March, but history is only complete from May.
+  it('starts where historyStart says, not at the earliest transaction it read', async () => {
     results.categories = income
-    results.transactions = { data: [...month('08', 3000, 1000), ...month('09', 3000, 1000)], error: null }
-    expect(await savedFoot()).not.toContain('Avg')
+    results.transactions = fixture()
+    history.value = { kind: 'ready', month: '2026-05' }
+    expect((await avgLine())!.props.children).toBe('Avg $2,000/mo · 3 mo')
+  })
+
+  it.each([
+    ['history is in but no full month has followed it', { kind: 'ready', month: '2026-08' }],
+    ['a bank has not delivered its history yet', { kind: 'pending', bank: 'Capital One' }],
+    ['there are no transactions', { kind: 'none' }],
+  ] as const)('shows no line when %s', async (_, state) => {
+    results.categories = income
+    results.transactions = fixture()
+    history.value = state
+    expect(await avgLine()).toBeUndefined()
+  })
+
+  it('is coral when the household loses money on average, and only then', async () => {
+    results.categories = income
+    history.value = { kind: 'ready', month: '2026-02' }
+    results.transactions = fixture({ '03': -2000, '04': -2000, '05': -2000, '06': -2000, '07': -2000, '08': -2000 })
+    const losing = (await avgLine())!
+    expect(losing.props.children).toBe('Avg -$2,000/mo · 6 mo')
+    expect(losing.props.className).toContain('text-coral')
+
+    results.transactions = fixture()
+    expect((await avgLine())!.props.className).not.toContain('text-coral')
+  })
+
+  // A few cents below zero rounds to "$0"; a red $0 would be noise.
+  it('is not coral when the average rounds to zero', async () => {
+    results.categories = income
+    history.value = { kind: 'ready', month: '2026-07' }
+    results.transactions = fixture({ '08': -0.3 })
+    const line = (await avgLine())!
+    expect(line.props.className).not.toContain('text-coral')
+  })
+
+  // The tile links to /breakdown/saved, and the two must tell the same story. One fixture, one
+  // history state, both pages.
+  it('agrees with the saved breakdown it links to', async () => {
+    results.categories = income
+    results.transactions = fixture({ '05': 3100, '07': -450.4 })
+    history.value = { kind: 'ready', month: '2026-03' }
+    const tile = (await avgLine())!.props.children
+    const breakdown = await BreakdownPage({ params: Promise.resolve({ metric: 'saved' }) })
+    const lists: { total?: { amount: number }; rows: unknown[] }[] = []
+    ;(function walk(n: unknown) {
+      if (n == null || typeof n !== 'object') return
+      if (Array.isArray(n)) return n.forEach(walk)
+      const el = n as { type?: unknown; props?: Record<string, unknown> }
+      if (el.type === BreakdownList) lists.push(el.props as never)
+      else if (el.props) walk(el.props.children)
+    })(breakdown)
+    const avg = lists[1]
+    expect(tile).toBe(`Avg ${moneyWhole(avg.total!.amount)}/mo · ${avg.rows.length} mo`)
+  })
+
+  // The read is seven months; the chart under "Last 6 months" must still get six.
+  it('still charts six months', async () => {
+    results.categories = income
+    results.transactions = fixture()
+    const tree = await render()
+    const chart = (function find(n: unknown): { props: { data: { key: string }[] } } | null {
+      if (n == null || typeof n !== 'object') return null
+      if (Array.isArray(n)) {
+        for (const c of n) {
+          const f = find(c)
+          if (f) return f
+        }
+        return null
+      }
+      const el = n as { type?: { name?: string }; props?: { children?: unknown } }
+      if (el.type?.name === 'SpendIncomeChart') return el as never
+      return el.props ? find(el.props.children) : null
+    })(tree)
+    expect(chart!.props.data.map((d) => d.key)).toEqual(['2026-04', '2026-05', '2026-06', '2026-07', '2026-08', '2026-09'])
   })
 })
 

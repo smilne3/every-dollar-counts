@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { averageSaved } from '@/lib/dashboard'
+import { averageSaved, savedAverage } from '@/lib/dashboard'
 
 // #126: "what do we typically save in a month?" One month is too noisy to answer it, and two kinds
 // of month would answer it wrongly: the current one, which is still in progress (#65), and any month
@@ -79,5 +79,31 @@ describe('averageSaved', () => {
     expect(
       averageSaved([flow('2026-09', 0, 0)], { currentKey: '2026-10', historyStartKey: null })
     ).toBeNull()
+  })
+})
+
+// The pages show the average, or say why there is none, from the history state (lib/history-start).
+// One function, so the tile and the drill-down cannot word it differently.
+describe('savedAverage', () => {
+  const flows = [flow('2026-08', 9000, 6000), flow('2026-09', 9000, 4000), flow('2026-10', 0, 900)]
+
+  it('averages once every bank\'s history is in', () => {
+    const r = savedAverage(flows, '2026-10', { kind: 'ready', month: '2026-07' })
+    expect(r).toMatchObject({ kind: 'average', average: 4000 })
+  })
+
+  it('names the bank it is waiting for', () => {
+    const r = savedAverage(flows, '2026-10', { kind: 'pending', bank: 'Capital One' })
+    expect(r).toEqual({ kind: 'unavailable', reason: expect.stringContaining("waiting for Capital One's") })
+  })
+
+  it('says when history is in but no full month has followed it yet', () => {
+    const r = savedAverage(flows, '2026-10', { kind: 'ready', month: '2026-09' })
+    expect(r).toEqual({ kind: 'unavailable', reason: expect.stringMatching(/not enough history yet/i) })
+  })
+
+  it('says when there are no transactions at all', () => {
+    const r = savedAverage(flows, '2026-10', { kind: 'none' })
+    expect(r).toEqual({ kind: 'unavailable', reason: expect.stringMatching(/no transactions yet/i) })
   })
 })

@@ -17,7 +17,7 @@ import {
   cashOnHand,
   lastNMonths,
   monthlyFlows,
-  averageSaved,
+  savedAverage,
   AVERAGE_SAVED_MONTHS,
   sumManualAssets,
   type FlowTxn,
@@ -30,7 +30,7 @@ import { fetchReceivable } from '@/lib/receivable'
 import { todayIn, hourIn } from '@/lib/clock'
 import { householdTimezone } from '@/lib/household'
 import { readAllRows } from '@/lib/read-all'
-import { historyStartMonth } from '@/lib/history-start'
+import { historyStart } from '@/lib/history-start'
 
 function greeting(hour: number): string {
   if (hour < 12) return 'Good morning'
@@ -114,14 +114,14 @@ export default async function DashboardPage({
   const categories = (catsData ?? []) as Category[]
   const pfcMap = pfcToName(categories)
 
-  // Six months for the chart, plus one more so the average-savings figure has six COMPLETE months
-  // to draw on: the current month never counts toward it (#126).
+  // The average's six complete months plus this one, which never counts toward it (#126). The
+  // chart shows the last six of these ("Last 6 months" below), so AVERAGE_SAVED_MONTHS must not drop
+  // below 6 without the chart changing too.
   const months = lastNMonths(today, AVERAGE_SAVED_MONTHS + 1)
   const windowStart = `${months[0].key}-01`
 
-  // The six-month window grows through each month and runs into PostgREST's 1,000-row cap near
-  // month end (908 rows on 2026-10-05, set to pass 1,000 around the 20th). Paged, so the chart and
-  // the tiles never silently drop transactions (#69).
+  // The window passes PostgREST's 1,000-row cap: six months alone held 908 rows on 2026-10-05, and
+  // this reads seven. Paged, so the chart and the tiles never silently drop transactions (#69).
   const { data: flowTxns, error: flowError } = await readAllRows(() =>
     supabase
       .from('transactions')
@@ -152,10 +152,7 @@ export default async function DashboardPage({
   // so a partial fix could have had the label and the amount naming different months.
   const thisMonthLabel = monthNameLong(months[months.length - 1].key)
   const chartFlows = flows.slice(-6)
-  const avgSaved = averageSaved(flows, {
-    currentKey: months[months.length - 1].key,
-    historyStartKey: await historyStartMonth(),
-  })
+  const avgSaved = savedAverage(flows, months[months.length - 1].key, await historyStart())
 
   const { data: budgetRows, error: budgetsError } = await supabase
     .from('budgets')
@@ -305,9 +302,15 @@ export default async function DashboardPage({
                 <span className="text-muted">
                   {money(income, currency)} in · {money(spent, currency)} out
                 </span>
-                {avgSaved && (
-                  <span className={`block ${avgSaved.average < 0 ? 'text-coral' : 'text-muted'}`}>
-                    {`Avg ${moneyWhole(avgSaved.average, currency)}/mo`}
+                {/* No line when there is no figure: the tile has no room to say why, and the
+                    saved breakdown it links to does. The month count keeps a one- or two-month
+                    "average" from passing for a settled one. Coral by the rounded figure, so a few
+                    cents below zero does not read as a red "$0". */}
+                {avgSaved.kind === 'average' && (
+                  <span
+                    className={`block ${Math.round(avgSaved.average) < 0 ? 'text-coral' : 'text-muted'}`}
+                  >
+                    {`Avg ${moneyWhole(avgSaved.average, currency)}/mo · ${avgSaved.months.length} mo`}
                   </span>
                 )}
               </>
