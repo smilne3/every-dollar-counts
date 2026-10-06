@@ -5,8 +5,12 @@ import { createClient } from '@/lib/supabase/client'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
 import { inputClass } from '@/components/ui/styles'
+import { useIsStandalone } from '@/lib/useIsStandalone'
 
 export default function LoginPage() {
+  // In the installed app a magic link opens in the browser, whose cookies the app cannot see, so
+  // the sign-in would land in the wrong place. Google completes inside the app.
+  const standalone = useIsStandalone()
   const [email, setEmail] = useState('')
   const [sent, setSent] = useState(false)
   const [err, setErr] = useState('')
@@ -74,25 +78,33 @@ export default function LoginPage() {
             Continue with Google
           </Button>
 
-          <div className="flex items-center gap-3 text-xs text-faint">
-            <div className="h-px flex-1 bg-line" />
-            or
-            <div className="h-px flex-1 bg-line" />
-          </div>
+          {standalone ? (
+            <p className="text-center text-sm text-muted">
+              Sign in with Google here. Email links open in your browser, not this app.
+            </p>
+          ) : (
+            <>
+              <div className="flex items-center gap-3 text-xs text-faint">
+                <div className="h-px flex-1 bg-line" />
+                or
+                <div className="h-px flex-1 bg-line" />
+              </div>
 
-          <form onSubmit={send} className="flex flex-col gap-3">
-            <input
-              className={inputClass}
-              type="email"
-              required
-              placeholder="you@email.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-            <Button variant="primary" className="w-full" disabled={loading}>
-              {loading ? 'Sending…' : 'Email me a login link'}
-            </Button>
-          </form>
+              <form onSubmit={send} className="flex flex-col gap-3">
+                <input
+                  className={inputClass}
+                  type="email"
+                  required
+                  placeholder="you@email.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+                <Button variant="primary" className="w-full" disabled={loading}>
+                  {loading ? 'Sending…' : 'Email me a login link'}
+                </Button>
+              </form>
+            </>
+          )}
 
           {err && <p className="text-sm text-coral">{err}</p>}
         </div>

@@ -9,6 +9,7 @@ import {
   clearPendingLink,
   completePendingLink,
 } from '@/components/plaid-link-context'
+import { useIsStandalone } from '@/lib/useIsStandalone'
 
 // Reopens Link in update mode to fix a broken login. The access token is unchanged, so on success
 // completePendingLink just clears the broken flag and resyncs. Critically, update mode does NOT
@@ -16,6 +17,9 @@ import {
 // of ten unrefundable slots.
 export function ReconnectButton({ itemId }: { itemId: string }) {
   const router = useRouter()
+  // Not from the installed app, for the reason LinkButton gives: the bank's return could land in
+  // the browser, away from the pending link this app's storage holds.
+  const standalone = useIsStandalone()
   const [token, setToken] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -70,9 +74,10 @@ export function ReconnectButton({ itemId }: { itemId: string }) {
 
   return (
     <div className="flex flex-col items-end gap-1">
-      <button onClick={start} disabled={busy} className={buttonClass('secondary', 'sm')}>
+      <button onClick={start} disabled={busy || standalone} className={buttonClass('secondary', 'sm')}>
         {busy ? 'Reconnecting…' : 'Reconnect'}
       </button>
+      {standalone && <span className="text-xs text-muted">Reconnect from your browser.</span>}
       {error && <span className="text-xs text-coral">{error}</span>}
     </div>
   )

@@ -10,6 +10,7 @@ import {
   clearPendingLink,
   completePendingLink,
 } from '@/components/plaid-link-context'
+import { useIsStandalone } from '@/lib/useIsStandalone'
 
 // Two paths, because Plaid Link only lists institutions supporting EVERY requested product:
 // asking for transactions + investments at once would hide most banks AND most brokerages.
@@ -28,6 +29,10 @@ type LinkError = { message: string; slotAtRisk: boolean }
 
 export function LinkButton() {
   const router = useRouter()
+  // Link keeps the pending connection in localStorage (plaid-link-context). The installed iOS app
+  // has storage of its own, so a bank login that returns to the browser instead would strand a
+  // connection whose lifetime slot is already spent. Connecting happens in the browser.
+  const standalone = useIsStandalone()
   const [token, setToken] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<LinkError | null>(null)
@@ -109,7 +114,7 @@ export function LinkButton() {
       <div className="flex flex-wrap gap-2">
         <button
           onClick={() => start(['transactions'])}
-          disabled={busy}
+          disabled={busy || standalone}
           className={buttonClass('primary', 'md')}
         >
           <BankIcon className="h-[18px] w-[18px]" />
@@ -117,12 +122,15 @@ export function LinkButton() {
         </button>
         <button
           onClick={() => start(['investments'])}
-          disabled={busy}
+          disabled={busy || standalone}
           className={buttonClass('secondary', 'md')}
         >
           Add investment account
         </button>
       </div>
+      {standalone && (
+        <p className="text-sm text-muted">Connect banks from your browser, not the installed app.</p>
+      )}
       {error && (
         <p className="text-sm text-coral">
           {error.message}
