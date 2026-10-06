@@ -7,6 +7,7 @@ import { SpendIncomeChart } from '@/components/SpendIncomeChart'
 import { RecentActivity } from '@/components/RecentActivity'
 import { Card } from '@/components/ui/Card'
 import { StatCard } from '@/components/ui/StatCard'
+import { StatRows } from '@/components/ui/StatRows'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { money, moneyWhole, longDate, monthNameLong } from '@/lib/format'
 import { effectiveCategory } from '@/lib/effective-category'
@@ -199,14 +200,30 @@ export default async function DashboardPage({
   const depCount = accounts.filter((a) => a.type === 'depository').length
 
   const budgetPct = totalBudget > 0 ? Math.round((trackedSpend / totalBudget) * 100) : null
-  const budgetFoot =
+  // Exact on the tile; whole dollars on the phone row, beside a whole-dollar figure, so it fits.
+  const budgetFoot = (fmt: typeof money) =>
     budgetPct != null ? (
       <span className={budgetPct > 100 ? 'text-coral' : budgetPct > 80 ? 'text-amber' : 'text-muted'}>
-        {money(trackedSpend, currency)} of {money(totalBudget, currency)} budgeted
+        {`${fmt(trackedSpend, currency)} of ${fmt(totalBudget, currency)} budgeted`}
       </span>
     ) : (
       <span className="text-muted">this month</span>
     )
+
+  const cashFoot = (
+    <span className="text-muted">
+      In {depCount} account{depCount === 1 ? '' : 's'}
+    </span>
+  )
+  // No average line when there is no figure: there is no room to say why, and the saved breakdown
+  // it links to does. The month count keeps a one- or two-month "average" from passing for a
+  // settled one. Coral by the rounded figure, so a few cents below zero does not read as a red "$0".
+  const avgLine =
+    avgSaved.kind === 'average' ? (
+      <span className={`block ${Math.round(avgSaved.average) < 0 ? 'text-coral' : 'text-muted'}`}>
+        {`Avg ${moneyWhole(avgSaved.average, currency)}/mo · ${avgSaved.months.length} mo`}
+      </span>
+    ) : null
 
   return (
     <div className="space-y-6">
@@ -267,20 +284,42 @@ export default async function DashboardPage({
             </span>
           }
         />
-        {/* The three supporting figures. `contents` from `md` up so they become direct children of
-            the grid above and take their own tracks, rather than sitting inside a nested box. */}
-        <div className="grid grid-cols-3 gap-3 md:contents">
+        {/* The three supporting figures. On a phone, rows in one card: three tiles side by side
+            left each about 76px at 390px, and the Saved tile wrapped its note over five lines and
+            broke "-$13,995" after the minus. The Saved row's note is the average when there is one,
+            else money in and out, in whole dollars to fit. */}
+        <div className="md:hidden">
+          <StatRows
+            rows={[
+              { label: 'Cash on hand', amount: cash, currency, href: '/breakdown/cash', foot: cashFoot },
+              {
+                label: `Spent in ${thisMonthLabel}`,
+                amount: spent,
+                currency,
+                href: '/breakdown/spent',
+                foot: budgetFoot(moneyWhole),
+              },
+              {
+                label: 'Saved this month',
+                amount: saved,
+                currency,
+                href: '/breakdown/saved',
+                tone: saved < 0 ? 'coral' : 'ink',
+                foot: avgLine ?? `${moneyWhole(income, currency)} in · ${moneyWhole(spent, currency)} out`,
+              },
+            ]}
+          />
+        </div>
+        {/* From `md` up, tiles. `contents` so they become direct children of the grid above and take
+            their own tracks, rather than sitting inside a nested box. */}
+        <div className="hidden md:contents">
           <StatCard
             label="Cash on hand"
             amount={cash}
             currency={currency}
             variant="compact"
             href="/breakdown/cash"
-            foot={
-              <span className="text-muted">
-                In {depCount} account{depCount === 1 ? '' : 's'}
-              </span>
-            }
+            foot={cashFoot}
           />
           <StatCard
             label={`Spent in ${thisMonthLabel}`}
@@ -288,7 +327,7 @@ export default async function DashboardPage({
             currency={currency}
             variant="compact"
             href="/breakdown/spent"
-            foot={budgetFoot}
+            foot={budgetFoot(money)}
           />
           <StatCard
             label="Saved this month"
@@ -302,17 +341,7 @@ export default async function DashboardPage({
                 <span className="text-muted">
                   {money(income, currency)} in · {money(spent, currency)} out
                 </span>
-                {/* No line when there is no figure: the tile has no room to say why, and the
-                    saved breakdown it links to does. The month count keeps a one- or two-month
-                    "average" from passing for a settled one. Coral by the rounded figure, so a few
-                    cents below zero does not read as a red "$0". */}
-                {avgSaved.kind === 'average' && (
-                  <span
-                    className={`block ${Math.round(avgSaved.average) < 0 ? 'text-coral' : 'text-muted'}`}
-                  >
-                    {`Avg ${moneyWhole(avgSaved.average, currency)}/mo · ${avgSaved.months.length} mo`}
-                  </span>
-                )}
+                {avgLine}
               </>
             }
           />
