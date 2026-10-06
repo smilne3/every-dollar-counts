@@ -9,6 +9,8 @@ import {
   cashOnHand,
   lastNMonths,
   monthlyFlows,
+  averageSaved,
+  AVERAGE_SAVED_MONTHS,
   sumManualAssets,
   type FlowTxn,
 } from '@/lib/dashboard'
@@ -20,6 +22,8 @@ import { fetchReceivable } from '@/lib/receivable'
 import { todayIn } from '@/lib/clock'
 import { householdTimezone } from '@/lib/household'
 import { readAllRows } from '@/lib/read-all'
+import { historyStartMonth } from '@/lib/history-start'
+import { monthNameLong } from '@/lib/format'
 
 const TITLES: Record<string, { title: string; subtitle: string }> = {
   'net-worth': { title: 'Net worth', subtitle: 'Everything you own, minus what you owe' },
@@ -58,6 +62,9 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
   const header = TITLES[metric]
   let rows: BreakdownRow[] = []
   let total: { label: string; amount: number; currency: string } | undefined
+  // Saved only: the average over complete months, under this month's own figures (#126).
+  // `undefined` on other metrics; `null` when there is not yet a complete month to average.
+  let average: { rows: BreakdownRow[]; total: NonNullable<typeof total>; count: number } | null | undefined
 
   if (metric === 'net-worth') {
     const g = groupAccountsByKind(accounts)
@@ -137,15 +144,18 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
 
     // The household's day, not the server's — this month key is also embedded in the outbound
     // /transactions?...&month= links below, so a wrong month here propagates (#73).
-    const months = lastNMonths(todayIn(await householdTimezone()), 6)
+    // Seven months: this one, plus the six complete months Saved's average draws on (#126). Spent
+    // reads only this month.
+    const months = lastNMonths(todayIn(await householdTimezone()), AVERAGE_SAVED_MONTHS + 1)
     const thisKey = months[months.length - 1].key
-    // Paged so the month cannot silently pass the 1,000-row cap (#69).
+    const readFrom = metric === 'saved' ? `${months[0].key}-01` : `${thisKey}-01`
+    // Paged so the window cannot silently pass the 1,000-row cap (#69).
     const { data: flowTxns, error: flowError } = await readAllRows(() =>
       supabase
         .from('transactions')
         .select('id, amount, date, user_category, pfc_primary, pfc_detailed, reimbursable_amount')
         .eq('removed', false)
-        .gte('date', `${thisKey}-01`)
+        .gte('date', readFrom)
     )
     if (flowError) throw new Error(`could not read transactions: ${flowError.message}`)
 
@@ -187,6 +197,23 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
         },
       ]
       total = { label: 'Saved this month', amount: m.income - m.spending, currency }
+
+      // The same rule as the dashboard tile, over the same flows, so the two cannot disagree.
+      const avg = averageSaved(flows, {
+        currentKey: thisKey,
+        historyStartKey: await historyStartMonth(),
+      })
+      average = avg && {
+        rows: [...avg.months].reverse().map((mo) => ({
+          key: mo.key,
+          label: monthNameLong(mo.key),
+          amount: mo.saved,
+          currency,
+          href: `/transactions?month=${mo.key}`,
+        })),
+        total: { label: 'Average per month', amount: avg.average, currency },
+        count: avg.months.length,
+      }
     }
   }
 
@@ -196,6 +223,22 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
       <Card className="p-5">
         <BreakdownList rows={rows} total={total} />
       </Card>
+      {average !== undefined && (
+        <Card className="p-5">
+          {average ? (
+            <>
+              <h2 className="mb-3 text-base font-semibold text-ink">
+                {`Average saved, last ${average.count} month${average.count === 1 ? '' : 's'}`}
+              </h2>
+              <BreakdownList rows={average.rows} total={average.total} />
+            </>
+          ) : (
+            <p className="text-sm text-muted">
+              Not enough history yet for an average. It starts after your first full month.
+            </p>
+          )}
+        </Card>
+      )}
     </div>
   )
 }

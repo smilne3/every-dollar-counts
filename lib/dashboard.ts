@@ -122,3 +122,31 @@ export function monthlyFlows(
   }
   return months.map((m) => ({ ...m, ...acc[m.key] }))
 }
+
+// How many complete months the average-savings figure covers at most (#126).
+export const AVERAGE_SAVED_MONTHS = 6
+
+// "What do we typically save in a month?" (#126), as the mean of income minus spending over the
+// last complete months. The dashboard tile and the saved breakdown both take it from here, over the
+// same monthlyFlows output, so the average always agrees with each month's own Saved figure.
+//
+// Two kinds of month are left out, because each would answer the question wrongly:
+// - the current month (`currentKey`), still in progress: its spending is in, its last paycheck may
+//   not be (#65);
+// - the month the household's history becomes complete (`historyStartKey`, from historyStartMonth
+//   in lib/history-start.ts) and everything before it: that month is partial, and earlier months are
+//   missing whole accounts, which is not the same as a $0 month. `null` means no transactions.
+//
+// Null when no month qualifies, so a new household sees no figure rather than a meaningless one.
+export function averageSaved(
+  flows: { key: string; label: string; spending: number; income: number }[],
+  { currentKey, historyStartKey }: { currentKey: string; historyStartKey: string | null }
+): { average: number; months: { key: string; label: string; saved: number }[] } | null {
+  if (!historyStartKey) return null
+  const months = flows
+    .filter((f) => f.key < currentKey && f.key > historyStartKey)
+    .slice(-AVERAGE_SAVED_MONTHS)
+    .map((f) => ({ key: f.key, label: f.label, saved: f.income - f.spending }))
+  if (!months.length) return null
+  return { average: months.reduce((sum, m) => sum + m.saved, 0) / months.length, months }
+}

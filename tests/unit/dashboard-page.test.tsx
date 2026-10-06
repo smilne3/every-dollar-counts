@@ -87,6 +87,7 @@ type StatCardProps = {
   amount: number
   variant?: 'hero' | 'compact'
   tone?: 'ink' | 'coral'
+  foot?: unknown
 }
 
 function findStatCards(node: unknown): { props: StatCardProps }[] {
@@ -158,6 +159,42 @@ beforeEach(() => {
   results.transactions = { data: [], error: null }
   results.budgets = { data: [], error: null }
   paged.transactions = null
+})
+
+describe('Dashboard average savings (#126)', () => {
+  // REPORTED is 2026-09-03, so September is in progress. History starts 2026-02-15, so February is
+  // partial. March to August qualify: March saves $8,000 and the other five $2,000 each, so the
+  // mean is $3,000. Without March (a window one month short) it would read $2,000.
+  const month = (m: string, income: number, spend: number) => [
+    { id: `${m}-in`, amount: -income, date: `2026-${m}-10`, user_category: null, pfc_primary: 'INCOME', pfc_detailed: null, reimbursable_amount: null },
+    { id: `${m}-out`, amount: spend, date: `2026-${m}-12`, user_category: null, pfc_primary: 'FOOD_AND_DRINK', pfc_detailed: null, reimbursable_amount: null },
+  ]
+  const income = { data: [{ id: 'c1', name: 'Income', pfc_primary: 'INCOME', sort_order: 0 }], error: null }
+  const savedFoot = async () =>
+    textOf(findStatCards(await render()).find((c) => c.props.label === 'Saved this month')!.props.foot)
+
+  it('shows the mean saving over the complete months on the Saved tile', async () => {
+    results.categories = income
+    results.transactions = {
+      // The stub ignores ordering, so the earliest row goes first, where an ascending read puts it.
+      data: [
+        ...month('02', 500, 4000).map((t) => ({ ...t, date: t.date.replace('-10', '-15').replace('-12', '-16') })),
+        ...month('03', 9000, 1000),
+        ...['04', '05', '06', '07', '08'].flatMap((m) => month(m, 3000, 1000)),
+        ...month('09', 0, 5000),
+      ],
+      error: null,
+    }
+    expect(await savedFoot()).toContain('Avg $3,000/mo')
+  })
+
+  // The in-progress month and the partial first month would each drag the figure down; with them
+  // in, this fixture averages well under $2,000.
+  it('is absent when no complete month follows the first one', async () => {
+    results.categories = income
+    results.transactions = { data: [...month('08', 3000, 1000), ...month('09', 3000, 1000)], error: null }
+    expect(await savedFoot()).not.toContain('Avg')
+  })
 })
 
 describe('Dashboard reads', () => {

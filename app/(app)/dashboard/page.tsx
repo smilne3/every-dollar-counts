@@ -8,7 +8,7 @@ import { RecentActivity } from '@/components/RecentActivity'
 import { Card } from '@/components/ui/Card'
 import { StatCard } from '@/components/ui/StatCard'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { money, longDate, monthNameLong } from '@/lib/format'
+import { money, moneyWhole, longDate, monthNameLong } from '@/lib/format'
 import { effectiveCategory } from '@/lib/effective-category'
 import { pfcToName, type Category } from '@/lib/categories'
 import { presentTransaction } from '@/lib/transaction-presentation'
@@ -17,6 +17,8 @@ import {
   cashOnHand,
   lastNMonths,
   monthlyFlows,
+  averageSaved,
+  AVERAGE_SAVED_MONTHS,
   sumManualAssets,
   type FlowTxn,
 } from '@/lib/dashboard'
@@ -28,6 +30,7 @@ import { fetchReceivable } from '@/lib/receivable'
 import { todayIn, hourIn } from '@/lib/clock'
 import { householdTimezone } from '@/lib/household'
 import { readAllRows } from '@/lib/read-all'
+import { historyStartMonth } from '@/lib/history-start'
 
 function greeting(hour: number): string {
   if (hour < 12) return 'Good morning'
@@ -111,8 +114,10 @@ export default async function DashboardPage({
   const categories = (catsData ?? []) as Category[]
   const pfcMap = pfcToName(categories)
 
-  const months = lastNMonths(today, 6)
-  const sixStart = `${months[0].key}-01`
+  // Six months for the chart, plus one more so the average-savings figure has six COMPLETE months
+  // to draw on: the current month never counts toward it (#126).
+  const months = lastNMonths(today, AVERAGE_SAVED_MONTHS + 1)
+  const windowStart = `${months[0].key}-01`
 
   // The six-month window grows through each month and runs into PostgREST's 1,000-row cap near
   // month end (908 rows on 2026-10-05, set to pass 1,000 around the 20th). Paged, so the chart and
@@ -122,7 +127,7 @@ export default async function DashboardPage({
       .from('transactions')
       .select('id, amount, date, user_category, pfc_primary, pfc_detailed, reimbursable_amount')
       .eq('removed', false)
-      .gte('date', sixStart)
+      .gte('date', windowStart)
   )
   // #46: "the query failed" and "you spent nothing this month" must never render identically.
   if (flowError) throw new Error(`could not read transactions: ${flowError.message}`)
@@ -146,6 +151,11 @@ export default async function DashboardPage({
   // Derived from the same key as the number beside it. These used to be computed independently,
   // so a partial fix could have had the label and the amount naming different months.
   const thisMonthLabel = monthNameLong(months[months.length - 1].key)
+  const chartFlows = flows.slice(-6)
+  const avgSaved = averageSaved(flows, {
+    currentKey: months[months.length - 1].key,
+    historyStartKey: await historyStartMonth(),
+  })
 
   const { data: budgetRows, error: budgetsError } = await supabase
     .from('budgets')
@@ -291,9 +301,16 @@ export default async function DashboardPage({
             tone={saved < 0 ? 'coral' : 'ink'}
             href="/breakdown/saved"
             foot={
-              <span className="text-muted">
-                {money(income, currency)} in · {money(spent, currency)} out
-              </span>
+              <>
+                <span className="text-muted">
+                  {money(income, currency)} in · {money(spent, currency)} out
+                </span>
+                {avgSaved && (
+                  <span className={`block ${avgSaved.average < 0 ? 'text-coral' : 'text-muted'}`}>
+                    {`Avg ${moneyWhole(avgSaved.average, currency)}/mo`}
+                  </span>
+                )}
+              </>
             }
           />
         </div>
@@ -320,7 +337,7 @@ export default async function DashboardPage({
             <span className="text-xs text-faint">Last 6 months</span>
           </div>
           <div className="mt-3">
-            <SpendIncomeChart data={flows} />
+            <SpendIncomeChart data={chartFlows} />
           </div>
         </Card>
 
