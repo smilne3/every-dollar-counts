@@ -66,9 +66,9 @@ export function AppShell({
   return (
     <div className="min-h-screen">
       {/* Desktop sidebar */}
-      {/* The safe-area insets are 0 in a browser tab and non-zero in the installed app (#21), whose
-          viewport covers the notch and the home indicator (app/layout.tsx). An iPhone held
-          landscape is wider than md, so it is this layout that meets the notch. */}
+      {/* The viewport covers the notch and the home indicator (app/layout.tsx, #21), so the
+          safe-area insets are non-zero in the installed app and in landscape Safari. An iPhone
+          held landscape is wider than md, so it is this layout that meets the notch. */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col bg-pine pl-[env(safe-area-inset-left)] text-white md:flex">
         <div className="flex items-center gap-2.5 px-5 pb-2 pt-5">
           <BrandMark className="h-9 w-9 text-lg" />
