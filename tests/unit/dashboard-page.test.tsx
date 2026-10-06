@@ -2,8 +2,11 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 // vi.hoisted for the same reason as tests/unit/trends-page.test.tsx: the static page import below
 // is linked before this file's body runs, firing the mock factory.
-const { results, tz, presentation } = vi.hoisted(() => ({
+const { results, tz, presentation, paged } = vi.hoisted(() => ({
   results: {} as Record<string, { data: unknown; error: { message: string } | null }>,
+  // When set, `transactions` is served by a PostgREST-like stub that caps each response at 1,000
+  // rows, so the test can tell a paged read from a plain one (#69).
+  paged: { transactions: null as null | { query: () => Record<string, unknown> } },
   tz: { value: 'America/New_York' },
   presentation: { stampLabel: false },
 }))
@@ -12,16 +15,28 @@ const { results, tz, presentation } = vi.hoisted(() => ({
 // method and resolves to whatever the test configured for that table.
 const chainFor = (table: string) => {
   const chain: Record<string, unknown> = {}
-  for (const m of ['select', 'order', 'eq', 'gte', 'lte', 'limit', 'not', 'range']) chain[m] = () => chain
+  for (const m of ['select', 'order', 'eq', 'gte', 'lte', 'limit', 'not']) chain[m] = () => chain
+  // readAllRows (lib/read-all.ts) asks for the rows after its cursor with .or(); there are none
+  // past this fixture, so a continuation page is empty and the read ends.
+  let afterCursor = false
+  chain.or = () => {
+    afterCursor = true
+    return chain
+  }
   chain.single = async () => results[table] ?? { data: null, error: null }
   chain.maybeSingle = async () => results[table] ?? { data: null, error: null }
   chain.then = (resolve: (v: unknown) => unknown) =>
-    Promise.resolve(results[table] ?? { data: [], error: null }).then(resolve)
+    Promise.resolve(
+      afterCursor ? { data: [], error: null } : (results[table] ?? { data: [], error: null })
+    ).then(resolve)
   return chain
 }
 
 vi.mock('@/lib/supabase/server', () => ({
-  createClient: async () => ({ from: (table: string) => chainFor(table) }),
+  createClient: async () => ({
+    from: (table: string) =>
+      table === 'transactions' && paged.transactions ? paged.transactions.query() : chainFor(table),
+  }),
 }))
 vi.mock('@/lib/household', () => ({
   DEFAULT_TIMEZONE: 'America/New_York',
@@ -45,6 +60,7 @@ vi.mock('@/lib/plaid-items', () => ({ listItemsForHousehold: async () => [] }))
 vi.mock('@/lib/manual-assets', () => ({ listManualAssets: async () => [] }))
 vi.mock('@/lib/receivable', () => ({ fetchReceivable: async () => 0 }))
 
+import { pagedTable } from '../stubs/postgrest-pages'
 import DashboardPage from '@/app/(app)/dashboard/page'
 
 const render = () => DashboardPage({ searchParams: Promise.resolve({}) })
@@ -141,6 +157,7 @@ beforeEach(() => {
   results.categories = { data: [], error: null }
   results.transactions = { data: [], error: null }
   results.budgets = { data: [], error: null }
+  paged.transactions = null
 })
 
 describe('Dashboard reads', () => {
@@ -151,6 +168,33 @@ describe('Dashboard reads', () => {
   it('fails loudly when the categories read fails, rather than counting income as spending', async () => {
     results.categories = { data: null, error: { message: 'permission denied' } }
     await expect(render()).rejects.toThrow(/could not read categories: permission denied/)
+  })
+
+  // #69: the six-month window passes PostgREST's 1,000-row cap near each month end. A plain read
+  // against this stub gets the first 1,000 of these 1,050 one-dollar purchases, so "Spent" would
+  // read $1,000.
+  it('counts every transaction in the window, past the 1,000-row cap', async () => {
+    paged.transactions = pagedTable(
+      Array.from({ length: 1050 }, (_, i) => ({
+        id: `t${String(i).padStart(5, '0')}`,
+        date: `2026-09-0${1 + (i % 3)}`,
+        amount: 1,
+        user_category: null,
+        pfc_primary: 'FOOD_AND_DRINK',
+        pfc_detailed: null,
+        reimbursable_amount: null,
+      }))
+    )
+    const spent = findStatCards(await render()).find((c) => c.props.label.startsWith('Spent in'))
+    expect(spent!.props.amount).toBeCloseTo(1050, 2)
+  })
+
+  it('fails loudly when a later page of the transactions read fails', async () => {
+    paged.transactions = pagedTable(
+      Array.from({ length: 1050 }, (_, i) => ({ id: `t${String(i).padStart(5, '0')}`, date: '2026-09-01' })),
+      { failOnRequest: 2 }
+    )
+    await expect(render()).rejects.toThrow(/could not read transactions: boom/)
   })
 
   it('fails loudly when the transactions read fails, rather than reporting a spotless month', async () => {

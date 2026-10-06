@@ -34,7 +34,7 @@ export default async function BudgetsPage() {
   const categories = (cats ?? []) as Category[]
   const categoryNames = spendingCategoryNames(categories)
 
-  // One month is far under the 1,000-row cap today, but paging means it cannot cross it unseen (#69).
+  // Paged, so the month cannot silently pass the 1,000-row cap (#69).
   const { data: txns, error: txnsError } = await readAllRows(() =>
     supabase
       .from('transactions')

@@ -1,100 +1,89 @@
 import { describe, it, expect } from 'vitest'
-import { readAllRows, PAGE_SIZE } from '@/lib/read-all'
+import { readAllRows, type PageableQuery } from '@/lib/read-all'
+import { pagedTable, txnRows } from '../stubs/postgrest-pages'
 
-// #69: PostgREST returns at most 1,000 rows per request, with a 200 and no error. A read that
-// asks for more gets the first 1,000 and renders them as though they were all of it. On
-// 2026-10-05 the Settings read returned 1,000 of 1,366 transactions, and the dashboard's
-// six-month window held 908 and was set to cross within weeks.
+// #69: PostgREST returns at most its max-rows per request (1,000 here), with a 200 and no error,
+// so a read that matches more renders the first page as though it were all of it.
 
-type Row = { id: string; date: string }
-const rows = (n: number, start = 0): Row[] =>
-  Array.from({ length: n }, (_, i) => ({ id: `t${start + i}`, date: '2026-10-01' }))
-
-// A stand-in for a Supabase query: records what it was asked for and answers one page from
-// `table`, the way PostgREST would (capped at PAGE_SIZE whatever range is requested).
-function fakeTable(table: Row[], opts: { failOnPage?: number; shiftAfterPage?: number } = {}) {
-  const calls: { orders: string[]; from: number; to: number }[] = []
-  let current = table
-  const build = () => {
-    const call = { orders: [] as string[], from: -1, to: -1 }
-    const q = {
-      order(col: string) {
-        call.orders.push(col)
-        return q
-      },
-      range(from: number, to: number) {
-        call.from = from
-        call.to = to
-        return q
-      },
-      then(resolve: (v: unknown) => unknown) {
-        calls.push(call)
-        const page = calls.length
-        if (opts.failOnPage === page) {
-          return Promise.resolve({ data: null, error: { message: 'boom' } }).then(resolve)
-        }
-        const data = current.slice(call.from, Math.min(call.to + 1, call.from + PAGE_SIZE))
-        // A sync landing mid-read inserts a row ahead of the cursor, shifting later pages by one.
-        if (opts.shiftAfterPage === page) current = [{ id: 'new', date: '2026-10-01' }, ...current]
-        return Promise.resolve({ data, error: null }).then(resolve)
-      },
-    }
-    return q
-  }
-  // The fake implements only what readAllRows calls; the cast stands in for Supabase's full
-  // builder type.
-  return { build: build as unknown as Parameters<typeof readAllRows<Row>>[0], calls }
-}
+type Row = ReturnType<typeof txnRows>[number]
+// The stub implements only what a paged read calls; the cast stands in for Supabase's builder type.
+const read = (t: ReturnType<typeof pagedTable>) =>
+  readAllRows(() => t.query() as unknown as PageableQuery<Row>)
 
 describe('readAllRows', () => {
-  it('reads past the 1,000-row cap until a short page', async () => {
-    const t = fakeTable(rows(2366))
-    const { data, error } = await readAllRows<Row>(t.build)
+  it('reads past the cap, continuing after the last row each time', async () => {
+    const t = pagedTable(txnRows(2366))
+    const { data, error } = await read(t)
     expect(error).toBeNull()
     expect(data).toHaveLength(2366)
-    expect(t.calls.map((c) => [c.from, c.to])).toEqual([
-      [0, 999],
-      [1000, 1999],
-      [2000, 2999],
+    // Three full-or-partial pages, then the empty page that proves the end.
+    expect(t.requests.map((r) => r.after)).toEqual([
+      null,
+      `${txnRows(2366)[999].date}/t00999`,
+      `${txnRows(2366)[1999].date}/t01999`,
+      `${txnRows(2366)[2365].date}/t02365`,
     ])
   })
 
-  it('stops cleanly when the total is an exact multiple of the page size', async () => {
-    const t = fakeTable(rows(1000))
-    const { data } = await readAllRows<Row>(t.build)
+  // The server's max-rows is a Supabase setting, not in this repo. If it were ever below the page
+  // size, a "stop on a short page" rule would end the read after the first page and call it done.
+  it('does not depend on the server cap matching the page size', async () => {
+    const t = pagedTable(txnRows(1366), { serverCap: 500 })
+    const { data, error } = await read(t)
+    expect(error).toBeNull()
+    expect(data).toHaveLength(1366)
+  })
+
+  it('stops cleanly when the total is an exact multiple of the cap', async () => {
+    const t = pagedTable(txnRows(1000))
+    const { data } = await read(t)
     expect(data).toHaveLength(1000)
-    expect(t.calls).toHaveLength(2)
+    expect(t.requests).toHaveLength(2)
   })
 
-  it('reads a small result in one request', async () => {
-    const t = fakeTable(rows(12))
-    const { data } = await readAllRows<Row>(t.build)
+  it('reads a small result, confirming the end with one empty page', async () => {
+    const t = pagedTable(txnRows(12))
+    const { data } = await read(t)
     expect(data).toHaveLength(12)
-    expect(t.calls).toHaveLength(1)
+    expect(t.requests).toHaveLength(2)
   })
 
-  // Paging is only meaningful over a total order. `date` alone ties constantly (#50), and tied rows
-  // may come back in any order, so pages could overlap or skip rows. `id` breaks the ties.
-  it('orders every page by date then id', async () => {
-    const t = fakeTable(rows(1500))
-    await readAllRows<Row>(t.build)
-    for (const c of t.calls) expect(c.orders).toEqual(['date', 'id'])
+  it('returns rows in date-then-id order', async () => {
+    const t = pagedTable(txnRows(1500).reverse())
+    const { data } = await read(t)
+    expect(data!.map((r) => r.id)).toEqual(txnRows(1500).map((r) => r.id))
   })
 
   // #46: a failed read must never render as a plausible number. Returning page 1 when page 2
   // failed is exactly the silent truncation this exists to stop.
   it('fails the whole read if any page fails, rather than returning part of it', async () => {
-    const t = fakeTable(rows(2366), { failOnPage: 2 })
-    const { data, error } = await readAllRows<Row>(t.build)
+    const t = pagedTable(txnRows(2366), { failOnRequest: 2 })
+    const { data, error } = await read(t)
     expect(data).toBeNull()
     expect(error).toEqual({ message: 'boom' })
   })
 
-  it('counts a row once when a concurrent insert shifts it onto the next page', async () => {
-    const t = fakeTable(rows(1500), { shiftAfterPage: 1 })
-    const { data } = await readAllRows<Row>(t.build)
-    const ids = data!.map((r) => r.id)
-    expect(new Set(ids).size).toBe(ids.length)
-    expect(ids).toContain('t999')
+  // postgrest-js reports a 200 (or 404) with an empty body as no data and no error. Read as an
+  // empty page, that would end the read early and call it complete.
+  it('treats a response with neither data nor error as a failure', async () => {
+    const t = pagedTable(txnRows(2366), { emptyBodyOnRequest: 2 })
+    const { data, error } = await read(t)
+    expect(data).toBeNull()
+    expect(error?.message).toMatch(/no data and no error/)
+  })
+
+  // A query that ignores the cursor (a broken stub, or a caller that bounded the query itself)
+  // would otherwise be read forever. It has to fail, not hang and not pass.
+  it('fails if a page does not move past the rows already read', async () => {
+    const stuck = () => {
+      const q: Record<string, unknown> = {}
+      for (const m of ['order', 'or', 'limit']) q[m] = () => q
+      q.then = (resolve: (v: unknown) => unknown) =>
+        Promise.resolve({ data: txnRows(3), error: null }).then(resolve)
+      return q
+    }
+    const { data, error } = await readAllRows(stuck as never)
+    expect(data).toBeNull()
+    expect(error?.message).toMatch(/did not advance/)
   })
 })

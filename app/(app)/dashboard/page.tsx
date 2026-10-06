@@ -114,8 +114,9 @@ export default async function DashboardPage({
   const months = lastNMonths(today, 6)
   const sixStart = `${months[0].key}-01`
 
-  // Six months of history passes PostgREST's 1,000-row cap (908 rows on 2026-10-05), so this pages
-  // rather than silently dropping transactions from the chart and the tiles (#69).
+  // The six-month window grows through each month and runs into PostgREST's 1,000-row cap near
+  // month end (908 rows on 2026-10-05, set to pass 1,000 around the 20th). Paged, so the chart and
+  // the tiles never silently drop transactions (#69).
   const { data: flowTxns, error: flowError } = await readAllRows(() =>
     supabase
       .from('transactions')

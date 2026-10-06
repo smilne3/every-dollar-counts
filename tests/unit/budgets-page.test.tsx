@@ -8,7 +8,9 @@ const { calls, tz } = vi.hoisted(() => ({
 // Record the date bounds the page asks the database for — that is the whole behaviour under test.
 const chainFor = () => {
   const chain: Record<string, unknown> = {}
-  for (const m of ['select', 'order', 'eq', 'range']) chain[m] = () => chain
+  for (const m of ['select', 'order', 'eq', 'limit']) chain[m] = () => chain
+  // readAllRows (lib/read-all.ts) pages with .or(); this stub has no rows, so one page ends it.
+  chain.or = () => chain
   chain.gte = (_col: string, v: string) => {
     calls.gte.push(v)
     return chain

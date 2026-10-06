@@ -35,7 +35,7 @@ export default async function TrendsPage() {
   if (catsError) throw new Error(`could not read categories: ${catsError.message}`)
   const categories = (cats ?? []) as Category[]
 
-  // Bounded at both ends. `previous.from` is the earliest date either card reads; the upper bound
+  // Date-bounded at both ends. `previous.from` is the earliest date either card reads; the upper bound
   // is what stops a row dated beyond the window being fetched at all. `inRange` is what actually
   // enforces the windows — this only keeps the query from carrying rows nothing will use.
   // Paged, so a long window cannot silently pass the 1,000-row cap (#69).
