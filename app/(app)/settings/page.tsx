@@ -13,6 +13,7 @@ import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { effectiveCategory } from '@/lib/effective-category'
 import { pfcToName, type Category } from '@/lib/categories'
+import { readAllRows } from '@/lib/read-all'
 
 export default async function SettingsPage() {
   const supabase = await createClient()
@@ -40,10 +41,19 @@ export default async function SettingsPage() {
   // Counts by EFFECTIVE category: auto-mapped transactions fall back to Uncategorized once
   // the category row is gone, exactly like user-overridden ones.
   const pfcMap = pfcToName((categories ?? []) as Category[])
-  const [{ data: catTxns }, { data: budgetRows }] = await Promise.all([
-    supabase.from('transactions').select('user_category, pfc_primary').eq('removed', false),
+  // Every transaction the household has, so this passed PostgREST's 1,000-row cap long ago and the
+  // delete warning undercounted (#69); it pages. A failed read throws rather than showing every
+  // category as unused. The budgets read beside it still does not check `error` (#91).
+  const [{ data: catTxns, error: catTxnsError }, { data: budgetRows }] = await Promise.all([
+    readAllRows(() =>
+      supabase
+        .from('transactions')
+        .select('id, date, user_category, pfc_primary')
+        .eq('removed', false)
+    ),
     supabase.from('budgets').select('category'),
   ])
+  if (catTxnsError) throw new Error(`could not read transactions: ${catTxnsError.message}`)
   const budgeted = new Set((budgetRows ?? []).map((b) => b.category as string))
   const usage: CategoryUsage = {}
   for (const c of categories ?? []) {

@@ -13,13 +13,17 @@ import { owedToYou, type ReimbursableTxn } from '@/lib/reimbursements'
 export async function fetchReceivable(): Promise<number> {
   const supabase = await createClient()
 
-  // Bounded by the partial index: only marked rows exist in it, and a household has few. `removed`
+  // Small because only marked rows match, and a household has few; the partial index makes that
+  // cheap but does not cap the result. `removed`
   // is a soft flag (a Plaid repost), not a delete, so its rows never disappear on their own — a
   // removed transaction's mark must not keep counting as money owed.
   // Same `.order('date', ...)` as app/(app)/reimbursements/page.tsx's query. Neither query bounds
   // rows by date — that would corrupt the FIFO allocation in unreimbursedExpenses — so both are
   // subject to PostgREST's 1000-row cap. Without a matching order, the two queries could truncate to
   // DIFFERENT 1000 rows past that cap and this dashboard total would disagree with the page's own.
+  // The matching order keeps the two agreeing; it does not stop the truncation itself.
+  // scripts/check-invariants.mjs allows this read by name while marked rows stay far under the cap
+  // (#69); past that, both reads move to readAllRows together.
   const { data, error } = await supabase
     .from('transactions')
     .select('id, amount, reimbursable_amount')

@@ -19,6 +19,7 @@ import { buildSpendContext } from '@/lib/spend-context'
 import { fetchReceivable } from '@/lib/receivable'
 import { todayIn } from '@/lib/clock'
 import { householdTimezone } from '@/lib/household'
+import { readAllRows } from '@/lib/read-all'
 
 const TITLES: Record<string, { title: string; subtitle: string }> = {
   'net-worth': { title: 'Net worth', subtitle: 'Everything you own, minus what you owe' },
@@ -138,11 +139,14 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
     // /transactions?...&month= links below, so a wrong month here propagates (#73).
     const months = lastNMonths(todayIn(await householdTimezone()), 6)
     const thisKey = months[months.length - 1].key
-    const { data: flowTxns, error: flowError } = await supabase
-      .from('transactions')
-      .select('id, amount, date, user_category, pfc_primary, pfc_detailed, reimbursable_amount')
-      .eq('removed', false)
-      .gte('date', `${thisKey}-01`)
+    // Paged so the month cannot silently pass the 1,000-row cap (#69).
+    const { data: flowTxns, error: flowError } = await readAllRows(() =>
+      supabase
+        .from('transactions')
+        .select('id, amount, date, user_category, pfc_primary, pfc_detailed, reimbursable_amount')
+        .eq('removed', false)
+        .gte('date', `${thisKey}-01`)
+    )
     if (flowError) throw new Error(`could not read transactions: ${flowError.message}`)
 
     // The reimbursable map is built straight from this page's own transaction rows — see

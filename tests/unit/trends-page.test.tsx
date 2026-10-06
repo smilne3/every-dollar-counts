@@ -14,6 +14,13 @@ const { results, calls } = vi.hoisted(() => ({
 const chainFor = (table: string) => {
   const chain: Record<string, unknown> = {}
   for (const method of ['select', 'order', 'eq', 'limit']) chain[method] = () => chain
+  // readAllRows (lib/read-all.ts) asks for the rows after its cursor with .or(); there are none
+  // past this fixture, so a continuation page is empty and the read ends.
+  let afterCursor = false
+  chain.or = () => {
+    afterCursor = true
+    return chain
+  }
   chain.gte = (_col: string, v: string) => {
     calls.gte.push(v)
     return chain
@@ -24,7 +31,9 @@ const chainFor = (table: string) => {
   }
   chain.maybeSingle = async () => results[table] ?? { data: null, error: null }
   chain.then = (resolve: (v: unknown) => unknown) =>
-    Promise.resolve(results[table] ?? { data: [], error: null }).then(resolve)
+    Promise.resolve(
+      afterCursor ? { data: [], error: null } : (results[table] ?? { data: [], error: null })
+    ).then(resolve)
   return chain
 }
 

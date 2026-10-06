@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { buttonClass } from '@/components/ui/Button'
 import { todayIn } from '@/lib/clock'
 import { householdTimezone } from '@/lib/household'
+import { readAllRows } from '@/lib/read-all'
 
 export default async function BudgetsPage() {
   const supabase = await createClient()
@@ -33,12 +34,15 @@ export default async function BudgetsPage() {
   const categories = (cats ?? []) as Category[]
   const categoryNames = spendingCategoryNames(categories)
 
-  const { data: txns, error: txnsError } = await supabase
-    .from('transactions')
-    .select('id, amount, date, user_category, pfc_primary, pfc_detailed, reimbursable_amount')
-    .eq('removed', false)
-    .gte('date', monthStart)
-    .lt('date', nextMonthStart)
+  // Paged, so the month cannot silently pass the 1,000-row cap (#69).
+  const { data: txns, error: txnsError } = await readAllRows(() =>
+    supabase
+      .from('transactions')
+      .select('id, amount, date, user_category, pfc_primary, pfc_detailed, reimbursable_amount')
+      .eq('removed', false)
+      .gte('date', monthStart)
+      .lt('date', nextMonthStart)
+  )
   // Every bar would read empty — indistinguishable from a month where nothing was spent (#46).
   if (txnsError) throw new Error(`could not read transactions: ${txnsError.message}`)
 
