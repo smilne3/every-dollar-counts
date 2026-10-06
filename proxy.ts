@@ -53,6 +53,12 @@ export async function proxy(request: NextRequest) {
   return res
 }
 
+// The installable-app assets (#21) are skipped entirely, by name. Browsers fetch the manifest
+// without credentials, so behind the login gate "Add to Home Screen" would receive a 307 to /login
+// instead of a manifest and fail to install, even for a signed-in user. Named rather than every
+// `.png`, and anchored at the root, so the exemption cannot quietly widen.
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|.*\\.svg$).*)'],
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico|manifest\\.webmanifest$|(?:icon|apple-icon|apple-touch-icon)(?:-[\\w-]+)?\\.png$|.*\\.svg$).*)',
+  ],
 }

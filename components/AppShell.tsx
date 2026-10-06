@@ -66,7 +66,10 @@ export function AppShell({
   return (
     <div className="min-h-screen">
       {/* Desktop sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col bg-pine text-white md:flex">
+      {/* The viewport covers the notch and the home indicator (app/layout.tsx, #21), so the
+          safe-area insets are non-zero in the installed app and in landscape Safari. An iPhone
+          held landscape is wider than md, so it is this layout that meets the notch. */}
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col bg-pine pl-[env(safe-area-inset-left)] text-white md:flex">
         <div className="flex items-center gap-2.5 px-5 pb-2 pt-5">
           <BrandMark className="h-9 w-9 text-lg" />
           <span className="text-sm font-semibold leading-tight text-white">
@@ -96,7 +99,7 @@ export function AppShell({
           })}
         </nav>
 
-        <div className="border-t border-white/10 p-3">
+        <div className="border-t border-white/10 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           <div className="flex items-center gap-2.5 px-2 py-1.5">
             <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-emerald/90 text-xs font-semibold text-white">
               {initials(householdName)}
@@ -124,7 +127,8 @@ export function AppShell({
 
       {/* Main content */}
       <div className="md:pl-64">
-        <main className="mx-auto max-w-6xl px-4 py-6 pb-24 md:px-8 md:py-8 md:pb-10">{children}</main>
+        {/* The tab bar below grows by the home indicator's height, so the page's clearance does too. */}
+        <main className="mx-auto max-w-6xl px-4 py-6 pb-[calc(6rem+env(safe-area-inset-bottom))] md:px-8 md:py-8 md:pb-10 md:pr-[max(2rem,env(safe-area-inset-right))]">{children}</main>
       </div>
 
       {/* Mobile bottom tab bar */}
