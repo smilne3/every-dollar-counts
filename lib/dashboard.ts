@@ -4,6 +4,7 @@ import { monthKey } from './budget'
 import { spendableAmount } from './reimbursements'
 import type { SpendContext } from './spend-context'
 import { MONTH_LABELS } from './format'
+import type { HistoryStart } from './history-start'
 
 export type FlowTxn = {
   id: string
@@ -121,4 +122,68 @@ export function monthlyFlows(
     }
   }
   return months.map((m) => ({ ...m, ...acc[m.key] }))
+}
+
+// How many complete months the average-savings figure covers at most (#126).
+export const AVERAGE_SAVED_MONTHS = 6
+
+// "What do we typically save in a month?" (#126), as the mean of income minus spending over the
+// last complete months. Each month is computed from monthlyFlows exactly as that month's own Saved
+// figure is, so the average introduces no money rules of its own.
+//
+// Two kinds of month are left out, because each would answer the question wrongly:
+// - the current month (`currentKey`), still in progress: its spending is in, its last paycheck may
+//   not be (#65);
+// - the month the last bank's history begins (`historyStartKey`, from historyStart in
+//   lib/history-start.ts) and everything before it: that month is partial, and earlier months are
+//   missing a whole bank, which is not the same as a $0 month.
+//
+// `historyStartKey` is null when there is no history; the result is then null too.
+//
+// Null when no month qualifies, so a new household sees no figure rather than a meaningless one.
+export function averageSaved(
+  flows: { key: string; label: string; spending: number; income: number }[],
+  { currentKey, historyStartKey }: { currentKey: string; historyStartKey: string | null }
+): { average: number; months: { key: string; label: string; saved: number }[] } | null {
+  if (!historyStartKey) return null
+  const months = flows
+    .filter((f) => f.key < currentKey && f.key > historyStartKey)
+    .slice(-AVERAGE_SAVED_MONTHS)
+    .map((f) => ({ key: f.key, label: f.label, saved: f.income - f.spending }))
+  if (!months.length) return null
+  return { average: months.reduce((sum, m) => sum + m.saved, 0) / months.length, months }
+}
+
+export type SavedAverage =
+  | { kind: 'average'; average: number; months: { key: string; label: string; saved: number }[] }
+  | { kind: 'unavailable'; reason: string }
+
+// The average, or why there is none, from the history state. The dashboard tile and the saved
+// breakdown both come through here, so they cannot disagree about the figure or word its absence
+// differently. Each reason is a different situation, and says so: a household waiting on one bank
+// is not a household with no history.
+export function savedAverage(
+  flows: { key: string; label: string; spending: number; income: number }[],
+  currentKey: string,
+  start: HistoryStart
+): SavedAverage {
+  if (start.kind === 'none') {
+    return { kind: 'unavailable', reason: 'No transactions yet, so there is no average.' }
+  }
+  if (start.kind === 'pending') {
+    return {
+      kind: 'unavailable',
+      reason: `The average is waiting for ${start.bank}'s transaction history to arrive.`,
+    }
+  }
+  const avg = averageSaved(flows, { currentKey, historyStartKey: start.month })
+  if (!avg) {
+    return {
+      kind: 'unavailable',
+      reason:
+        'Not enough history yet for an average. It starts after the first full month in which ' +
+        'every bank has history.',
+    }
+  }
+  return { kind: 'average', ...avg }
 }
