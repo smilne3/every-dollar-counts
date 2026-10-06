@@ -14,15 +14,18 @@ export type StatRow = {
 }
 
 // The dashboard's supporting figures on a phone: one card, a row per figure, each row a link into
-// its breakdown. It replaced three StatCard tiles side by side, which left each figure about 76px at
-// 390px: the Saved tile wrapped its note over five lines and broke "-$13,995" after the minus on
-// the owner's iPhone (2026-10-06). A row gives the label and note the left of the full width and the
-// figure the right, so neither has to give way. From `md` up the tiles have the room and return.
+// its breakdown. It replaced three StatCard tiles side by side (spec §4, superseded there), which
+// left each figure about 70px of text width at 390px: the Saved tile wrapped its note over five
+// lines and broke "-$13,995" after the minus. iOS renders text wider than Chromium, so a local
+// render at the same width did not show the break. A row gives the label and note the left of the
+// card's width and the figure the right: the figure never wraps or shrinks, and the note has far
+// more room than a tile gave it (it can still wrap at the narrowest widths). The dashboard shows
+// this only below `md`; from `md` up it uses StatCard tiles.
 //
-// Figures are whole dollars, as the compact tiles were below `md` (spec §4), and never wrap.
+// Figures are whole dollars, the rounding rule from spec §4.
 export function StatRows({ rows }: { rows: StatRow[] }) {
   return (
-    <Card className="divide-y divide-line">
+    <Card className="divide-y divide-line overflow-hidden">
       {rows.map(({ label, amount, currency = 'USD', href, tone = 'ink', foot }) => (
         <Link
           key={href}

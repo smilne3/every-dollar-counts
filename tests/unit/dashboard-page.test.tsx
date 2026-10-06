@@ -310,6 +310,34 @@ describe('Dashboard average savings (#126)', () => {
     expect(textOf((await phoneRows()).rows[1].foot)).toContain('$14,289 of $15,000 budgeted')
   })
 
+  // The tiles show exact cents from md up. budgetFoot takes its formatter, so handing the tile the
+  // phone's whole-dollar one is an easy slip; this is the test that catches it.
+  it('keeps the Spent and Saved tile notes exact', async () => {
+    results.categories = { data: [{ id: 'c2', name: 'Food & Drink', pfc_primary: 'FOOD_AND_DRINK', sort_order: 1 }], error: null }
+    results.budgets = { data: [{ category: 'Food & Drink', monthly_limit: 15000 }], error: null }
+    results.transactions = { data: month('09', 0, 14289.44), error: null }
+    const tiles = findStatCards(await render())
+    expect(textOf(tiles.find((t) => t.props.label.startsWith('Spent'))!.props.foot)).toContain(
+      '$14,289.44 of $15,000.00 budgeted'
+    )
+    expect(textOf(tiles.find((t) => t.props.label === 'Saved this month')!.props.foot).replace(/\s+/g, ' ')).toContain(
+      '$0.00 in · $14,289.44 out'
+    )
+  })
+
+  it('gives the Cash row its account count', async () => {
+    expect(textOf((await phoneRows()).rows[0].foot).replace(/\s+/g, ' ')).toContain('In 1 account')
+  })
+
+  // Breaking even is not a loss: a $0 month stays ink.
+  it('does not colour a break-even month coral', async () => {
+    results.categories = income
+    results.transactions = { data: month('09', 5000, 5000), error: null }
+    const saved = (await phoneRows()).rows[2]
+    expect(saved.amount).toBe(0)
+    expect(saved.tone).toBe('ink')
+  })
+
   it('colours the Saved row coral when the month lost money', async () => {
     results.categories = income
     results.transactions = fixture()
@@ -318,7 +346,8 @@ describe('Dashboard average savings (#126)', () => {
     expect(saved.tone).toBe('coral')
   })
 
-  // The tiles are the md-and-up layout; on a phone they must not render beside the rows.
+  // The tiles are the md-and-up layout and the rows the phone layout; CSS picks, so both wrappers
+  // must carry their breakpoint class.
   it('hides the tiles below md and the rows from md up', async () => {
     const classes = classNamesOf(await render())
     expect(classes).toContain('hidden md:contents')

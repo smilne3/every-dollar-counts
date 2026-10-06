@@ -27,7 +27,8 @@ export function StatCard({
   currency?: string
   // `hero`: always exact, and the largest type below `md` — for the figure that must never be
   // abbreviated. The width it needs comes from how the caller lays the tile out, not from here.
-  // `compact`: rounded below `md` where the width is not there, exact from `md` up.
+  // `compact`: rounded below `md` where the width is not there, exact from `md` up. (No caller shows
+  // a compact tile below `md` today: the dashboard uses StatRows there; see #137.)
   variant?: 'hero' | 'compact'
   tone?: 'ink' | 'coral'
   foot?: ReactNode

@@ -215,8 +215,8 @@ export default async function DashboardPage({
       In {depCount} account{depCount === 1 ? '' : 's'}
     </span>
   )
-  // No average line when there is no figure: there is no room to say why, and the saved breakdown
-  // it links to does. The month count keeps a one- or two-month "average" from passing for a
+  // No average line when there is no figure (the phone row shows money in and out instead):
+  // neither layout has room to say why, and the saved breakdown it links to does. The month count keeps a one- or two-month "average" from passing for a
   // settled one. Coral by the rounded figure, so a few cents below zero does not read as a red "$0".
   const avgLine =
     avgSaved.kind === 'average' ? (
@@ -267,10 +267,10 @@ export default async function DashboardPage({
         }
       />
 
-      {/* Net worth leads (§4). Below `md` it is a full-width hero and the other three share one
-          row; from `md` up this is the grid it has always been — two-across at `md`, four at `lg`.
-          Two containers rather than one grid, because the hero and the row have different track
-          counts and a single grid would need a col-span that applies at exactly one breakpoint. */}
+      {/* Net worth leads (§4). Below `md` it is a full-width hero with the other three as rows in
+          one card beneath it (StatRows); from `md` up this is the grid it has always been —
+          two-across at `md`, four at `lg`. The hero sits outside the rows because only from `md` up
+          do they share one grid. */}
       <div className="space-y-4 md:grid md:grid-cols-2 md:gap-4 md:space-y-0 lg:grid-cols-4">
         <StatCard
           label="Net worth"
@@ -284,10 +284,10 @@ export default async function DashboardPage({
             </span>
           }
         />
-        {/* The three supporting figures. On a phone, rows in one card: three tiles side by side
-            left each about 76px at 390px, and the Saved tile wrapped its note over five lines and
-            broke "-$13,995" after the minus. The Saved row's note is the average when there is one,
-            else money in and out, in whole dollars to fit. */}
+        {/* The three supporting figures. On a phone, rows in one card: three tiles across were too
+            narrow (see components/ui/StatRows.tsx). The Saved row has room for one note: the
+            average when there is one, which drops money in and out, otherwise money in and out in
+            whole dollars. */}
         <div className="md:hidden">
           <StatRows
             rows={[
