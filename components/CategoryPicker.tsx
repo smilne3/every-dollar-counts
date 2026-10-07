@@ -91,12 +91,13 @@ export function CategoryPicker({
 
   // One wrapper for the select and its alert. Below md it is a full-width column, because the phone
   // sheet (TransactionCard.tsx) gives the picker the full width and has room for an alert beneath.
-  // From md up it is one line, alert truncated beside the select, so an error never adds a line to a
-  // desktop row (#50). `md:max-w-full` caps the wrapper at its cell, so in the transactions page's
-  // table-fixed layout the alert clips with an ellipsis instead of spilling over the Amount column.
+  // From md up an error must never grow or shift the desktop row (#50), and a message squeezed beside
+  // the select into a ~128px cell cannot be read. So the alert floats below the select, positioned
+  // against the `md:relative` wrapper: it takes no layout space, keeping the row's height, and gets
+  // up to 16rem to wrap in. `md:max-w-full md:flex-nowrap` keep the select itself inside its cell.
   // The select's own `w-full md:w-auto` (selectClass) still sets its width.
   return (
-    <span className="flex w-full min-w-0 flex-col gap-1 md:inline-flex md:w-auto md:max-w-full md:flex-row md:flex-nowrap md:items-center md:gap-1.5">
+    <span className="flex w-full min-w-0 flex-col gap-1 md:relative md:inline-flex md:w-auto md:max-w-full md:flex-row md:flex-nowrap md:items-center md:gap-1.5">
       <select
         value={val}
         onChange={change}
@@ -111,7 +112,7 @@ export function CategoryPicker({
         ))}
       </select>
       {error && (
-        <span role="alert" className="text-xs text-coral md:min-w-0 md:truncate">
+        <span role="alert" className="text-xs text-coral md:absolute md:left-0 md:top-full md:z-10 md:mt-1 md:w-max md:max-w-64 md:whitespace-normal md:rounded-md md:border md:border-line md:bg-surface md:px-2 md:py-1 md:shadow-sm">
           {error}
         </span>
       )}

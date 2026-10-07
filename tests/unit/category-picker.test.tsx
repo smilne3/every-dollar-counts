@@ -239,10 +239,11 @@ describe('CategoryPicker', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
-  // #50: on the desktop row an error must not add a line. On a phone the sheet has room, and the
-  // picker must stay full width. `md:max-w-full` keeps the wrapper inside its table-fixed cell, so a
-  // long alert clips instead of spilling over the Amount column. jsdom does no layout, so these class
-  // names are the only evidence available here; the overflow itself was seen in Chromium.
+  // #50: on the desktop row an error must not add a line or shift the row. On a phone the sheet has
+  // room, and the picker must stay full width. From md the alert floats below the select (absolute,
+  // against the `md:relative` wrapper) rather than being truncated beside it, where a ~128px cell
+  // left it no room to be read. jsdom does no layout, so these class names are the only evidence
+  // available here; the layout itself was measured in Chromium.
   it('keeps select and alert in one wrapper: a column on phones, one line from md', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, redirected: false, json: async () => ({ error: 'No.' }) }))
     render(<CategoryPicker {...props} />)
@@ -250,10 +251,13 @@ describe('CategoryPicker', () => {
     const alert = await screen.findByRole('alert')
     const wrapper = select().parentElement!
     expect(alert.parentElement).toBe(wrapper)
-    for (const c of ['flex', 'w-full', 'flex-col', 'md:inline-flex', 'md:w-auto', 'md:max-w-full', 'md:flex-row', 'md:flex-nowrap']) {
+    for (const c of ['flex', 'w-full', 'flex-col', 'md:relative', 'md:inline-flex', 'md:w-auto', 'md:max-w-full', 'md:flex-row', 'md:flex-nowrap']) {
       expect(wrapper.className.split(/\s+/)).toContain(c)
     }
-    expect(alert.className).toContain('md:truncate')
+    const alertClasses = alert.className.split(/\s+/)
+    expect(alertClasses).toContain('md:absolute')
+    expect(alertClasses).toContain('md:top-full')
+    expect(alertClasses).not.toContain('md:truncate')
   })
 
   // A refresh can bring a new server value while a save is in flight. If that save then fails, the
