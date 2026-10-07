@@ -6,6 +6,9 @@ import { selectClass } from './ui/styles'
 
 const SAVE_FAILED = 'That could not be saved.'
 const SESSION_ENDED = 'Your session ended. Sign in again.'
+// The request may have reached the server and written before the reply was lost (a phone dropping
+// signal mid-request), so "could not be saved" would be a guess. Say so, and reload to show the truth.
+const MAY_NOT_HAVE_SAVED = 'It may not have saved. Showing the latest.'
 
 export function CategoryPicker({
   transactionId,
@@ -55,21 +58,38 @@ export function CategoryPicker({
     setPending(category)
     working(true)
     setError(null)
-    let saved = false
+    // What to do once the request has settled: reload after a save, or after one whose outcome is
+    // unknown. Never while it is in flight, and never after a refusal.
+    let reload = false
     try {
       const res = await fetch('/api/transactions/categorize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transactionId, category }),
       })
-      const body = (await res.json().catch(() => null)) as { ok?: unknown; error?: unknown } | null
+      const isJson = (res.headers.get('content-type') ?? '').includes('application/json')
       // A signed-out call is redirected to /login and fetch follows it to an HTML page: a 200 that
-      // saved nothing. Only the route's own JSON `ok: true` is a save. A non-OK response whose body
-      // is not JSON (an HTML 5xx page, say) is a failed save, not an ended session, and falls through.
-      if (res.redirected || (res.ok && body === null)) {
+      // saved nothing. The route always answers in JSON, so a 200 that is not JSON is not its reply.
+      // A non-OK reply that is not JSON (an HTML 5xx page, say) is a failed save, not an ended
+      // session, and falls through.
+      if (res.redirected || (res.ok && !isJson)) {
         setPending(null)
         setError(SESSION_ENDED)
         return
+      }
+      let body: { ok?: unknown; error?: unknown } | null = null
+      let unreadable: { err: unknown } | null = null
+      if (isJson) {
+        try {
+          body = await res.json()
+        } catch (err) {
+          unreadable = { err }
+        }
+      }
+      if (res.ok && unreadable) {
+        // The route's own 200 that cannot be read. It only answers 200 after the write, so the save
+        // probably landed, but nothing here can say so. Treated like a request that never landed.
+        throw unreadable.err
       }
       if (!res.ok || body?.ok !== true) {
         // Back to what the server has (the prop), not to the last local value (#102).
@@ -77,16 +97,20 @@ export function CategoryPicker({
         setError(typeof body?.error === 'string' ? body.error : SAVE_FAILED)
         return
       }
-      saved = true
-    } catch {
+      reload = true
+    } catch (err) {
+      // The request failed in flight, or its 200 could not be read. Neither means it never reached
+      // the server.
+      console.error('[CategoryPicker] save failed', err)
       setPending(null)
-      setError(SAVE_FAILED)
+      setError(MAY_NOT_HAVE_SAVED)
+      reload = true
     } finally {
       // `disabled` means "in flight", never "has failed".
       working(false)
     }
     // Outside the try: a throw from refresh is not a failed save.
-    if (saved) router.refresh()
+    if (reload) router.refresh()
   }
 
   // One wrapper for the select and its alert: a column at every width, the alert in flow directly

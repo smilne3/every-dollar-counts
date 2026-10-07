@@ -397,12 +397,14 @@ describe('TransactionCard sheet with a save in flight', () => {
   // A fetch the test settles by hand, so "in flight" is a state the test controls rather than
   // races. Resolving it is how the failure is delivered.
   function pendingFetch() {
-    let settle!: (res: { ok: boolean; json: () => Promise<unknown> }) => void
+    let settle!: (res: { ok: boolean; headers: Headers; json: () => Promise<unknown> }) => void
     const fetchMock = vi.fn(() => new Promise((resolve) => { settle = resolve }))
     vi.stubGlobal('fetch', fetchMock)
+    // Both routes answer in JSON, and CategoryPicker reads the content type to know the reply is theirs.
+    const headers = () => new Headers({ 'content-type': 'application/json' })
     return {
-      refuse: () => settle({ ok: false, json: async () => ({ error: 'nope' }) }),
-      accept: () => settle({ ok: true, json: async () => ({}) }),
+      refuse: () => settle({ ok: false, headers: headers(), json: async () => ({ error: 'nope' }) }),
+      accept: () => settle({ ok: true, headers: headers(), json: async () => ({}) }),
     }
   }
 
