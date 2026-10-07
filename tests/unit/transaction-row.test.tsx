@@ -132,3 +132,19 @@ describe('TransactionRow amount cell', () => {
   })
 
 })
+
+// Spec §8.1. The route now refuses every card payment, including one someone filed by hand before
+// (Task 2), so the row must not offer a picker that always fails. It shows the pick as plain text.
+describe('TransactionRow card payment with a pick', () => {
+  it('shows the pick as text, with no picker', () => {
+    renderRow({ pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', user_category: 'Shopping' })
+    expect(screen.getByText('Shopping')).toBeTruthy()
+    expect(screen.queryByRole('combobox')).toBeNull()
+  })
+
+  it('still says Card payment when there is no pick', () => {
+    renderRow({ pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' })
+    expect(screen.getByText('Card payment')).toBeTruthy()
+    expect(screen.queryByRole('combobox')).toBeNull()
+  })
+})

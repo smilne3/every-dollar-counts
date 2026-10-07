@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { isCardPaymentRow } from '@/lib/categories'
 import { money, shortDate } from '@/lib/format'
 import { presentTransaction, TONE_CLASS } from '@/lib/transaction-presentation'
 import { Dialog } from '@/components/ui/Dialog'
@@ -58,12 +59,14 @@ export function TransactionCard({
   // `label` is never null — presentTransaction owns the fallback so this card and the desktop row
   // cannot answer "what is this called?" differently (spec §9).
   const { label: name, display, tone, isCC, shareAmount } = presentTransaction(t)
+  // As TransactionRow: the route refuses every card payment, picked or not (#28).
+  const cardPayment = isCardPaymentRow(t.pfc_detailed)
   // Gated on isCC as well, so that a refresh which turns this row INTO a card payment — replacing
   // all three controls with the explanatory line — cannot leave a stale "in flight" behind and lock the sheet shut
   // for good. Holding someone inside a sheet they cannot leave is a worse bug than the one this
   // is here to prevent, so the state that withholds the exit is tied to the controls existing.
   const busy = !isCC && (pickerBusy || checkboxBusy || editorBusy)
-  const categoryLabel = isCC ? 'Card payment' : categoryName
+  const categoryLabel = cardPayment ? (t.user_category ?? 'Card payment') : categoryName
   const shareLabel = shareAmount !== null ? `, your share ${money(shareAmount)}` : ''
 
   // The whole row is the control: a 390px row has no room for a separate affordance, and the
@@ -140,10 +143,14 @@ export function TransactionCard({
               )}
             </dl>
 
-            {isCC ? (
+            {cardPayment ? (
               // Same exemption the desktop row enforces. A user_category here re-enters both legs
               // of the payment into every total — see TransactionRow.tsx:48-58.
-              <p className="mt-4 text-sm text-muted">Card payment — moves between your accounts.</p>
+              <p className="mt-4 text-sm text-muted">
+                {t.user_category
+                  ? `${t.user_category} · card payment, moves between your accounts.`
+                  : 'Card payment — moves between your accounts.'}
+              </p>
             ) : (
               <div className="mt-4 flex flex-col gap-4">
                 <label className="flex flex-col gap-1.5">

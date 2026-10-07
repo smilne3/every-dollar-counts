@@ -541,3 +541,19 @@ describe('TransactionCard sheet with a save in flight', () => {
     expect(screen.queryByRole('checkbox')).toBeNull()
   })
 })
+
+describe('TransactionCard card payment with a pick', () => {
+  const picked = { pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', user_category: 'Shopping' }
+
+  it('names the pick on the row', () => {
+    renderCard(picked)
+    expect(screen.getByText(/2026-08-29 · Shopping/)).toBeTruthy()
+  })
+
+  it('offers no picker in the sheet', () => {
+    renderCard(picked)
+    fireEvent.click(screen.getByRole('button', { name: /Joe S Den/ }))
+    expect(screen.queryByRole('combobox')).toBeNull()
+    expect(screen.getByText(/Shopping · card payment, moves between your accounts\./)).toBeTruthy()
+  })
+})

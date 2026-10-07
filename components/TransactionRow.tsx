@@ -1,3 +1,4 @@
+import { isCardPaymentRow } from '@/lib/categories'
 import { money } from '@/lib/format'
 import { presentTransaction, TONE_CLASS } from '@/lib/transaction-presentation'
 import { CategoryPicker } from './CategoryPicker'
@@ -32,6 +33,9 @@ export function TransactionRow({
   // lib/transaction-presentation.ts so the phone card can't drift from this table.
   const { label, display, tone, isCC, shareAmount } = presentTransaction(t)
   const marked = Number(t.reimbursable_amount ?? 0)
+  // Not isCC: that turns false once someone has picked a category, and the route refuses to change
+  // ANY card payment (#28). A card payment shows its pick as text, never a picker that always fails.
+  const cardPayment = isCardPaymentRow(t.pfc_detailed)
 
   return (
     <tr className="border-b border-line transition-colors hover:bg-surface-2">
@@ -48,10 +52,11 @@ export function TransactionRow({
           income. Only the two Transfer categories are harmless. A control where most choices
           silently corrupt the numbers by thousands does not belong on the row, and "Loan Payments"
           was never what this is anyway. Same reasoning that already hides the reimbursable box and
-          the editor here. */}
+          the editor here. A card payment someone filed by hand before #28 shows that pick as text:
+          the route refuses to change any card payment. */}
       <td className="px-4 py-3">
-        {isCC ? (
-          <span className="text-sm text-muted">Card payment</span>
+        {cardPayment ? (
+          <span className="text-sm text-muted">{t.user_category ?? 'Card payment'}</span>
         ) : (
           <CategoryPicker
             transactionId={t.id}
