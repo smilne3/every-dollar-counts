@@ -45,7 +45,9 @@ export const TRANSFER_PFC = new Set(['TRANSFER_IN', 'TRANSFER_OUT'])
 export const CREDIT_CARD_PAYMENT_DETAILED = 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT'
 
 // True for an auto-categorized credit-card payment. A user override wins (existing contract): if
-// they deliberately recategorized it, respect that and let normal category logic apply.
+// they deliberately recategorized it, respect that and let normal category logic apply. That only
+// governs how an already-picked card payment is COUNTED (picks made before #28): since #28 the
+// categorize route refuses to set a pick on any card payment (see isCardPaymentRow below).
 export function isCreditCardPayment(t: {
   pfc_detailed: string | null
   user_category: string | null

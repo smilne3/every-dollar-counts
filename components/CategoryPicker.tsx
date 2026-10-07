@@ -93,10 +93,11 @@ export function CategoryPicker({
   // under the select. Spec §8.2's one-line rule exists for #50, so that routine taps never shift
   // rows. A failed save is rare and has to be readable, and in the ~128px desktop Category cell every
   // no-growth layout either hides the message (truncated beside the select), covers the next row
-  // (floated below it), or is clipped on the last row by the table's overflow-x-auto box. So the row
-  // grows by one line while the error shows, until the next pick or a refresh clears it.
-  // `md:w-auto md:max-w-full` keep the wrapper to its content on desktop and inside the cell; the
-  // select's own `w-full md:w-auto` (selectClass) still sets its width.
+  // (floated below it), or is clipped on the last row by the table's overflow-x-auto box. So while a
+  // save error shows, that one row grows (by up to about four lines in the narrowest ~128px cell for
+  // the longest message) until the next pick or a refresh clears it. On desktop the column stretches
+  // the select to the Category cell's width, and `md:max-w-full` keeps it inside the cell, which also
+  // stops a long option name running into the Amount column (#138).
   return (
     <span className="flex w-full min-w-0 flex-col gap-1 md:w-auto md:max-w-full">
       <select

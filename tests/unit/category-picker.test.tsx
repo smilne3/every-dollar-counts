@@ -241,9 +241,10 @@ describe('CategoryPicker', () => {
 
   // The alert sits in flow under the select at every width. #50's one-line rule keeps routine taps
   // from shifting rows, but a failed save must be readable, and in the ~128px desktop cell every
-  // no-growth layout hid it, covered the next row, or was clipped on the last row. So the erroring
-  // row grows by one line. jsdom does no layout, so these class names are the only evidence
-  // available here; the layout itself was measured in Chromium.
+  // no-growth layout hid it, covered the next row, or was clipped on the last row. So while an error
+  // shows, the erroring row grows, by up to about four lines in the narrowest cell for the longest
+  // message. jsdom does no layout, so these class names are the only evidence available here; the
+  // layout itself was measured in Chromium.
   it('keeps select and alert in one wrapper: a column at every width, the alert in flow', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, redirected: false, json: async () => ({ error: 'No.' }) }))
     render(<CategoryPicker {...props} />)
