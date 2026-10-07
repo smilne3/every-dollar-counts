@@ -240,7 +240,9 @@ describe('CategoryPicker', () => {
   })
 
   // #50: on the desktop row an error must not add a line. On a phone the sheet has room, and the
-  // picker must stay full width.
+  // picker must stay full width. `md:max-w-full` keeps the wrapper inside its table-fixed cell, so a
+  // long alert clips instead of spilling over the Amount column. jsdom does no layout, so these class
+  // names are the only evidence available here; the overflow itself was seen in Chromium.
   it('keeps select and alert in one wrapper: a column on phones, one line from md', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, redirected: false, json: async () => ({ error: 'No.' }) }))
     render(<CategoryPicker {...props} />)
@@ -248,9 +250,32 @@ describe('CategoryPicker', () => {
     const alert = await screen.findByRole('alert')
     const wrapper = select().parentElement!
     expect(alert.parentElement).toBe(wrapper)
-    for (const c of ['flex', 'w-full', 'flex-col', 'md:inline-flex', 'md:w-auto', 'md:flex-row', 'md:flex-nowrap']) {
+    for (const c of ['flex', 'w-full', 'flex-col', 'md:inline-flex', 'md:w-auto', 'md:max-w-full', 'md:flex-row', 'md:flex-nowrap']) {
       expect(wrapper.className.split(/\s+/)).toContain(c)
     }
     expect(alert.className).toContain('md:truncate')
+  })
+
+  // A refresh can bring a new server value while a save is in flight. If that save then fails, the
+  // picker must fall back to the server's current value, not the one it had when the user chose.
+  it('falls back to the server value that arrived while the save was in flight', async () => {
+    let reply!: (r: unknown) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise((res) => { reply = res })))
+    const { rerender } = render(<CategoryPicker {...props} />)
+    fireEvent.change(select(), { target: { value: 'Shopping' } })
+    rerender(<CategoryPicker {...props} value="Travel" />)
+    reply({ ok: false, redirected: false, json: async () => ({ error: 'No.' }) })
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('No.'))
+    expect(select().value).toBe('Travel')
+  })
+
+  // An HTML error page from a failing server is a failed save, not an ended session.
+  it('treats a non-OK response that is not JSON as a failed save, not an ended session', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, redirected: false, json: async () => { throw new SyntaxError('html') } }))
+    render(<CategoryPicker {...props} />)
+    fireEvent.change(select(), { target: { value: 'Shopping' } })
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('That could not be saved.'))
+    expect(select().value).toBe('Food & Drink')
+    expect(refresh).not.toHaveBeenCalled()
   })
 })

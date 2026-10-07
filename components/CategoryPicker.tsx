@@ -24,16 +24,21 @@ export function CategoryPicker({
   onBusyChange?: (busy: boolean) => void
 }) {
   const router = useRouter()
-  const [val, setVal] = useState(value)
+  // The choice being saved, shown in place of the server's value until the save settles. On failure
+  // it is dropped, so the picker falls back to the server's CURRENT value, even one that arrived by
+  // refresh while the request was in flight. Rolling back to the value captured at event time would
+  // undo that newer value with nothing left to correct it (#102).
+  const [pending, setPending] = useState<string | null>(null)
+  const val = pending ?? value
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Follow the server. When a refresh brings a new value (another household member, or a rule from
-  // PR 2), show it and drop any stale optimistic value or alert. React's documented way to adjust
+  // PR 2), show it and drop any optimistic choice or alert. React's documented way to adjust
   // state when a prop changes; the same idiom as ReimbursableCheckbox.
   const [seen, setSeen] = useState(value)
   if (seen !== value) {
     setSeen(value)
-    setVal(value)
+    setPending(null)
     setError(null)
   }
 
@@ -47,7 +52,7 @@ export function CategoryPicker({
 
   async function change(e: React.ChangeEvent<HTMLSelectElement>) {
     const category = e.target.value
-    setVal(category)
+    setPending(category)
     working(true)
     setError(null)
     let saved = false
@@ -59,21 +64,22 @@ export function CategoryPicker({
       })
       const body = (await res.json().catch(() => null)) as { ok?: unknown; error?: unknown } | null
       // A signed-out call is redirected to /login and fetch follows it to an HTML page: a 200 that
-      // saved nothing. Only the route's own JSON `ok: true` is a save.
-      if (res.redirected || body === null) {
-        setVal(value)
+      // saved nothing. Only the route's own JSON `ok: true` is a save. A non-OK response whose body
+      // is not JSON (an HTML 5xx page, say) is a failed save, not an ended session, and falls through.
+      if (res.redirected || (res.ok && body === null)) {
+        setPending(null)
         setError(SESSION_ENDED)
         return
       }
-      if (!res.ok || body.ok !== true) {
+      if (!res.ok || body?.ok !== true) {
         // Back to what the server has (the prop), not to the last local value (#102).
-        setVal(value)
-        setError(typeof body.error === 'string' ? body.error : SAVE_FAILED)
+        setPending(null)
+        setError(typeof body?.error === 'string' ? body.error : SAVE_FAILED)
         return
       }
       saved = true
     } catch {
-      setVal(value)
+      setPending(null)
       setError(SAVE_FAILED)
     } finally {
       // `disabled` means "in flight", never "has failed".
@@ -86,9 +92,11 @@ export function CategoryPicker({
   // One wrapper for the select and its alert. Below md it is a full-width column, because the phone
   // sheet (TransactionCard.tsx) gives the picker the full width and has room for an alert beneath.
   // From md up it is one line, alert truncated beside the select, so an error never adds a line to a
-  // desktop row (#50). The select's own `w-full md:w-auto` (selectClass) still sets its width.
+  // desktop row (#50). `md:max-w-full` caps the wrapper at its cell, so in the transactions page's
+  // table-fixed layout the alert clips with an ellipsis instead of spilling over the Amount column.
+  // The select's own `w-full md:w-auto` (selectClass) still sets its width.
   return (
-    <span className="flex w-full min-w-0 flex-col gap-1 md:inline-flex md:w-auto md:flex-row md:flex-nowrap md:items-center md:gap-1.5">
+    <span className="flex w-full min-w-0 flex-col gap-1 md:inline-flex md:w-auto md:max-w-full md:flex-row md:flex-nowrap md:items-center md:gap-1.5">
       <select
         value={val}
         onChange={change}
