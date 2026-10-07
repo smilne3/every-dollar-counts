@@ -89,15 +89,16 @@ export function CategoryPicker({
     if (saved) router.refresh()
   }
 
-  // One wrapper for the select and its alert. Below md it is a full-width column, because the phone
-  // sheet (TransactionCard.tsx) gives the picker the full width and has room for an alert beneath.
-  // From md up an error must never grow or shift the desktop row (#50), and a message squeezed beside
-  // the select into a ~128px cell cannot be read. So the alert floats below the select, positioned
-  // against the `md:relative` wrapper: it takes no layout space, keeping the row's height, and gets
-  // up to 16rem to wrap in. `md:max-w-full md:flex-nowrap` keep the select itself inside its cell.
-  // The select's own `w-full md:w-auto` (selectClass) still sets its width.
+  // One wrapper for the select and its alert: a column at every width, the alert in flow directly
+  // under the select. Spec §8.2's one-line rule exists for #50, so that routine taps never shift
+  // rows. A failed save is rare and has to be readable, and in the ~128px desktop Category cell every
+  // no-growth layout either hides the message (truncated beside the select), covers the next row
+  // (floated below it), or is clipped on the last row by the table's overflow-x-auto box. So the row
+  // grows by one line while the error shows, until the next pick or a refresh clears it.
+  // `md:w-auto md:max-w-full` keep the wrapper to its content on desktop and inside the cell; the
+  // select's own `w-full md:w-auto` (selectClass) still sets its width.
   return (
-    <span className="flex w-full min-w-0 flex-col gap-1 md:relative md:inline-flex md:w-auto md:max-w-full md:flex-row md:flex-nowrap md:items-center md:gap-1.5">
+    <span className="flex w-full min-w-0 flex-col gap-1 md:w-auto md:max-w-full">
       <select
         value={val}
         onChange={change}
@@ -112,7 +113,7 @@ export function CategoryPicker({
         ))}
       </select>
       {error && (
-        <span role="alert" className="text-xs text-coral md:absolute md:left-0 md:top-full md:z-10 md:mt-1 md:w-max md:max-w-64 md:whitespace-normal md:rounded-md md:border md:border-line md:bg-surface md:px-2 md:py-1 md:shadow-sm">
+        <span role="alert" className="text-xs text-coral">
           {error}
         </span>
       )}

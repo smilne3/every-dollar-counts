@@ -239,25 +239,29 @@ describe('CategoryPicker', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
-  // #50: on the desktop row an error must not add a line or shift the row. On a phone the sheet has
-  // room, and the picker must stay full width. From md the alert floats below the select (absolute,
-  // against the `md:relative` wrapper) rather than being truncated beside it, where a ~128px cell
-  // left it no room to be read. jsdom does no layout, so these class names are the only evidence
+  // The alert sits in flow under the select at every width. #50's one-line rule keeps routine taps
+  // from shifting rows, but a failed save must be readable, and in the ~128px desktop cell every
+  // no-growth layout hid it, covered the next row, or was clipped on the last row. So the erroring
+  // row grows by one line. jsdom does no layout, so these class names are the only evidence
   // available here; the layout itself was measured in Chromium.
-  it('keeps select and alert in one wrapper: a column on phones, one line from md', async () => {
+  it('keeps select and alert in one wrapper: a column at every width, the alert in flow', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, redirected: false, json: async () => ({ error: 'No.' }) }))
     render(<CategoryPicker {...props} />)
     fireEvent.change(select(), { target: { value: 'Shopping' } })
     const alert = await screen.findByRole('alert')
     const wrapper = select().parentElement!
     expect(alert.parentElement).toBe(wrapper)
-    for (const c of ['flex', 'w-full', 'flex-col', 'md:relative', 'md:inline-flex', 'md:w-auto', 'md:max-w-full', 'md:flex-row', 'md:flex-nowrap']) {
-      expect(wrapper.className.split(/\s+/)).toContain(c)
+    const wrapperClasses = wrapper.className.split(/\s+/)
+    for (const c of ['flex', 'w-full', 'flex-col', 'md:w-auto', 'md:max-w-full']) {
+      expect(wrapperClasses).toContain(c)
+    }
+    for (const c of ['md:flex-row', 'md:inline-flex']) {
+      expect(wrapperClasses).not.toContain(c)
     }
     const alertClasses = alert.className.split(/\s+/)
-    expect(alertClasses).toContain('md:absolute')
-    expect(alertClasses).toContain('md:top-full')
-    expect(alertClasses).not.toContain('md:truncate')
+    for (const c of ['md:absolute', 'md:truncate']) {
+      expect(alertClasses).not.toContain(c)
+    }
   })
 
   // A refresh can bring a new server value while a save is in flight. If that save then fails, the
