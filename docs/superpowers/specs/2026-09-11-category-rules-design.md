@@ -3,8 +3,15 @@
 - **Repo:** `smilne3/every-dollar-counts`
 - **Date:** 2026-09-11
 - **Closes:** #28
-- **Status:** Design approved in brainstorming (sections 1–3). Revised after an adversarial review of this document. Awaiting owner review.
-- **One line:** The first time you file a merchant under a category, the app remembers it as a household rule and applies it to that merchant's other transactions, past and future. Rules are resolved whenever a page reads, never written onto a transaction, so changing or removing one moves every row with it.
+- **Status:** Rules design (§1–§13) approved in brainstorming on 2026-09-11 and revised after an adversarial review. Jev suggestions (§14) added and approved in brainstorming on 2026-10-07, after a probe on live data. Awaiting owner review of the revised spec.
+- **One line:** The first time you file a merchant under a category, the app remembers it as a household rule and applies it to that merchant's other transactions, past and future. Rules are resolved whenever a page reads, never written onto a transaction, so changing or removing one moves every row with it. For merchants with no rule, Jev (TypeSafe) suggests one of the household's own categories, applied automatically when it is confident and never across spending, transfers and income (§14).
+
+### Changes since 2026-09-11
+
+- **Migration numbers.** `020` was taken by `020_drop_non_cashflow_transactions.sql`. The rules migration is now **`021_category_rules.sql`** and its seed files `021_category_rules_*.sql`; Jev's table is **`022_category_suggestions.sql`** (§14.4). Every `020` below that names this feature means `021`.
+- **Paging (#69, PR #131).** `lib/read-all.ts`'s `readAllRows` now pages transaction reads by key on `(date, id)`, ends only on an empty page, and fails the whole read on any failed page. Use it wherever this spec says `readAllByKeyset` for **transactions**: `readTransactionsForCounts` selects `date` as well. `category_rules` has no `date`, so its read needs an `id`-only keyset; PR 2 adds that as a second function in `lib/read-all.ts` rather than a separate helper.
+- **Settings (#69, #91).** PR #131 already pages Settings' transactions read and throws when it fails. The budgets read beside it is still unchecked (#91) and is still this spec's to fix (§7.3).
+- **Jev (§14).** A fourth source of a category, between rules and the bank's, delivered as PR 4.
 
 ---
 
@@ -42,6 +49,10 @@ Settled with the owner during brainstorming. They are not open during implementa
 5. **Seed at launch** from the household's existing hand picks.
 6. **Remove forgets.** Removing a rule deletes it. Its rows go back to the bank's category, and the next pick for that merchant teaches again. This was chosen over "stop learning this merchant", accepting that a merchant fitting no single category re-learns on its next correction.
 7. **No "Automatic" option.** A hand pick stays until someone picks a different category. Accepted costs: a hand pick can't rejoin its merchant's rule, and a card payment that already carries a category keeps counting. There are none today.
+
+8. **Jev fills in after picks and rules, automatically when confident** (added 2026-10-07, §14). For a row with no pick and no applicable rule, Jev's stored suggestion applies when its confidence is at least the threshold (0.90 to start, §14.8). Below it, the row keeps the bank's category.
+9. **Jev never crosses the line either.** It is offered only categories of the row's own kind, plus "none of these fits", and §5.3's two-kind gate re-checks the result. Spent, Income and Saved therefore still cannot move.
+10. **Jev runs on spending rows only, in production only.** Card payments, hand-picked rows, transfers and income are never sent. Local and Preview builds never call TypeSafe.
 
 Defaults accepted along with them:
 - **Match** on exact `merchant_name`, ignoring case and surrounding whitespace. `Walmart` and `Walmart+` stay two merchants.
@@ -90,7 +101,7 @@ Three architectures were designed and scored by independent judges on two lenses
 
 A's real cost: a row's effective category has no SQL form, so complete counts need a paged read of every transaction (§7.1). At 1,238 rows that is three requests: 1,000 rows, 238, then an empty page.
 
-## 4. Storage: `db/migrations/020_category_rules.sql`
+## 4. Storage: `db/migrations/021_category_rules.sql`
 
 Hand-run in the SQL editor, re-runnable, and appended to the README run order (`README.md:75`). **It creates no rows.** Seeding is a separate script (§9).
 
@@ -223,7 +234,14 @@ export type ResolvedCategory = {
    - its category is still in the context;
    - `kindOf(ruleCategory) === bank.kind`;
    - `kindOf(ruleCategory) === kindOf(bank.name)`.
-5. **Otherwise** return `{ name: bank.name, source: 'bank', ruleId: null, bankName: bank.name }`.
+5. **Jev's suggestion** (PR 4, §14.3). Return `{ name: suggestedCategory, source: 'suggestion', ruleId: null, bankName: bank.name }` when the row carries a suggestion and all of these hold:
+   - suggestions are switched on (§14.7);
+   - its category is still in the context, and its catalogue fingerprint equals the context's current one;
+   - its confidence is at least the threshold;
+   - `kindOf(suggestedCategory) === bank.kind` and `=== kindOf(bank.name)`.
+6. **Otherwise** return `{ name: bank.name, source: 'bank', ruleId: null, bankName: bank.name }`.
+
+`ResolvedCategory.source` gains `'suggestion'` in PR 4.
 
 **`changedByRule(r)`** is `r.source === 'rule' && r.name !== r.bankName`. It drives the marker and the Settings counts.
 
@@ -346,7 +364,7 @@ The existing unchecked name cascades are no worse than today; hardening them is 
 
   It **throws** if either read fails:
   - `could not read categories: …`
-  - `could not read category rules: <code> <message> (has db/migrations/020, including its grants, been applied?)`
+  - `could not read category rules: <code> <message> (has db/migrations/021, including its grants, been applied?)`
 
   A failed rules read can never render as "no rules", which would silently revert every learned label (#46).
 - **`readAllByKeyset<T extends { id: string }>(buildPage: () => PostgrestFilterBuilder<any, any, any, T[], any, any, any>): Promise<T[]>`**:
@@ -512,9 +530,9 @@ Three files, written and reviewed in PR 2. **None is part of setup or the README
 
 | File | Purpose |
 | --- | --- |
-| `020_category_rules_seed.sql` | Creates the seeded rules. Refuses to run on a non-empty table. |
-| `020_category_rules_dry_run.sql` | The same query without the insert: the expected set of rules. |
-| `020_category_rules_checks.sql` | Read-only launch checks (§10.2). |
+| `021_category_rules_seed.sql` | Creates the seeded rules. Refuses to run on a non-empty table. |
+| `021_category_rules_dry_run.sql` | The same query without the insert: the expected set of rules. |
+| `021_category_rules_checks.sql` | Read-only launch checks (§10.2). |
 
 **It runs once per launch, immediately before PR 2 deploys.** Before then, no rule can have been changed or removed through Settings → Category rules. Production still runs PR 1, and local and Preview sessions run sandbox, which the category-rules route's environment guard refuses (§6.2). Because Remove forgets (decision 6), running it again after PR 2 deploys would bring back every seeded rule the household had removed.
 
@@ -585,11 +603,11 @@ do $$ begin
 end $$;
 ```
 
-- **Dry run.** `020_category_rules_dry_run.sql` is the `with … select … having` query alone, with no insert, no `on conflict` and no guard block.
+- **Dry run.** `021_category_rules_dry_run.sql` is the `with … select … having` query alone, with no insert, no `on conflict` and no guard block.
 - **Consistency with the code.** The seed's `bank_kind` and `shown_kind` are §5.2's two kinds. Its key matches `merchantKey` on ASCII, and the launch checks prove every live merchant name is ASCII.
 - **Resetting.** Before PR 2 deploys, the reset is `delete from public.category_rules where origin = 'seeded';` followed by running the seed again. Every rule is seeded until PR 3, so this empties the table and the guard allows the re-run. After PR 2 deploys there is no reset; changes go through Settings.
 
-**The per-rule verification query** in `020_category_rules_checks.sql`. It is read-only, with no environment filter, because pages have none:
+**The per-rule verification query** in `021_category_rules_checks.sql`. It is read-only, with no environment filter, because pages have none:
 
 ```sql
 with cats as (
@@ -633,20 +651,21 @@ order by 1, 3;
 
 ## 10. Delivery
 
-### 10.1 Three PRs
+### 10.1 Four PRs
 
 | PR | Contents | Depends on |
 | --- | --- | --- |
 | **1** | **Code:** §5.2's `lib/categories.ts` exports only (`CREDIT_CARD_PAYMENT_DETAILED`, `isCardPaymentRow`). §6.1 steps 1–7 and 9 (no learning; answers `{ ok: true }`). §8.2 keyed on `value`, with its own one-line wrapper. The §8.1 card-payment cell, still on the `categoryName` prop.<br>**Tests:** `categorize-route.test.ts` (the PR 1 list), `category-picker.test.tsx` (all but the source case), `transaction-row.test.tsx`'s card-payment-with-a-pick case, and `isCardPaymentRow` in `categories.test.ts`. | Nothing. On its own it fixes today's silent picker failures and adds the missing server-side card-payment guard. |
-| **2** | **Code:** the migration 020 file (applied when PR 2 development starts, §10.2), the three `db/seeds/` files, the rest of §5, §6.2, §6.3's DELETE guard, §7 including tripwire 4, the §8.1 marker and the `category: ResolvedCategory` prop, §8.2's source key, §8.3, §8.4, and the README run order plus its seed note.<br>**Tests:** every §11 item not in PR 1 or PR 3, including `transaction-row.test.tsx`'s marker and one-line cases and `category-picker.test.tsx`'s source case, plus rewiring existing tests. | PR 1 merged; 020 applied |
+| **2** | **Code:** the migration 021 file (applied when PR 2 development starts, §10.2), the three `db/seeds/` files, the rest of §5, §6.2, §6.3's DELETE guard, §7 including tripwire 4, the §8.1 marker and the `category: ResolvedCategory` prop, §8.2's source key, §8.3, §8.4, and the README run order plus its seed note.<br>**Tests:** every §11 item not in PR 1 or PR 3, including `transaction-row.test.tsx`'s marker and one-line cases and `category-picker.test.tsx`'s source case, plus rewiring existing tests. | PR 1 merged; 021 applied |
 | **3** | **Code:** §6.1 step 8 (learning) and the `learned` field.<br>**Tests:** the PR 3 list. | PR 2 |
+| **4** | **Code:** §14: migration 022, `lib/typesafe.ts`, `lib/category-suggest.ts`, the after-sync step, §5.3 step 5, the suggestion marker, the switch.<br>**Tests:** §14.9. | PR 3; the §14.8 launch check reported to the owner before the switch is turned on |
 
 ### 10.2 Order of operations
 
 1. **Before PR 1 deploys:**
    - Back up hand picks: export `id, plaid_transaction_id, merchant_name, date, amount, user_category` for rows with `user_category` set, to CSV. The Free plan has no automatic backups (`docs/plaid-production-cutover.md:44`).
    - Run the card-payment check below; expect 0 rows.
-2. **When PR 2 development starts, apply 020.**
+2. **When PR 2 development starts, apply 021.**
    - It creates an empty table that no deployed code reads. It has to go in early because local and Preview share the production database, and without the table the PR 2 pages throw. Precedent: migration 019 was applied to production before merge (`f33c1c2`).
    - Confirm the grants: `has_table_privilege('authenticated', 'public.category_rules', …)` must be true for SELECT, INSERT, UPDATE and DELETE.
    - To review PR 2's marker, counts and Settings card on local or a Preview, run the seed there, then use the §9 reset afterwards. Production code doesn't read the table yet, and Change and Remove answer `409` outside production, so the review is read-only. Change and Remove are covered by their route tests and first exercised live in step 5.
@@ -689,9 +708,9 @@ Picks made between PR 2 and PR 3 don't teach; the merchant's next pick after PR 
 
 ### 10.3 If something goes wrong
 
-- **PR 2 deployed before 020, or without its grants.**
+- **PR 2 deployed before 021, or without its grants.**
   - Dashboard, Transactions, Budgets, Trends and Breakdown (spent/saved) show `app/(app)/error.tsx`'s retryable card.
-  - In production and on Preview the card's message is Next's generic Server Components message with a digest (`error.md:111`). The underlying `could not read category rules: … (has db/migrations/020, including its grants, been applied?)` is in the Vercel runtime logs for that digest; locally, `next dev` shows it on the page.
+  - In production and on Preview the card's message is Next's generic Server Components message with a digest (`error.md:111`). The underlying `could not read category rules: … (has db/migrations/021, including its grants, been applied?)` is in the Vercel runtime logs for that digest; locally, `next dev` shows it on the page.
   - Settings shows its inline alert, and Banks keeps working.
   - Bank sync is unaffected, because ingest never reads the table, and PR 1's route still saves picks.
   - There is deliberately no "table missing, so no rules" fallback: it would silently revert every learned label.
@@ -845,3 +864,134 @@ CI runs typecheck (tests included), lint, the suite in two timezones, secrets, i
 - Redirect-safe saves in the repo's other client mutations.
 - Separate rules for a merchant's spending and transfer rows.
 - #66, bulk recategorize. It will reuse §6.1's hardened route and `buildKindContext`.
+- Category descriptions the household writes for Jev ("Kid Expenses: classes, camps"). A rule covers such merchants after one pick; descriptions can come later.
+- Suggesting categories for transfer and income rows.
+
+## 14. Jev suggestions (PR 4)
+
+### 14.1 Why
+
+Rules need one pick per merchant, and most merchants are never picked. Plaid's categories can't know the household's own ones: Plaid files every supermarket under Food & Drink, and the household budgets Grocery separately. Jev, TypeSafe's System One model, picks one option from a defined set and returns a probability for each, so it can file a transaction directly into the household's categories.
+
+**Probe on live data, 2026-10-07** (throwaway, read-only, 264 calls; the owner approved sending transaction details to TypeSafe):
+
+| Method | Matches the household's 73 hand picks (each merchant held out when judged) |
+| --- | --- |
+| The app today | 0 / 73 (each pick corrected it) |
+| A merchant rule learned from the household's other picks | **46 / 73** (48 rows had a rule) |
+| Jev alone | 31 / 73 |
+| Jev, shown how the household filed other merchants | 34 / 73 |
+| Rule, else Jev | 48 / 73 |
+
+- **Jev doesn't replace picks.** Most picks carry context a transaction doesn't hold: purchases in Basel and Reims are Travel because of a trip, and Joe S Den is Kid Expenses because of what it is for. Jev mostly agrees with the bank on those, and its confidence barely drops when wrong (mean 0.82 wrong, 0.91 right).
+- **Jev fills the gap rules can't.** On 100 unpicked transactions it agreed with the app on 80. Of the 20 disagreements, **19 moved grocery stores to Grocery**, including merchants never picked: Whole Foods 0.84, Giant Food 0.86, Harris Teeter 0.84, Dunhams Produce 0.88 without examples, and 0.99–1.00 with them. It left Starbucks in Food & Drink, CVS in Medical and Target in Shopping. Its one doubtful call, PHR to Kid Expenses, came in at 0.48.
+- **Its worst errors crossed the line:** a Venmo payment the household filed as Kid Expenses, and a florist filed as Utilities, both called Transfer Out at 0.99. §14.2 makes that impossible.
+- **Cost and speed:** about 1,300 input tokens per call with examples; median 174ms, p95 275ms.
+
+### 14.2 The question Jev is asked
+
+- **Rows:** non-removed, no hand pick, not a card payment (`isCardPaymentRow`), and with a bank kind of `'spending'` (§5.2). Transfer and income kinds are skipped: each side has one meaningful category, and their descriptions carry people's names.
+- **Options:** the household's spending-kind categories (by name, each described with the Plaid primary that maps to it by default), plus `none` ("none of these fits"). `none` stores a suggestion with no category, which resolves to the bank's.
+- **State, per request:**
+  - `household_examples`: one `{ merchant, filed_as }` per merchant the household has decided, from its rules and hand picks, spending kind only, most recent first, capped at 60;
+  - `transactions`: up to 20 rows, each `{ merchant, bank_description, amount_usd, direction, date, bank_category }` (`bank_category` is `pfc_detailed ?? pfc_primary`).
+- **Questions:** one Choice per transaction in the batch, its instructions naming `transactions[i]`: "Which of this household's budget categories should `transactions[i]` be filed under? `household_examples` shows how this household files merchants it has decided; follow its habits."
+- **Batching** sends the examples once per 20 rows instead of once per row. Its effect on answers is measured in §14.8 before it is relied on; if batched answers diverge from single ones, batches shrink.
+- **Nothing else is sent:** no account numbers, balances, institution names or household identifiers.
+
+### 14.3 Resolution
+
+§5.3 step 5. Rows carry their suggestion through an embedded select, so a page makes no extra request: `…, category_suggestions(category_id, confidence, catalog_fingerprint)`. `CategorizableTxn` gains a required `suggestion` field, so a select that drops it fails tsc, as §7.4 does for `merchant_name`.
+
+- **`changedBySuggestion(r)`** is `r.source === 'suggestion' && r.name !== r.bankName`. It drives the marker.
+- **Money.** A suggestion stays inside one kind, so §5.4's argument holds unchanged: no set of suggestions moves Spent, Income or Saved. §11's money property test gains suggestions.
+- **Stale suggestions.** `catalogFingerprint(categories)` is a hash of the household's sorted `id:name:kind` triples, computed in `buildCategoryContext`. Adding, renaming or deleting a category changes it, so every older suggestion stops applying at once and its row shows the bank's category until it is re-suggested.
+
+### 14.4 Storage: `db/migrations/022_category_suggestions.sql`
+
+Hand-run, re-runnable, appended to the README run order, the same shape as 021 (§4): the table and its RLS in one statement, idempotent re-asserts, explicit grants.
+
+```sql
+create table public.category_suggestions (
+  transaction_id uuid primary key references public.transactions(id) on delete cascade,
+  household_id uuid not null references public.households(id) on delete cascade,
+  category_id uuid,                                    -- null: Jev answered "none of these fits"
+  confidence real not null check (confidence >= 0 and confidence <= 1),
+  catalog_fingerprint text not null,
+  model text not null,                                 -- the model TypeSafe reports, e.g. jev-…
+  created_at timestamptz not null default now(),
+  constraint category_suggestions_category_fk foreign key (household_id, category_id)
+    references public.categories (household_id, id) on delete cascade
+);
+-- Read by the household; written only by the server job through the service role.
+create policy "read your category suggestions" on public.category_suggestions
+  for select to authenticated using ( household_id in (select private.household_ids()) );
+grant select on table public.category_suggestions to authenticated;
+grant select, insert, update, delete on table public.category_suggestions to service_role;
+```
+
+- **One row per transaction**, replaced on each new suggestion (upsert on `transaction_id`).
+- **Deleting a transaction or a category** deletes its suggestions. The composite FK keeps a suggestion inside its household, as 021's does for rules.
+- **Starting over** is `delete from public.category_suggestions where household_id = …`. Unlike `category_rules`, emptying it loses nothing a person decided.
+- **No column on `transactions`, and never `user_category`.** Ingest stays untouched, and the card-payment hazard (§1) can't arise.
+
+### 14.5 Producing suggestions: `lib/category-suggest.ts` (server-only)
+
+`suggestCategories(householdId, { limit = 200 })`:
+1. **Environment.** `assertEnvMatchesDatabase()`. A mismatch logs `[suggest] skipped: environment` and returns, so local and Preview never call TypeSafe or write suggestions.
+2. **Switch.** Returns at once unless suggestions are on (§14.7).
+3. **Read** the household's categories and rules (`fetchCategoryContext`'s data) and its hand picks, and build the examples and the fingerprint.
+4. **Select up to `limit` rows** that §14.2 admits and that have no suggestion or one with a different fingerprint, newest first, through `readAllRows`.
+5. **Ask** in batches of 20, through `lib/typesafe.ts`: a typed wrapper over `POST https://api.typesafe.ai/v1/systemone` with `model: 'jev-latest'`. It uses `fetch`, adds no dependency, reads `TYPESAFE_API_KEY` (already documented and guarded by `check:secrets`), retries 429 and 529 up to three times with backoff, and never logs the request body.
+6. **Write** with the service-role client: upsert per row, `{ count: 'exact' }`, checked.
+
+**When it runs:**
+- **After each sync,** in the sync route and the webhook's sync path, through `after()` from `next/server` (`node_modules/next/dist/docs/01-app/03-api-reference/04-functions/after.md`). It runs once the response is sent, within the route's max duration, so Refresh is not slowed. **Any failure is caught, logged as `[suggest] failed`, and never reaches the sync's response, its status, or the bank's health flag.** `after` also runs when the sync itself failed; that's harmless, because the job only suggests for rows already stored.
+- **History** fills over successive syncs at 200 rows a run: about 1,400 rows, so about seven syncs. There is no separate backfill path.
+- **About 150 new transactions a month** at 20 per request is about eight requests a month, plus re-suggestion after a category change.
+
+### 14.6 UI
+
+- **Marker.** Where §8.1 shows the learned marker, a row whose `changedBySuggestion` is true shows a distinct `SuggestedIcon` with `title` and `aria-label` "Grocery, suggested by Jev. Pick a category to change it." It links nowhere: a suggestion has no settings of its own.
+- **Picking overrides it,** and (PR 3) the pick teaches a rule as any pick does.
+- **Settings → Category rules** gains one line under its help text: "For merchants without a rule, Jev suggests a category. {n} transactions are filed by Jev." No other controls.
+
+### 14.7 The switch
+
+`CATEGORY_SUGGESTIONS=on` (server env, unset means off) enables both the job (§14.5 step 2) and §5.3 step 5. Turning it off stops new calls **and** makes every page ignore stored suggestions on the next load, so it is the rollback. It starts off in production and is turned on only after §14.8.
+
+### 14.8 Launch check
+
+Before the switch is turned on, a check run against production through `lib/category-suggest.ts`'s own request builder (throwaway script, read-only on the database) reports to the owner:
+- agreement with the household's hand picks, each merchant held out;
+- the unpicked sample, listing every row Jev would change, with confidence;
+- batched against single answers on the same rows;
+- the rows that would change at 0.80, 0.90 and 0.95, so the owner picks the threshold;
+- tokens per row and latency.
+
+The threshold the owner picks becomes `SUGGESTION_THRESHOLD` in `lib/category-suggest.ts`. Then the switch goes on, and Spent, Income and Saved are compared before and after, as §10.2 step 4 does for rules.
+
+### 14.9 Testing
+
+- **`resolveCategory`:** a pick beats a suggestion, a rule beats a suggestion, a suggestion beats the bank; below the threshold, with a stale fingerprint, with a missing category, across kinds, on a card payment, or with the switch off, it doesn't apply; `none` resolves to the bank.
+- **Money property:** Spent and Income identical under any set of suggestions, on §11's category sets.
+- **`lib/typesafe.ts`:** request shape, the auth header, retries on 429/529 then failure, no body in logs.
+- **`lib/category-suggest.ts`:**
+  - only §14.2's rows are selected; transfer, income, card payment and picked rows never reach the request;
+  - options are spending categories plus `none`;
+  - examples capped and same-kind only;
+  - batches of 20;
+  - a stale fingerprint is re-suggested and a current one is not;
+  - environment mismatch and switch off make no TypeSafe call;
+  - a TypeSafe failure writes nothing and throws nothing to the caller.
+- **Sync route:** a rejecting `suggestCategories` leaves the sync's response and the bank's status unchanged.
+- **Pages:** each money surface relabels a Safeway-less Whole Foods row through a seeded suggestion, and ignores it with the switch off.
+- **Invariants:** tripwire 4's `user-category-write` check also covers `lib/category-suggest.ts`; `.from('category_suggestions')` writes appear only there.
+
+### 14.10 Trade-offs
+
+- **Transaction details leave the app.** Merchant, description, amount, date and Plaid's category go to TypeSafe for spending rows. TypeSafe states it doesn't train on user data; retention follows its Data Processing Agreement, and zero retention is enterprise-only. The owner approved this on 2026-10-07.
+- **Jev can be confidently wrong.** Its confidence separated right from wrong only weakly in the probe. The threshold, the same-kind gate and the household's own picks limit the damage; a wrong suggestion is fixed with one pick, which also teaches a rule.
+- **History fills gradually**, over about seven syncs, and after a category change.
+- **Cost** depends on TypeSafe's pricing, which its docs don't publish. The launch check reports actual tokens.
+- **Suggestions stay put when a rule is removed.** A merchant whose rule is removed falls back to its suggestion if one applies, not straight to the bank's.
