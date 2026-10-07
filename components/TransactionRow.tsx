@@ -51,9 +51,10 @@ export function TransactionRow({
           September spending from $3,949.16 to MINUS $3,917.53; picking Income invents $7,866.69 of
           income. Only the two Transfer categories are harmless. A control where most choices
           silently corrupt the numbers by thousands does not belong on the row, and "Loan Payments"
-          was never what this is anyway. Same reasoning that already hides the reimbursable box and
-          the editor here. A card payment someone filed by hand before #28 shows that pick as text:
-          the route refuses to change any card payment. */}
+          was never what this is anyway. The same reasoning hides the reimbursable box and the
+          editor on an UNPICKED card payment (they follow isCC). A card payment someone filed by
+          hand before #28 shows that pick as text: the categorize route refuses to change any card
+          payment. */}
       <td className="px-4 py-3">
         {cardPayment ? (
           <span className="text-sm text-muted">{t.user_category ?? 'Card payment'}</span>

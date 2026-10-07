@@ -531,6 +531,31 @@ describe('TransactionCard sheet with a save in flight', () => {
     expect((done() as HTMLButtonElement).disabled).toBe(false)
   })
 
+  // The same, for the picker alone: a refresh that turns this row into a card payment WITH a pick
+  // removes the picker but keeps the reimbursable controls (they follow isCC). The picker's stale
+  // "in flight" must stop counting the moment it is unmounted.
+  it('does not lock the sheet shut when only the picker disappears mid-flight', () => {
+    pendingFetch()
+    const { rerender } = render(
+      <TransactionCard t={txn} categoryName="Food" categoryOptions={['Food', 'Grocery']} />
+    )
+    fireEvent.click(screen.getByRole('button', { name: /edit/ }))
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Grocery' } })
+    expect((done() as HTMLButtonElement).disabled).toBe(true)
+
+    rerender(
+      <TransactionCard
+        t={{ ...txn, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', user_category: 'Shopping' }}
+        categoryName="Shopping"
+        categoryOptions={['Food', 'Grocery']}
+      />
+    )
+
+    expect(screen.queryByRole('combobox')).toBeNull()
+    expect(screen.queryByRole('checkbox')).not.toBeNull()
+    expect((done() as HTMLButtonElement).disabled).toBe(false)
+  })
+
   // Nothing is in flight here, so the ordinary way out must be untouched.
   it('still closes on Done when no save is in flight', () => {
     openSheet()
@@ -555,5 +580,28 @@ describe('TransactionCard card payment with a pick', () => {
     fireEvent.click(screen.getByRole('button', { name: /Joe S Den/ }))
     expect(screen.queryByRole('combobox')).toBeNull()
     expect(screen.getByText(/Shopping · card payment, moves between your accounts\./)).toBeTruthy()
+  })
+})
+
+// Spec §8.1/§12: only the category control goes. The reimbursable route still accepts a mark on a
+// card payment that carries a pick (isCC is false for it), and the desktop row still offers it, so
+// the phone sheet must too.
+describe('TransactionCard sheet on a card payment', () => {
+  function openSheet(overrides: Partial<typeof txn>) {
+    renderCard(overrides)
+    fireEvent.click(screen.getByRole('button', { name: /Joe S Den/ }))
+  }
+
+  it('keeps the reimbursable controls when the card payment carries a pick', () => {
+    openSheet({ pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', user_category: 'Shopping' })
+    expect(screen.queryByRole('combobox')).toBeNull()
+    expect(screen.getByRole('checkbox')).toBeTruthy()
+  })
+
+  it('shows neither picker nor reimbursable controls when it carries no pick', () => {
+    openSheet({ pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' })
+    expect(screen.queryByRole('combobox')).toBeNull()
+    expect(screen.queryByRole('checkbox')).toBeNull()
+    expect(screen.queryByRole('button', { name: /partial reimbursable amount/ })).toBeNull()
   })
 })
