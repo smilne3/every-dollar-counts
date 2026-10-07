@@ -4,6 +4,9 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { selectClass } from './ui/styles'
 
+const SAVE_FAILED = 'That could not be saved.'
+const SESSION_ENDED = 'Your session ended. Sign in again.'
+
 export function CategoryPicker({
   transactionId,
   value,
@@ -15,22 +18,28 @@ export function CategoryPicker({
   value: string
   options: string[]
   label?: string
-  // Told whenever a save starts and stops, so a host that can UNMOUNT this control — the phone
-  // sheet, whose children are gated on `open` — can refuse to close over a request in flight. The
-  // error below is set after the await, and React silently no-ops a setState on an unmounted
-  // component, so without somewhere for it to land a failed save is discarded before it is shown.
-  // Optional: the desktop row is mounted for the life of the page and passes nothing.
+  // Told whenever a save starts and stops, so a host that can UNMOUNT this control (the phone sheet)
+  // can refuse to close over a request in flight; a failed save's message would otherwise land on an
+  // unmounted component and be lost. The desktop row passes nothing.
   onBusyChange?: (busy: boolean) => void
 }) {
   const router = useRouter()
   const [val, setVal] = useState(value)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Follow the server. When a refresh brings a new value (another household member, or a rule from
+  // PR 2), show it and drop any stale optimistic value or alert. React's documented way to adjust
+  // state when a prop changes; the same idiom as ReimbursableCheckbox.
+  const [seen, setSeen] = useState(value)
+  if (seen !== value) {
+    setSeen(value)
+    setVal(value)
+    setError(null)
+  }
 
-  // Ensure the current value is selectable even if it's 'Uncategorized' or stale.
+  // The current value is always selectable, even when it is 'Uncategorized' or a stale name.
   const opts = options.includes(val) ? options : [val, ...options]
 
-  // One place to change both, so the host's view of "in flight" cannot drift from the control's own.
   function working(now: boolean) {
     setSaving(now)
     onBusyChange?.(now)
@@ -38,8 +47,6 @@ export function CategoryPicker({
 
   async function change(e: React.ChangeEvent<HTMLSelectElement>) {
     const category = e.target.value
-    // What to fall back to if the save is refused. Read before the optimistic update, not after.
-    const previous = val
     setVal(category)
     working(true)
     setError(null)
@@ -50,47 +57,38 @@ export function CategoryPicker({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transactionId, category }),
       })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        // Put the picker back where the server still has it. An optimistic value that survives a
-        // rejection is a lie: it shows a category that was never saved, and the next refresh
-        // silently replaces it with the old one for no visible reason (#97).
-        setVal(previous)
-        // The route's refusals are written to be read aloud — an unknown category, or a
-        // credit-card payment (#98). A generic message would discard the only actionable part.
-        setError(body.error ?? 'That could not be saved.')
+      const body = (await res.json().catch(() => null)) as { ok?: unknown; error?: unknown } | null
+      // A signed-out call is redirected to /login and fetch follows it to an HTML page: a 200 that
+      // saved nothing. Only the route's own JSON `ok: true` is a save.
+      if (res.redirected || body === null) {
+        setVal(value)
+        setError(SESSION_ENDED)
+        return
+      }
+      if (!res.ok || body.ok !== true) {
+        // Back to what the server has (the prop), not to the last local value (#102).
+        setVal(value)
+        setError(typeof body.error === 'string' ? body.error : SAVE_FAILED)
         return
       }
       saved = true
     } catch {
-      // Same reasoning as the !res.ok branch — the request never landed, so the value must not stand.
-      setVal(previous)
-      setError('That could not be saved.')
+      setVal(value)
+      setError(SAVE_FAILED)
     } finally {
-      // `disabled` means "in flight", never "has failed": leaving it disabled after a rejection
-      // would strand the user on the wrong category with no way to try again.
+      // `disabled` means "in flight", never "has failed".
       working(false)
     }
-    // Outside the try, deliberately. A throw from router.refresh() is not a failed save, and inside
-    // the catch it would revert the value and show an error on a write the server has already
-    // accepted — this component's own bug, inverted.
+    // Outside the try: a throw from refresh is not a failed save.
     if (saved) router.refresh()
   }
 
-  // A fragment, deliberately: this component contributes no box of its own, so each surface keeps
-  // full control of how the picker is placed and sized. Width now comes from `selectClass` itself,
-  // which carries `w-full md:w-auto` for the 44px phone tap target (§7) — full width in the sheet
-  // (TransactionCard.tsx), content width in the desktop <td> (TransactionRow.tsx). That `md:w-auto`
-  // is load-bearing, not tidiness: drop it and `w-full` reaches desktop and stretches the picker
-  // across the whole category column, measured at 357px in a 389px cell against 133px today.
-  //
-  // A wrapper would not change the width any more — `w-full` would fill it — but it would still
-  // insert a box between the picker and whatever layout the surface has built, and the error below
-  // would be trapped inside it rather than laying out as the surface's own child. `block` on that
-  // error gives it its own line in the table cell and is a no-op in the sheet, where flex items are
-  // blockified.
+  // One wrapper for the select and its alert. Below md it is a full-width column, because the phone
+  // sheet (TransactionCard.tsx) gives the picker the full width and has room for an alert beneath.
+  // From md up it is one line, alert truncated beside the select, so an error never adds a line to a
+  // desktop row (#50). The select's own `w-full md:w-auto` (selectClass) still sets its width.
   return (
-    <>
+    <span className="flex w-full min-w-0 flex-col gap-1 md:inline-flex md:w-auto md:flex-row md:flex-nowrap md:items-center md:gap-1.5">
       <select
         value={val}
         onChange={change}
@@ -105,10 +103,10 @@ export function CategoryPicker({
         ))}
       </select>
       {error && (
-        <span role="alert" className="block text-xs text-coral">
+        <span role="alert" className="text-xs text-coral md:min-w-0 md:truncate">
           {error}
         </span>
       )}
-    </>
+    </span>
   )
 }

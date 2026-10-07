@@ -24,7 +24,7 @@ const select = () => screen.getByRole('combobox') as HTMLSelectElement
 
 describe('CategoryPicker', () => {
   it('saves the chosen category', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) })
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, redirected: false, json: async () => ({ ok: true }) })
     vi.stubGlobal('fetch', fetchMock)
 
     render(<CategoryPicker {...props} />)
@@ -59,7 +59,7 @@ describe('CategoryPicker', () => {
   })
 
   it('tells the page to reload once the save lands', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, redirected: false, json: async () => ({ ok: true }) }))
 
     render(<CategoryPicker {...props} />)
     fireEvent.change(select(), { target: { value: 'Shopping' } })
@@ -72,7 +72,7 @@ describe('CategoryPicker', () => {
   it('does not reload the page when the save is refused', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => ({ ok: false, json: async () => ({ error: 'nope' }) }))
+      vi.fn(async () => ({ ok: false, redirected: false, json: async () => ({ error: 'nope' }) }))
     )
 
     render(<CategoryPicker {...props} />)
@@ -89,7 +89,7 @@ describe('CategoryPicker', () => {
   it('puts the category back when the server refuses', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => ({ ok: false, json: async () => ({ error: 'that is not one of your categories' }) }))
+      vi.fn(async () => ({ ok: false, redirected: false, json: async () => ({ error: 'that is not one of your categories' }) }))
     )
 
     render(<CategoryPicker {...props} />)
@@ -106,6 +106,7 @@ describe('CategoryPicker', () => {
       'fetch',
       vi.fn(async () => ({
         ok: false,
+        redirected: false,
         json: async () => ({ error: 'a credit-card payment moves money between your own accounts' }),
       }))
     )
@@ -138,7 +139,7 @@ describe('CategoryPicker', () => {
   it('is usable again after a failure', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => ({ ok: false, json: async () => ({ error: 'nope' }) }))
+      vi.fn(async () => ({ ok: false, redirected: false, json: async () => ({ error: 'nope' }) }))
     )
 
     render(<CategoryPicker {...props} />)
@@ -151,8 +152,8 @@ describe('CategoryPicker', () => {
   it('clears a previous error once a save succeeds', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({ ok: false, json: async () => ({ error: 'nope' }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({}) })
+      .mockResolvedValueOnce({ ok: false, redirected: false, json: async () => ({ error: 'nope' }) })
+      .mockResolvedValueOnce({ ok: true, redirected: false, json: async () => ({ ok: true }) })
     vi.stubGlobal('fetch', fetchMock)
 
     render(<CategoryPicker {...props} />)
@@ -169,7 +170,7 @@ describe('CategoryPicker', () => {
   // ReimbursableCheckbox already has; TransactionCard folds it into the `busy` that Dialog honours.
   it('tells its host while a save is in flight', async () => {
     const onBusyChange = vi.fn()
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, redirected: false, json: async () => ({ ok: true }) }))
 
     render(<CategoryPicker {...props} onBusyChange={onBusyChange} />)
     fireEvent.change(select(), { target: { value: 'Shopping' } })
@@ -192,5 +193,64 @@ describe('CategoryPicker', () => {
 
     await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy())
     expect(onBusyChange.mock.calls.map((c) => c[0])).toEqual([true, false])
+  })
+
+  // A signed-out /api call is redirected to /login by proxy.ts, and fetch follows it to a 200 HTML
+  // page. That is not a save.
+  it('treats a redirected response as a failure, and does not refresh', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, redirected: true, json: async () => ({ ok: true }) }))
+    render(<CategoryPicker {...props} />)
+    fireEvent.change(select(), { target: { value: 'Shopping' } })
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Your session ended. Sign in again.'))
+    expect(select().value).toBe('Food & Drink')
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it('treats a response that is not JSON as a failure', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, redirected: false, json: async () => { throw new SyntaxError('html') } }))
+    render(<CategoryPicker {...props} />)
+    fireEvent.change(select(), { target: { value: 'Shopping' } })
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Your session ended. Sign in again.'))
+    expect(select().value).toBe('Food & Drink')
+  })
+
+  it('needs ok: true in the body, not just a 200', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, redirected: false, json: async () => ({}) }))
+    render(<CategoryPicker {...props} />)
+    fireEvent.change(select(), { target: { value: 'Shopping' } })
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('That could not be saved.'))
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  // Another household member, or a later PR's rule, changes the row; the refreshed page brings the
+  // new value. The picker must show it, not the value it was mounted with (#102).
+  it('follows the server when its value changes', () => {
+    const { rerender } = render(<CategoryPicker {...props} />)
+    rerender(<CategoryPicker {...props} value="Travel" />)
+    expect(select().value).toBe('Travel')
+  })
+
+  it('clears its alert when the server value changes', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, redirected: false, json: async () => ({ error: 'No.' }) }))
+    const { rerender } = render(<CategoryPicker {...props} />)
+    fireEvent.change(select(), { target: { value: 'Shopping' } })
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy())
+    rerender(<CategoryPicker {...props} value="Travel" />)
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  // #50: on the desktop row an error must not add a line. On a phone the sheet has room, and the
+  // picker must stay full width.
+  it('keeps select and alert in one wrapper: a column on phones, one line from md', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, redirected: false, json: async () => ({ error: 'No.' }) }))
+    render(<CategoryPicker {...props} />)
+    fireEvent.change(select(), { target: { value: 'Shopping' } })
+    const alert = await screen.findByRole('alert')
+    const wrapper = select().parentElement!
+    expect(alert.parentElement).toBe(wrapper)
+    for (const c of ['flex', 'w-full', 'flex-col', 'md:inline-flex', 'md:w-auto', 'md:flex-row', 'md:flex-nowrap']) {
+      expect(wrapper.className.split(/\s+/)).toContain(c)
+    }
+    expect(alert.className).toContain('md:truncate')
   })
 })
