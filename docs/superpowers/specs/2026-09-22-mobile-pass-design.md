@@ -166,6 +166,21 @@ Mechanically this means **`StatCard` gains a variant** — `hero` (exact, full w
 
 This treats the tiles by importance rather than equally, which matches the stated phone task: open it, see where things stand, close it.
 
+> **Superseded on 2026-10-06 (PR #136): the three below the hero are rows, not tiles.** Three across left each figure about 70px of text width at 390px. Once Saved went negative and gained an average note (#126), the owner's iPhone wrapped that tile's note over five lines and broke "-$13,995" after the minus. iOS renders text wider than Chromium, so a local render did not show it. Below `md` the three are now one card with a row each (`components/ui/StatRows.tsx`): label and note on the left, the whole-dollar figure on the right, never wrapping. From `md` up the tiles are as described here. The rounding rule is unchanged; it now lives in StatRows for the phone.
+>
+> ```
+> ┌──────────────────────────────────┐
+> │ CASH ON HAND            $34,920 ›│
+> │ In 2 accounts                    │
+> ├──────────────────────────────────┤
+> │ SPENT IN OCTOBER         $8,776 ›│
+> │ $8,776 of $15,000 budgeted       │
+> ├──────────────────────────────────┤
+> │ SAVED THIS MONTH         $5,449 ›│
+> │ Avg $3,822/mo · 5 mo             │
+> └──────────────────────────────────┘
+> ```
+
 **Rounding is display-only.** It happens in the tile, never in the value passed to it, and never on the desktop layout.
 
 The remaining dashboard sections stack in the order they already have: the spend/income chart, recent activity, then accounts. The account card list is long — 12 today — so below `md` it shows the first 4 behind a **"Show all N"** control, N being whatever the household actually has. Accounts are reference material rather than the reason the page was opened.

@@ -265,6 +265,95 @@ describe('Dashboard average savings (#126)', () => {
     expect(tile).toBe(`Avg ${moneyWhole(avg.total!.amount)}/mo · ${avg.rows.length} mo`)
   })
 
+  // On a phone the three figures are rows in one card (components/ui/StatRows), not tiles. Both
+  // ship in one server-rendered document and CSS picks, so they must carry the same figures.
+  const phoneRows = async () => {
+    const tree = await render()
+    const found: { rows: { label: string; amount: number; href: string; tone?: string; foot?: unknown }[] }[] = []
+    ;(function walk(n: unknown) {
+      if (n == null || typeof n !== 'object') return
+      if (Array.isArray(n)) return n.forEach(walk)
+      const el = n as { type?: { name?: string }; props?: Record<string, unknown> }
+      if (el.type?.name === 'StatRows') found.push(el.props as never)
+      else if (el.props) walk(el.props.children)
+    })(tree)
+    return { tree, rows: found[0].rows }
+  }
+
+  it('gives the phone rows the same figures and links as the tiles', async () => {
+    results.categories = income
+    results.transactions = fixture()
+    history.value = { kind: 'ready', month: '2026-02' }
+    const { tree, rows } = await phoneRows()
+    const tiles = findStatCards(tree).filter((c) => c.props.label !== 'Net worth')
+    expect(rows.map((r) => [r.label, r.amount])).toEqual(tiles.map((t) => [t.props.label, t.props.amount]))
+    expect(rows.map((r) => r.href)).toEqual(['/breakdown/cash', '/breakdown/spent', '/breakdown/saved'])
+  })
+
+  it('puts the average in the Saved row, and money in and out when there is no average', async () => {
+    results.categories = income
+    results.transactions = fixture()
+    history.value = { kind: 'ready', month: '2026-02' }
+    expect(textOf((await phoneRows()).rows[2].foot)).toContain('Avg $3,000/mo · 6 mo')
+
+    history.value = { kind: 'pending', bank: 'Capital One' }
+    const foot = textOf((await phoneRows()).rows[2].foot)
+    expect(foot).not.toContain('Avg')
+    expect(foot.replace(/\s+/g, ' ')).toContain('$0 in · $5,000 out')
+  })
+
+  // Beside a whole-dollar figure, on a narrow row, the budget note is whole dollars too.
+  it('gives the Spent row its budget note in whole dollars', async () => {
+    results.categories = { data: [{ id: 'c2', name: 'Food & Drink', pfc_primary: 'FOOD_AND_DRINK', sort_order: 1 }], error: null }
+    results.budgets = { data: [{ category: 'Food & Drink', monthly_limit: 15000 }], error: null }
+    results.transactions = { data: month('09', 0, 14289.44), error: null }
+    expect(textOf((await phoneRows()).rows[1].foot)).toContain('$14,289 of $15,000 budgeted')
+  })
+
+  // The tiles show exact cents from md up. budgetFoot takes its formatter, so handing the tile the
+  // phone's whole-dollar one is an easy slip; this is the test that catches it.
+  it('keeps the Spent and Saved tile notes exact', async () => {
+    results.categories = { data: [{ id: 'c2', name: 'Food & Drink', pfc_primary: 'FOOD_AND_DRINK', sort_order: 1 }], error: null }
+    results.budgets = { data: [{ category: 'Food & Drink', monthly_limit: 15000 }], error: null }
+    results.transactions = { data: month('09', 0, 14289.44), error: null }
+    const tiles = findStatCards(await render())
+    expect(textOf(tiles.find((t) => t.props.label.startsWith('Spent'))!.props.foot)).toContain(
+      '$14,289.44 of $15,000.00 budgeted'
+    )
+    expect(textOf(tiles.find((t) => t.props.label === 'Saved this month')!.props.foot).replace(/\s+/g, ' ')).toContain(
+      '$0.00 in · $14,289.44 out'
+    )
+  })
+
+  it('gives the Cash row its account count', async () => {
+    expect(textOf((await phoneRows()).rows[0].foot).replace(/\s+/g, ' ')).toContain('In 1 account')
+  })
+
+  // Breaking even is not a loss: a $0 month stays ink.
+  it('does not colour a break-even month coral', async () => {
+    results.categories = income
+    results.transactions = { data: month('09', 5000, 5000), error: null }
+    const saved = (await phoneRows()).rows[2]
+    expect(saved.amount).toBe(0)
+    expect(saved.tone).toBe('ink')
+  })
+
+  it('colours the Saved row coral when the month lost money', async () => {
+    results.categories = income
+    results.transactions = fixture()
+    const saved = (await phoneRows()).rows[2]
+    expect(saved.amount).toBeLessThan(0)
+    expect(saved.tone).toBe('coral')
+  })
+
+  // The tiles are the md-and-up layout and the rows the phone layout; CSS picks, so both wrappers
+  // must carry their breakpoint class.
+  it('hides the tiles below md and the rows from md up', async () => {
+    const classes = classNamesOf(await render())
+    expect(classes).toContain('hidden md:contents')
+    expect(classes).toContain('md:hidden')
+  })
+
   // The read is seven months; the chart under "Last 6 months" must still get six.
   it('still charts six months', async () => {
     results.categories = income
@@ -516,7 +605,9 @@ describe('Dashboard reads', () => {
   it('keeps the hero-plus-row container structure', async () => {
     const classes = classNamesOf(await render())
     expect(classes).toContain('space-y-4 md:grid md:grid-cols-2 md:gap-4 md:space-y-0 lg:grid-cols-4')
-    expect(classes).toContain('grid grid-cols-3 gap-3 md:contents')
+    // Below md the tiles give way to StatRows (see "hides the tiles below md…"); from md up they
+    // must still be direct grid children, or the three crush into one cell.
+    expect(classes).toContain('hidden md:contents')
   })
 })
 
