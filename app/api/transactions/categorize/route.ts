@@ -1,102 +1,106 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { isCreditCardPayment } from '@/lib/categories'
+import { isCardPaymentRow, CREDIT_CARD_PAYMENT_DETAILED } from '@/lib/categories'
 
-// Re-categorize a transaction. Runs as the user, so RLS ("update your txns")
-// enforces that they can only touch their own household's rows.
+// Sets the category on ONE transaction (#28 spec §6.1). Runs as the user, so RLS decides WHOSE rows;
+// the guards below decide WHICH writes are coherent. Every message here may be shown to a person
+// verbatim (CategoryPicker does), so none carries the database's words; those go to the log.
 //
-// RLS is about WHOSE rows; the guards below are about WHICH writes are coherent at all. This is the
-// only route that sets an arbitrary override on a SINGLE transaction, so anything not refused here
-// lands in the totals. It is not the only writer of the column: app/api/categories/route.ts rewrites
-// it in bulk when a category is renamed (:67) or deleted (:87), and the rename cascade does no
-// validation of its own — so the guarantees below stop at this door.
+// What it will not do:
+// - clear a pick, or write 'Uncategorized' (spec decision 7): no UI sends either, and a name that is
+//   not a real category would become its own spending bucket;
+// - touch a card payment, picked or not (#59): any user_category on one re-enters it into every
+//   total. The test is pfc_detailed alone, because isCreditCardPayment turns false once a pick is set;
+// - write a row the bank removed.
+const SAVE_FAILED = 'That could not be saved. Please try again.'
+
 export async function POST(req: Request) {
-  const { transactionId, category } = await req.json()
-  if (!transactionId) {
-    return NextResponse.json({ error: 'transactionId required' }, { status: 400 })
+  // 1. Validate before touching the database.
+  const body = (await req.json().catch(() => null)) as { transactionId?: unknown; category?: unknown } | null
+  const transactionId = typeof body?.transactionId === 'string' ? body.transactionId : ''
+  const category = typeof body?.category === 'string' ? body.category.trim() : ''
+  if (!transactionId || !category) {
+    return NextResponse.json({ error: 'Choose a category for this transaction.' }, { status: 400 })
   }
 
+  // 2. Sign-in. proxy.ts usually redirects a signed-out /api call first; this stays as defence.
   const supabase = await createClient()
   const {
     data: { user },
   } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  if (!user) return NextResponse.json({ error: 'Your session ended. Sign in again.' }, { status: 401 })
 
-  const { data: txn, error: readError } = await supabase
+  // 3. Read the row. Every column here is used below, or by learning in PR 3.
+  const { data: row, error: readError } = await supabase
     .from('transactions')
-    // pfc_detailed and user_category are here only to evaluate isCreditCardPayment below.
-    .select('id, pfc_detailed, user_category')
+    .select('id, household_id, merchant_name, pfc_primary, pfc_detailed, removed, user_category')
     .eq('id', transactionId)
     .maybeSingle()
-  // Fail closed: a read error must not be mistaken for "no such transaction", and must never fall
-  // through to the write.
+  // Fail closed: a read error must not pass for "no such transaction" or fall through to the write.
   if (readError) {
-    return NextResponse.json({ error: 'could not read the transaction' }, { status: 500 })
+    console.error('[categorize] transaction read failed', readError.message)
+    return NextResponse.json({ error: SAVE_FAILED }, { status: 500 })
   }
-  if (!txn) return NextResponse.json({ error: 'transaction not found' }, { status: 404 })
-
-  // Guards #98. isCreditCardPayment is `!user_category && pfc_detailed === CREDIT_CARD_PAYMENT`, so
-  // writing ANY override here permanently flips it false and re-enters the leg you categorized into
-  // the totals. (A card payment is stored as two rows — money out of checking, money into the card —
-  // and both are excluded; one POST re-admits one of them.) Measured on a real row: categorizing the
-  // card-side leg as spending moved September spending from $3,949.16 to -$3,917.53, the inflow
-  // landing in `bucket.spending` at lib/dashboard.ts:117-120; categorizing it as Income invented
-  // $7,866.69 of income. Both UI surfaces already refuse this, but the mobile pass keeps adding
-  // surfaces and each one had to remember independently. Refuse at the source.
-  //
-  // Only an AUTO-categorized payment is refused: the override-wins contract in lib/categories.ts is
-  // deliberate, so a row a human has already ruled on stays correctable rather than frozen.
-  if (isCreditCardPayment(txn)) {
+  if (!row) {
+    return NextResponse.json({ error: 'That transaction no longer exists. Refresh and try again.' }, { status: 404 })
+  }
+  if (row.removed) {
     return NextResponse.json(
-      { error: 'a credit-card payment moves money between your own accounts' },
+      { error: 'Your bank removed that transaction. Refresh and try again.' },
       { status: 400 }
     )
   }
 
-  // 'Uncategorized' is effectiveCategory's DISPLAY fallback, never a row in `categories` — but
-  // CategoryPicker deliberately offers it whenever it is the current value. Validating it like a
-  // real name would reject an option the UI itself presents; writing it literally would create the
-  // phantom bucket described below. Choosing it means "no override", same as clearing.
-  const requested = typeof category === 'string' ? category.trim() : ''
-  const next = requested && requested !== 'Uncategorized' ? requested : null
-
-  // effectiveCategory returns user_category verbatim, so an unvalidated string silently becomes its
-  // own spending bucket: absent from nonSpendingNames AND transferNames, it counts as real
-  // spending under a name nothing else in the app knows about.
-  if (next) {
-    const { data: cats, error: catsError } = await supabase.from('categories').select('name')
-    // Fail closed again — an empty list from a failed read would reject every valid category.
-    if (catsError) {
-      return NextResponse.json({ error: 'could not read your categories' }, { status: 500 })
-    }
-    if (!(cats ?? []).some((c) => c.name === next)) {
-      return NextResponse.json({ error: 'that is not one of your categories' }, { status: 400 })
-    }
+  // 4. Card payments, picked or not.
+  if (isCardPaymentRow(row.pfc_detailed)) {
+    return NextResponse.json(
+      { error: 'A credit-card payment is already kept out of spending and income.' },
+      { status: 400 }
+    )
   }
 
-  // `count` is the point of this call, not decoration. Supabase sends no count header by default and
-  // reports `error: null` for an update that matched NOTHING, so without it "wrote the row" and
-  // "wrote nothing" are the same answer. That is how #73 hid: households had no update policy, the
-  // write matched zero rows, the route said ok, and the old value came back forever.
-  // app/api/household/timezone/route.ts:26-42 is the precedent this mirrors.
+  // 5. The row's household's categories, whole and in order: PR 3 builds its kind gate from this
+  //    list, which must never be partial.
+  const { data: cats, error: catsError } = await supabase
+    .from('categories')
+    .select('id, name, pfc_primary, sort_order')
+    .eq('household_id', row.household_id)
+    .order('sort_order')
+  if (catsError) {
+    console.error('[categorize] categories read failed', catsError.message)
+    return NextResponse.json({ error: SAVE_FAILED }, { status: 500 })
+  }
+  const picked = (cats ?? []).find((c) => c.name === category)
+  if (!picked) {
+    return NextResponse.json(
+      { error: 'That category no longer exists. Refresh and try again.' },
+      { status: 400 }
+    )
+  }
+
+  // 6. Write, with the guards INSIDE the update, so Plaid re-tagging or removing the row between the
+  //    read and the write cannot slip through. The .or is deliberate: .neq alone would silently skip
+  //    rows whose pfc_detailed is null. `count` is what tells "wrote it" from "matched nothing" (#73).
   const { error, count } = await supabase
     .from('transactions')
-    .update({ user_category: next }, { count: 'exact' })
+    .update({ user_category: picked.name }, { count: 'exact' })
     .eq('id', transactionId)
-
-  // Log the database's words, do not SHOW them — the rule app/api/manual-assets/route.ts:47-53
-  // already states. CategoryPicker now renders whatever this route returns, so echoing
-  // `error.message` would put raw Postgres ("new row violates row-level security policy...") in a
-  // red span on someone's phone. 500, not 400: a failed write is a server fault, not a refusal the
-  // user can act on, and the two guards above own the 400s that are worth reading.
+    .eq('removed', false)
+    .or(`pfc_detailed.is.null,pfc_detailed.neq.${CREDIT_CARD_PAYMENT_DETAILED}`)
   if (error) {
     console.error('[categorize] update failed', error.message)
-    return NextResponse.json({ error: 'That could not be saved. Please try again.' }, { status: 500 })
+    return NextResponse.json({ error: SAVE_FAILED }, { status: 500 })
   }
   if (!count) {
-    console.error('[categorize] update matched no rows — is the update policy present?')
-    return NextResponse.json({ error: 'That could not be saved. Please try again.' }, { status: 500 })
+    // Usually the row changed underneath us. A missing update policy would also land here, which is
+    // why the log says both.
+    console.error('[categorize] update matched no rows (row changed, or the update policy is missing)', transactionId)
+    return NextResponse.json({ error: 'This transaction just changed. Refresh and try again.' }, { status: 409 })
   }
 
+  // 7. A record of every change, so a mistaken pick can be put back from the logs.
+  console.info('[categorize] changed', { id: transactionId, from: row.user_category, to: picked.name })
+
+  // 9. PR 3 adds `learned` here.
   return NextResponse.json({ ok: true })
 }
