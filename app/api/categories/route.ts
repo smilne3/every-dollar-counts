@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { assertEnvMatchesDatabase, envGuardResponse } from '@/lib/app-env'
 
 async function household(supabase: Awaited<ReturnType<typeof createClient>>) {
   const {
@@ -69,7 +70,7 @@ export async function PATCH(req: Request) {
   return NextResponse.json({ ok: true })
 }
 
-// Delete a category (reverts its transactions to auto, drops its budget).
+// Delete a category: its rules go with it (FK), its picks revert to auto, its budget is dropped.
 export async function DELETE(req: Request) {
   const { id } = await req.json()
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
@@ -78,6 +79,18 @@ export async function DELETE(req: Request) {
     data: { user },
   } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  // Deleting a category now deletes its rules too (category_rules' FK, #28), and already clears
+  // picks and deletes budgets, all in the database local, Preview and production share. So it is
+  // guarded before its first read. POST and PATCH touch no rule and stay unguarded.
+  try {
+    await assertEnvMatchesDatabase()
+  } catch (e) {
+    return envGuardResponse(e, {
+      tag: '[categories]',
+      mismatch: 'This app is pointed at a database from a different environment. Nothing deleted.',
+      unreadable: 'Could not verify which database this is, so nothing was deleted.',
+    })
+  }
 
   const { data: cat } = await supabase.from('categories').select('name').eq('id', id).single()
   if (!cat) return NextResponse.json({ error: 'not found' }, { status: 404 })
