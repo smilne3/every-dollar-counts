@@ -29,6 +29,8 @@ const safeway = (over: Partial<RuleView> = {}): RuleView => ({
   id: 'r1', merchantLabel: 'Safeway', categoryId: 'c-grocery', categoryName: 'Grocery', origin: 'seeded',
   changed: 145, pickedByHand: 14, matching: 159, ...over,
 })
+// The count line, found by its title: its text is split across unbreakable pieces (see below).
+const countLine = () => screen.getByTitle(/^Transactions this rule files under /)
 const reply = (ok: boolean, body: unknown) => ({ ok, redirected: false, headers: new Headers({ 'content-type': 'application/json' }), json: async () => body })
 
 describe('CategoryRulesCard', () => {
@@ -41,25 +43,37 @@ describe('CategoryRulesCard', () => {
   // Review Focus 4.
   it('stacks below sm and never truncates the count', () => {
     render(<CategoryRulesCard rules={[safeway({ merchantLabel: 'A very long merchant name that will not fit on a phone' })]} categories={CATS} />)
-    const count = screen.getByText('145 transactions · 14 picked by hand')
-    expect(count.className).toContain('whitespace-nowrap')
-    expect(count.className).toContain('tabular-nums')
-    expect(count.closest('.truncate')).toBeNull()
+    const line = countLine()
+    expect(line.textContent).toBe('145 transactions · 14 picked by hand')
+    expect(line.closest('.truncate')).toBeNull()
+    // Each piece is unbreakable and tabular; the line may break only between them, at " · ".
+    const pieces = [...line.querySelectorAll('.whitespace-nowrap.tabular-nums')]
+    expect(pieces.map((el) => el.textContent)).toEqual(['145 transactions ·', '14 picked by hand'])
     // Exact: the closed Remove dialog also names the merchant, inside longer sentences.
     const label = screen.getByText('A very long merchant name that will not fit on a phone')
     expect(label.className).toContain('truncate')
     expect(label.getAttribute('title')).toBe('A very long merchant name that will not fit on a phone')
-    expect(label.closest('li')?.className).toMatch(/flex-col.*sm:flex-row/)
+    const li = label.closest('li')!
+    expect(li.className).toMatch(/flex-col.*sm:flex-row/)
+    // Lets the controls, and the alert, drop to their own line rather than squeeze the text to 0px (1280px, Chromium).
+    expect(li.className).toContain('sm:flex-wrap')
+    // Keeps ~298px for the longest count beside the controls; without it the count ran under them at 640-900px.
+    expect(label.parentElement!.className).toContain('sm:flex-[1_0_19rem]')
+    // Caps the select at 192px from md up, where selectClass's md:w-auto let a long category name widen it.
+    expect(screen.getByRole('combobox').className).toContain('md:max-w-48')
   })
 
   it('omits the hand-pick count when it is zero', () => {
     render(<CategoryRulesCard rules={[safeway({ pickedByHand: 0 })]} categories={CATS} />)
-    expect(screen.getByText('145 transactions')).toBeTruthy()
+    expect(countLine().textContent).toBe('145 transactions')
   })
 
   it('shows a rule with no current transactions as such', () => {
     render(<CategoryRulesCard rules={[safeway({ changed: 0, pickedByHand: 0, matching: 0 })]} categories={CATS} />)
-    expect(screen.getByText('No current transactions · set up from your earlier picks')).toBeTruthy()
+    const line = countLine()
+    expect(line.textContent).toBe('No current transactions · set up from your earlier picks')
+    // Wider than a 360px phone's content box on one line, so it must be able to break at " · ".
+    expect(line.querySelectorAll('.whitespace-nowrap').length).toBe(2)
   })
 
   it('shows the empty state', () => {
@@ -121,6 +135,22 @@ describe('CategoryRulesCard', () => {
     expect(within(dialog).getByText('145 Safeway transactions go back to their bank’s category.')).toBeTruthy()
     expect(within(dialog).queryByText(/picked by hand|keep theirs/)).toBeNull()
     expect(within(dialog).getByText('The next category you pick for Safeway will teach the app again.')).toBeTruthy()
+  })
+
+  it("Remove's dialog speaks of one transaction, and one hand pick, in the singular", () => {
+    render(<CategoryRulesCard rules={[safeway({ changed: 1, pickedByHand: 1, matching: 2 })]} categories={CATS} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Remove the Safeway rule' }))
+    const dialog = screen.getByRole('dialog', { hidden: true })
+    expect(within(dialog).getByText('1 Safeway transaction goes back to its bank’s category.')).toBeTruthy()
+    expect(within(dialog).getByText('1 you picked by hand keeps its category.')).toBeTruthy()
+  })
+
+  it("Remove's dialog says how many hand picks keep theirs", () => {
+    render(<CategoryRulesCard rules={[safeway()]} categories={CATS} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Remove the Safeway rule' }))
+    const dialog = screen.getByRole('dialog', { hidden: true })
+    expect(within(dialog).getByText('145 Safeway transactions go back to their bank’s category.')).toBeTruthy()
+    expect(within(dialog).getByText('14 you picked by hand keep theirs.')).toBeTruthy()
   })
 
   it("Remove's dialog explains a rule with no current transactions", () => {

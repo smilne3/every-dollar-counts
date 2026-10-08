@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/Button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -106,10 +106,10 @@ function RuleRow({ rule, categories }: { rule: RuleView; categories: RuleCategor
     if (!saved) setPending(null)
   }
 
-  const count =
+  const countParts =
     rule.matching === 0
-      ? `No current transactions · ${ORIGIN[rule.origin]}`
-      : `${txns(rule.changed)}${rule.pickedByHand > 0 ? ` · ${rule.pickedByHand} picked by hand` : ''}`
+      ? ['No current transactions', ORIGIN[rule.origin]]
+      : [txns(rule.changed), ...(rule.pickedByHand > 0 ? [`${rule.pickedByHand} picked by hand`] : [])]
 
   return (
     // sm:flex-wrap and the text's 19rem basis: where the row is too narrow for the longest count
@@ -122,13 +122,21 @@ function RuleRow({ rule, categories }: { rule: RuleView; categories: RuleCategor
           {label}
         </p>
         {/* Never inside a truncating element: the count is the point of the row. */}
-        <p className="text-xs text-muted">
-          <span
-            className="whitespace-nowrap tabular-nums"
-            title={`Transactions this rule files under ${rule.categoryName} instead of the bank's category`}
-          >
-            {count}
-          </span>
+        {/* Each piece is unbreakable and the line breaks only after a " ·": the longest line is wider
+            than a 360px phone's content box, so it wraps there rather than overflowing. */}
+        <p
+          className="text-xs text-muted"
+          title={`Transactions this rule files under ${rule.categoryName} instead of the bank's category`}
+        >
+          {countParts.map((part, i) => (
+            <Fragment key={i}>
+              {i > 0 && ' '}
+              <span className="whitespace-nowrap tabular-nums">
+                {part}
+                {i < countParts.length - 1 && ' ·'}
+              </span>
+            </Fragment>
+          ))}
         </p>
       </div>
       <div className="flex items-center gap-2">
@@ -172,8 +180,10 @@ function RuleRow({ rule, categories }: { rule: RuleView; categories: RuleCategor
           void send('DELETE', { id: rule.id, expectedCategoryId: rule.categoryId })
         }}
       >
-        {rule.changed > 0 && <p>{rule.changed} {label} transactions go back to their bank’s category.</p>}
-        {rule.pickedByHand > 0 && <p>{rule.pickedByHand} you picked by hand keep theirs.</p>}
+        {rule.changed === 1 && <p>1 {label} transaction goes back to its bank’s category.</p>}
+        {rule.changed > 1 && <p>{rule.changed} {label} transactions go back to their bank’s category.</p>}
+        {rule.pickedByHand === 1 && <p>1 you picked by hand keeps its category.</p>}
+        {rule.pickedByHand > 1 && <p>{rule.pickedByHand} you picked by hand keep theirs.</p>}
         {rule.matching === 0 && (
           <p>No {label} transactions are showing right now — for example, if a bank is disconnected.</p>
         )}
