@@ -186,8 +186,8 @@ function DeleteImpactLines({ name, impact }: { name: string; impact: DeleteImpac
       {impact.movedMore > 0 && <p>And {impact.movedMore} more will move to other categories.</p>}
       {impact.rulesRemoved > 0 && (
         <p>
-          {impact.rulesRemoved} merchant rule{impact.rulesRemoved === 1 ? '' : 's'} that file into {name} will be
-          removed.
+          {impact.rulesRemoved} merchant {impact.rulesRemoved === 1 ? 'rule that files' : 'rules that file'} into{' '}
+          {name} will be removed.
         </p>
       )}
       {impact.toSpending > 0 && <p>{impact.toSpending} of these will start counting as spending.</p>}

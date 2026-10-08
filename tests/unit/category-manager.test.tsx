@@ -104,6 +104,12 @@ describe('CategoryManager delete dialog', () => {
     expect(screen.getByText('2 merchant rules that file into Grocery will be removed.')).toBeTruthy()
   })
 
+  it('agrees the verb when a delete removes one rule', () => {
+    renderManager(usageFor({ rulesRemoved: 1 }))
+    openDelete('Grocery')
+    expect(screen.getByText('1 merchant rule that files into Grocery will be removed.')).toBeTruthy()
+  })
+
   it('warns about spending only when rows would start counting as spending', () => {
     renderManager(usageFor({ uncategorized: 1, toSpending: 1 }))
     openDelete('Grocery')
