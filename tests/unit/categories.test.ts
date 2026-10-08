@@ -44,7 +44,8 @@ describe('categories', () => {
 })
 
 // #28 spec §5.2. A card payment is a card payment whatever its label: the route refuses to change
-// one, and neither surface offers a picker on one, even when someone filed it by hand before.
+// one, and neither surface offers a picker on one, even when someone filed it by hand before #28,
+// or picked it before Plaid re-tagged the row as a card payment.
 // isCreditCardPayment answers a different question ("does it count in the totals?") and returns
 // false once a pick is set, which is why the two must not be confused.
 describe('isCardPaymentRow', () => {

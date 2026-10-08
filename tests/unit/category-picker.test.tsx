@@ -8,8 +8,9 @@ afterEach(() => {
   refresh.mockClear()
 })
 // A real spy, not a bare closure. With `refresh: () => {}` no test can tell whether the list is ever
-// told to reload, so deleting the call — or making it run on the failure path, where it races the
-// optimistic revert — leaves the suite green.
+// told to reload, so deleting the call, or making it run after a refused save, leaves the suite
+// green. A refused save writes nothing: the server holds the old value, which the picker already
+// shows while the error explains why, so a reload there is a wasted round trip.
 const refresh = vi.hoisted(() => vi.fn())
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }))
 
@@ -76,8 +77,8 @@ describe('CategoryPicker', () => {
     await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
   })
 
-  // A refresh on a refused save would race the revert: the server's value arrives and overwrites
-  // the category the user is being shown an error about.
+  // A refused save wrote nothing, so the server still holds the old value. The picker already shows
+  // it while the error explains why; a refresh would only re-render the same value.
   it('does not reload the page when the save is refused', async () => {
     vi.stubGlobal(
       'fetch',
@@ -108,8 +109,9 @@ describe('CategoryPicker', () => {
     expect(select().value).toBe('Food & Drink')
   })
 
-  // #98 gives the route two refusals worth reading aloud — a credit-card payment and an unknown
-  // category. A generic "that could not be saved" would throw away the only part the user can act on.
+  // The route's refusals are written to be read aloud: a credit-card payment, a category that no
+  // longer exists, a row that changed. A generic "that could not be saved" would throw away the only
+  // part the user can act on.
   it('shows the reason the server gave', async () => {
     vi.stubGlobal(
       'fetch',
@@ -277,7 +279,7 @@ describe('CategoryPicker', () => {
     expect(refresh).not.toHaveBeenCalled()
   })
 
-  // Another household member, or a later PR's rule, changes the row; the refreshed page brings the
+  // Another household member, or a category rule, changes the row; the refreshed page brings the
   // new value. The picker must show it, not the value it was mounted with (#102).
   it('follows the server when its value changes', () => {
     const { rerender } = render(<CategoryPicker {...props} />)
@@ -317,12 +319,12 @@ describe('CategoryPicker', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
-  // The alert sits in flow under the select at every width. #50's one-line rule keeps routine taps
-  // from shifting rows, but a failed save must be readable, and in the ~128px desktop cell every
-  // no-growth layout hid it, covered the next row, or was clipped on the last row. So while an error
-  // shows, the erroring row grows, by up to about four lines in the narrowest cell for the longest
-  // message. jsdom does no layout, so these class names are the only evidence available here; the
-  // layout itself was measured in Chromium.
+  // The alert sits in flow under the select at every width. Spec §8.2 asks for one line so a routine
+  // tap never moves other rows (the principle behind #50), but a failed save must be readable, and
+  // in the narrow fixed Category column every no-growth layout failed: truncated beside the select,
+  // floated below it (covering the next row), or clipped on the last row. So the row grows while the
+  // error shows. jsdom does no layout, so these class names are the only evidence available here;
+  // the layout itself was checked in Chromium.
   it('keeps select and alert in one wrapper: a column at every width, the alert in flow', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply(false, { error: 'No.' })))
     render(<CategoryPicker {...props} />)

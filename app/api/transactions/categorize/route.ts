@@ -8,11 +8,17 @@ import { isCardPaymentRow, CREDIT_CARD_PAYMENT_DETAILED } from '@/lib/categories
 // verbatim (CategoryPicker does), so none carries the database's words; those go to the log.
 //
 // What it will not do:
-// - clear a pick, or write 'Uncategorized' (spec decision 7): no UI sends either, and a name that is
-//   not a real category would become its own spending bucket;
-// - touch a card payment, picked or not (#59): any user_category on one re-enters it into every
-//   total. The test is pfc_detailed alone, because isCreditCardPayment turns false once a pick is set;
+// - clear a pick (spec decision 7), or write a name that is not one of the household's categories
+//   (including the display fallback 'Uncategorized'): no UI sends either, and a name that is not a
+//   real category would become its own spending bucket;
+// - touch a card payment, picked or not (#59). On an unpicked one, any user_category re-enters it
+//   into every total. An already-picked one stays refused too: changing it can move it between
+//   spending and income, and a pick cannot be cleared back to the exclusion (spec decision 7). The
+//   test is pfc_detailed alone, because isCreditCardPayment turns false once a pick is set;
 // - write a row the bank removed.
+//
+// It is not the only writer of user_category: app/api/categories/route.ts also writes it in bulk on
+// rename and delete (a delete clears picks), outside these guards (#100).
 const SAVE_FAILED = 'That could not be saved. Please try again.'
 
 export async function POST(req: Request) {
@@ -39,7 +45,8 @@ export async function POST(req: Request) {
   }
   if (!user) return NextResponse.json({ error: 'Your session ended. Sign in again.' }, { status: 401 })
 
-  // 3. Read the row. Every column here is used below, or by learning in PR 3.
+  // 3. Read the row. Every column here is used below, except merchant_name and pfc_primary, which
+  //    are read for learning (spec §6.1 step 8).
   const { data: row, error: readError } = await supabase
     .from('transactions')
     .select('id, household_id, merchant_name, pfc_primary, pfc_detailed, removed, user_category')
@@ -68,8 +75,8 @@ export async function POST(req: Request) {
     )
   }
 
-  // 5. The row's household's categories, whole and in order: PR 3 builds its kind gate from this
-  //    list, which must never be partial.
+  // 5. The row's household's categories, whole and in order. Learning (§6.1 step 8) builds its kind
+  //    gate from this list, which must never be partial.
   const { data: cats, error: catsError } = await supabase
     .from('categories')
     .select('id, name, pfc_primary, sort_order')
@@ -89,7 +96,9 @@ export async function POST(req: Request) {
 
   // 6. Write, with the guards INSIDE the update, so Plaid re-tagging or removing the row between the
   //    read and the write cannot slip through. The .or is deliberate: .neq alone would silently skip
-  //    rows whose pfc_detailed is null. `count` is what tells "wrote it" from "matched nothing" (#73).
+  //    rows whose pfc_detailed is null. `count` is what tells "wrote it" from "matched nothing";
+  //    without it a write that matches no row reads as success, the way the households update
+  //    policy that silently matched nothing went unseen (#73; see app/api/household/timezone/route.ts).
   const { error, count } = await supabase
     .from('transactions')
     .update({ user_category: picked.name }, { count: 'exact' })
@@ -110,6 +119,6 @@ export async function POST(req: Request) {
   // 7. A record of every change, so a mistaken pick can be put back from the logs.
   console.info('[categorize] changed', { id: transactionId, from: row.user_category, to: picked.name })
 
-  // 9. PR 3 adds `learned` here.
+  // 9. Response (spec §6.1 step 9). Step 8, learning, is not implemented yet.
   return NextResponse.json({ ok: true })
 }

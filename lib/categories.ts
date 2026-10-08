@@ -46,8 +46,9 @@ export const CREDIT_CARD_PAYMENT_DETAILED = 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT'
 
 // True for an auto-categorized credit-card payment. A user override wins (existing contract): if
 // they deliberately recategorized it, respect that and let normal category logic apply. That only
-// governs how an already-picked card payment is COUNTED (picks made before #28): since #28 the
-// categorize route refuses to set a pick on any card payment (see isCardPaymentRow below).
+// governs how an already-picked card payment is COUNTED (picked before #28, or picked before Plaid
+// re-tagged the row as a card payment): since #28 the categorize route refuses to set a pick on any
+// card payment (see isCardPaymentRow below).
 export function isCreditCardPayment(t: {
   pfc_detailed: string | null
   user_category: string | null
@@ -58,7 +59,9 @@ export function isCreditCardPayment(t: {
 // True for any credit-card payment, whether or not someone has picked a category for it (#28).
 // Not the same question as isCreditCardPayment, which asks whether the row is still KEPT OUT of the
 // totals and so turns false once a pick is set. This one asks whether the row may be recategorized:
-// never, because any user_category on it re-enters it into every total (#59).
+// never. On an unpicked one any user_category re-enters it into every total (#59). An already-picked
+// one stays refused too: changing it can move it between spending and income, and a pick cannot be
+// cleared back to the exclusion (spec decision 7).
 export function isCardPaymentRow(pfcDetailed: string | null): boolean {
   return pfcDetailed === CREDIT_CARD_PAYMENT_DETAILED
 }

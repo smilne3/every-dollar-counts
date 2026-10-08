@@ -4,8 +4,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 // strict on purpose, because a permissive one hid three dead guards here before (#99):
 // - select() PROJECTS the fixture to the requested columns, so a narrowed read starves the guards;
 // - the categories read only resolves through .eq('household_id', …).order('sort_order');
-// - update() only resolves after .eq('id') → .eq('removed', false) → .or(<card-payment filter>),
-//   so a write missing any guard cannot produce a result at all.
+// - update() resolves only through two .eq()s and an .or(); the tests below assert which columns
+//   and values those are (#140 tracks tightening the stand-in itself).
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 
 import { AuthRetryableFetchError, AuthSessionMissingError, type AuthError } from '@supabase/supabase-js'
@@ -198,7 +198,9 @@ describe('POST /api/transactions/categorize', () => {
     expect(calls.updates).toHaveLength(0)
   })
 
-  // #59: any user_category on a card payment re-enters it into every total.
+  // #59: on an unpicked card payment, any user_category re-enters it into every total. An already-
+  // picked one stays refused: changing it can move it between spending and income, and a pick
+  // cannot be cleared back to the exclusion (spec decision 7).
   it.each([
     ['an unpicked card payment', null],
     ['a card payment someone already filed by hand', 'Shopping'],
@@ -230,7 +232,8 @@ describe('POST /api/transactions/categorize', () => {
     expect(calls.updates).toHaveLength(0)
   })
 
-  // Spec decision 7: clearing is not supported; 'Uncategorized' is a display name, not a category.
+  // A name that is not one of the household's categories, including the display fallback
+  // 'Uncategorized' (spec decision 7: clearing is not supported).
   it.each(['Uncategorized', 'Not A Category'])('answers 400 for %s, and writes nothing', async (category) => {
     const calls = makeSupabase({ row: ROW })
     const res = await post({ transactionId: 'txn-1', category })

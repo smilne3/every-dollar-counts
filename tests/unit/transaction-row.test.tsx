@@ -133,8 +133,9 @@ describe('TransactionRow amount cell', () => {
 
 })
 
-// Spec §8.1. The route now refuses every card payment, including one someone filed by hand before
-// (Task 2), so the row must not offer a picker that always fails. It shows the pick as plain text.
+// Spec §8.1. The route now refuses every card payment (spec §6.1 step 4), including one someone
+// filed by hand before #28, or picked before Plaid re-tagged the row as a card payment, so the row
+// must not offer a picker that always fails. It shows the pick as plain text.
 describe('TransactionRow card payment with a pick', () => {
   it('shows the pick as text, with no picker', () => {
     renderRow({ pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', user_category: 'Shopping' })
