@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Tripwires for the three defect classes this repo has actually shipped.
+// Tripwires for the four defect classes this repo has actually shipped.
 //
 // These are greps, not proofs. They cannot understand the code — they can only notice a shape that
 // has been wrong before. That is deliberate: each one exists because a real bug reached production
@@ -11,26 +11,7 @@
 // is how the debt gets paid.
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
-
-const ROOT = process.cwd()
-const failures = []
-
-function walk(dir, out = []) {
-  for (const entry of readdirSync(dir)) {
-    if (entry === 'node_modules' || entry === '.next' || entry.startsWith('.')) continue
-    const full = join(dir, entry)
-    if (statSync(full).isDirectory()) walk(full, out)
-    else if (/\.tsx?$/.test(full)) out.push(full)
-  }
-  return out
-}
-
-const files = ['app', 'lib', 'components']
-  .flatMap((d) => walk(join(ROOT, d)))
-  .map((f) => ({ path: relative(ROOT, f), text: readFileSync(f, 'utf8') }))
-
-const report = (check, file, line, message) =>
-  failures.push(`  ${file}:${line}\n      [${check}] ${message}`)
+import { pathToFileURL } from 'node:url'
 
 // ---------------------------------------------------------------------------
 // 1. Every read on a page checks `error`.
@@ -49,20 +30,25 @@ const READS_ALLOWED = new Map([
   ],
 ])
 
-for (const { path, text } of files) {
-  if (!path.startsWith('app/(app)/')) continue
-  if (READS_ALLOWED.has(path)) continue
-  text.split('\n').forEach((line, i) => {
-    if (!/const\s*{\s*data\b/.test(line)) return
-    if (/\berror\b/.test(line)) return
-    report(
-      'unchecked-read',
-      path,
-      i + 1,
-      'destructures `data` without `error`. A failed read must not render identically to no data ' +
-        '(#46) — check `error` and throw, so app/(app)/error.tsx can show a retryable message.'
-    )
-  })
+export function checkUncheckedReads(files) {
+  const out = []
+  for (const { path, text } of files) {
+    if (!path.startsWith('app/(app)/')) continue
+    if (READS_ALLOWED.has(path)) continue
+    text.split('\n').forEach((line, i) => {
+      if (!/const\s*{\s*data\b/.test(line)) return
+      if (/\berror\b/.test(line)) return
+      out.push({
+        check: 'unchecked-read',
+        file: path,
+        line: i + 1,
+        message:
+          'destructures `data` without `error`. A failed read must not render identically to no data ' +
+          '(#46) — check `error` and throw, so app/(app)/error.tsx can show a retryable message.',
+      })
+    })
+  }
+  return out
 }
 
 // ---------------------------------------------------------------------------
@@ -76,20 +62,25 @@ for (const { path, text } of files) {
 // ---------------------------------------------------------------------------
 const CLOCK_ALLOWED = new Map([])
 
-for (const { path, text } of files) {
-  if (CLOCK_ALLOWED.has(path)) continue
-  text.split('\n').forEach((line, i) => {
-    const match = line.match(/\.get(Hours|Month|FullYear|Date|Day)\(\)/)
-    if (!match || /getUTC/.test(line)) return
-    report(
-      'runtime-clock',
-      path,
-      i + 1,
-      `reads .get${match[1]}() off the runtime clock, which is UTC on Vercel and not the ` +
-        "household's zone (#73). Resolve the day through lib/clock.ts, or construct with Date.UTC " +
-        'and read it back with getUTC*.'
-    )
-  })
+export function checkRuntimeClock(files) {
+  const out = []
+  for (const { path, text } of files) {
+    if (CLOCK_ALLOWED.has(path)) continue
+    text.split('\n').forEach((line, i) => {
+      const match = line.match(/\.get(Hours|Month|FullYear|Date|Day)\(\)/)
+      if (!match || /getUTC/.test(line)) return
+      out.push({
+        check: 'runtime-clock',
+        file: path,
+        line: i + 1,
+        message:
+          `reads .get${match[1]}() off the runtime clock, which is UTC on Vercel and not the ` +
+          "household's zone (#73). Resolve the day through lib/clock.ts, or construct with Date.UTC " +
+          'and read it back with getUTC*.',
+      })
+    })
+  }
+  return out
 }
 
 // ---------------------------------------------------------------------------
@@ -163,8 +154,9 @@ function closeOf(code, open) {
   return code.length
 }
 
-// The calls chained onto `.from(...)`, in order: [{ name, args }], with `args` taken from the
-// comment-free source so string arguments survive.
+// The calls chained onto `.from(...)`, in order: [{ name, args, codeArgs, close }], with `args`
+// taken from the comment-free source so string arguments survive, `codeArgs` from the blanked
+// source, and `close` the index of the call's closing parenthesis.
 function chainAfter(code, text, from) {
   const calls = []
   let k = closeOf(code, code.indexOf('(', from)) + 1
@@ -173,7 +165,7 @@ function chainAfter(code, text, from) {
     if (!m) return calls
     const open = k + m[0].length - 1
     const close = closeOf(code, open)
-    calls.push({ name: m[1], args: text.slice(open + 1, close) })
+    calls.push({ name: m[1], args: text.slice(open + 1, close), codeArgs: code.slice(open + 1, close), close })
     k = close + 1
   }
 }
@@ -190,6 +182,8 @@ function insideReadAllRows(code, at) {
   }
   return false
 }
+
+const lineOf = (text, at) => text.slice(0, at).split('\n').length
 
 const literalInts = (args) => args.split(',').map((a) => (/^\s*\d+\s*$/.test(a) ? Number(a) : null))
 
@@ -209,38 +203,199 @@ function boundsItself(calls) {
   })
 }
 
-for (const { path, text } of files) {
-  if (TXN_READS_ALLOWED.has(path)) continue
-  const { text: commentFree, code } = views(text)
-  const fromRe = /\.from\(\s*(['"])transactions\1\s*\)/g
-  let match
-  while ((match = fromRe.exec(commentFree))) {
-    const at = match.index
-    if (insideReadAllRows(code, at)) continue
-    const calls = chainAfter(code, commentFree, at)
-    const names = calls.map((c) => c.name)
-    const reads = names.includes('select') && !names.some((n) => /^(update|upsert|insert|delete)$/.test(n))
-    if (!reads || boundsItself(calls)) continue
-    report(
-      'unbounded-txn-read',
-      path,
-      text.slice(0, at).split('\n').length,
-      'reads transactions with no bound at or under 1,000 rows. PostgREST truncates at 1,000 with ' +
-        'a 200 OK and no error, and .order() alone does not stop that (#69). Wrap the query in ' +
-        'readAllRows (lib/read-all.ts), or bound it.'
-    )
+export function checkTxnReads(files) {
+  const out = []
+  for (const { path, text } of files) {
+    if (TXN_READS_ALLOWED.has(path)) continue
+    const { text: commentFree, code } = views(text)
+    const fromRe = /\.from\(\s*(['"])transactions\1\s*\)/g
+    let match
+    while ((match = fromRe.exec(commentFree))) {
+      const at = match.index
+      if (insideReadAllRows(code, at)) continue
+      const calls = chainAfter(code, commentFree, at)
+      const names = calls.map((c) => c.name)
+      const reads = names.includes('select') && !names.some((n) => /^(update|upsert|insert|delete)$/.test(n))
+      if (!reads || boundsItself(calls)) continue
+      out.push({
+        check: 'unbounded-txn-read',
+        file: path,
+        line: lineOf(text, at),
+        message:
+          'reads transactions with no bound at or under 1,000 rows. PostgREST truncates at 1,000 with ' +
+          'a 200 OK and no error, and .order() alone does not stop that (#69). Wrap the query in ' +
+          'readAllRows (lib/read-all.ts), or bound it.',
+      })
+    }
   }
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// 4. Categories and rules are read in one place, and only two routes write user_category.
+//
+// #28. A category name comes from resolveCategory (lib/category-rules.ts), over a context only
+// fetchCategoryContext (lib/category-context.ts) can produce. A page that read categories itself
+// and built its own map would compile, ignore every rule, and show Safeway under Food & Drink on
+// one page and Grocery on the next. And a rule must never write user_category: any value there on
+// a card payment re-enters it into every total, which once took a month's spending from $3,949.16
+// to -$3,917.53 (#59).
+// ---------------------------------------------------------------------------
+const CATEGORY_READS_ALLOWED = new Map([
+  ['lib/category-context.ts', 'The one read every page goes through.'],
+  ['app/api/categories/route.ts', 'Manages categories.'],
+  ['app/api/transactions/categorize/route.ts', 'Validates a pick and builds its KindContext from the whole list.'],
+  ['app/api/category-rules/route.ts', 'Validates a Change: the target must count the same way.'],
+])
+const PFC_TO_NAME_ALLOWED = new Set(['lib/categories.ts', 'lib/category-rules.ts'])
+const RULES_READS_ALLOWED = new Map([
+  ['lib/category-context.ts', 'The one read every page goes through.'],
+  ['app/api/transactions/categorize/route.ts', 'Learns a rule from a first pick (spec §6.1 step 8, PR 3).'],
+  ['app/api/category-rules/route.ts', 'Change and Remove.'],
+])
+const USER_CATEGORY_WRITERS = new Map([
+  ['app/api/transactions/categorize/route.ts', 'Sets a pick on one transaction, with guards (spec §6.1).'],
+  ['app/api/categories/route.ts', 'Rename and delete cascade a category name onto picks (#100).'],
+])
+const VARIABLE_PAYLOADS_ALLOWED = new Map([
+  ['lib/ingest.ts', 'Its upserts come from transactionUpsertRow, which never carries user_category (tests/unit/ingest-reimbursable.test.ts).'],
+  ['scripts/seed-sandbox-bank.mjs', 'Sandbox rows, never a user_category.'],
+])
+const BRAND_PRODUCERS = new Set(['lib/category-rules.ts', 'lib/category-context.ts', 'lib/spend-context.ts'])
+
+function findAll(re, src) {
+  const at = []
+  let m
+  while ((m = re.exec(src))) at.push(m.index)
+  return at
+}
+
+export function checkCategoryReads(files) {
+  const out = []
+  for (const { path, text } of files) {
+    const { text: commentFree, code } = views(text)
+    if (!CATEGORY_READS_ALLOWED.has(path)) {
+      for (const at of findAll(/\.from\(\s*(['"])categories\1\s*\)/g, commentFree)) {
+        out.push({ check: 'category-read', file: path, line: lineOf(text, at), message:
+          'reads categories directly. Use fetchCategoryContext (lib/category-context.ts), so rules apply (#28).' })
+      }
+    }
+    if (!PFC_TO_NAME_ALLOWED.has(path)) {
+      for (const at of findAll(/\bpfcToName\s*\(/g, code)) {
+        out.push({ check: 'category-read', file: path, line: lineOf(text, at), message:
+          'builds its own Plaid-to-name map, which ignores rules. Resolve through resolveCategory (#28).' })
+      }
+    }
+  }
+  return out
+}
+
+export function checkRulesReads(files) {
+  const out = []
+  for (const { path, text } of files) {
+    if (RULES_READS_ALLOWED.has(path)) continue
+    for (const at of findAll(/\.from\(\s*(['"])category_rules\1\s*\)/g, views(text).text)) {
+      out.push({ check: 'rules-read', file: path, line: lineOf(text, at), message:
+        'reads category_rules outside lib/category-context.ts and the two routes allowed to (#28).' })
+    }
+  }
+  return out
+}
+
+// The first top-level argument of a call, from its blanked source.
+function firstArg(codeArgs) {
+  let depth = 0
+  for (let k = 0; k < codeArgs.length; k++) {
+    const c = codeArgs[k]
+    if (c === '(' || c === '{' || c === '[') depth++
+    else if (c === ')' || c === '}' || c === ']') depth--
+    else if (c === ',' && depth === 0) return codeArgs.slice(0, k)
+  }
+  return codeArgs
+}
+
+export function checkUserCategoryWrites(files) {
+  const out = []
+  for (const { path, text } of files) {
+    const { text: commentFree, code } = views(text)
+    for (const at of findAll(/\.from\(\s*(['"])transactions\1\s*\)/g, commentFree)) {
+      const calls = chainAfter(code, commentFree, at)
+      const write = calls.find((c) => /^(update|upsert|insert)$/.test(c.name))
+      if (!write) continue
+      const line = lineOf(text, at)
+      const chain = commentFree.slice(at, calls[calls.length - 1].close + 1)
+      if (/\buser_category\b/.test(chain) && !USER_CATEGORY_WRITERS.has(path)) {
+        out.push({ check: 'user-category-write', file: path, line, message:
+          'writes user_category outside the categorize and categories routes. A rule must never write it, ' +
+          'and any value on a card payment re-enters it into every total (#28, #59).' })
+        continue
+      }
+      const payload = firstArg(write.codeArgs).trim()
+      if ((!payload.startsWith('{') || payload.includes('...')) && !VARIABLE_PAYLOADS_ALLOWED.has(path)) {
+        out.push({ check: 'user-category-write', file: path, line, message:
+          'writes transactions with a payload this check cannot read (a variable or a spread), so it cannot ' +
+          'tell whether user_category is in it. Write an inline object literal, or allowlist the file with a reason (#28).' })
+      }
+    }
+  }
+  return out
+}
+
+export function checkBrandCasts(files) {
+  const out = []
+  for (const { path, text } of files) {
+    if (BRAND_PRODUCERS.has(path)) continue
+    for (const at of findAll(/\bas\s+(CategoryData|KindContext|CategoryContext|SpendContext)\b/g, views(text).code)) {
+      out.push({ check: 'brand-cast', file: path, line: lineOf(text, at), message:
+        'casts to a branded category type. Build it through its producer, so the rules cannot be left out (#28).' })
+    }
+  }
+  return out
 }
 
 // ---------------------------------------------------------------------------
 
-if (failures.length) {
-  console.error(`\ncheck:invariants — ${failures.length} problem(s):\n`)
-  console.error(failures.join('\n\n'))
-  console.error(
-    '\nEach of these is a shape that has shipped a real bug here. Fix it, or add the file to the ' +
-      'matching allowlist in scripts/check-invariants.mjs with a reason and an issue number.\n'
-  )
-  process.exit(1)
+function walk(dir, out = [], ext = /\.tsx?$/) {
+  for (const entry of readdirSync(dir)) {
+    if (entry === 'node_modules' || entry === '.next' || entry.startsWith('.')) continue
+    const full = join(dir, entry)
+    if (statSync(full).isDirectory()) walk(full, out, ext)
+    else if (ext.test(full)) out.push(full)
+  }
+  return out
 }
-console.log('invariants ok')
+
+function main() {
+  const ROOT = process.cwd()
+  const read = (f) => ({ path: relative(ROOT, f), text: readFileSync(f, 'utf8') })
+  const files = ['app', 'lib', 'components'].flatMap((d) => walk(join(ROOT, d))).map(read)
+  let scripts = []
+  try {
+    scripts = walk(join(ROOT, 'scripts'), [], /\.mjs$/)
+      .map(read)
+      .filter((f) => f.path !== 'scripts/check-invariants.mjs')
+  } catch {
+    // No scripts/ directory (the scratch trees in tests/unit/check-invariants-txn-reads.test.ts).
+  }
+  const failures = [
+    ...checkUncheckedReads(files),
+    ...checkRuntimeClock(files),
+    ...checkTxnReads(files),
+    ...checkCategoryReads(files),
+    ...checkRulesReads(files),
+    ...checkUserCategoryWrites([...files, ...scripts]),
+    ...checkBrandCasts(files),
+  ]
+  if (failures.length) {
+    console.error(`\ncheck:invariants — ${failures.length} problem(s):\n`)
+    console.error(failures.map((f) => `  ${f.file}:${f.line}\n      [${f.check}] ${f.message}`).join('\n\n'))
+    console.error(
+      '\nEach of these is a shape that has shipped a real bug here. Fix it, or add the file to the ' +
+        'matching allowlist in scripts/check-invariants.mjs with a reason and an issue number.\n'
+    )
+    process.exit(1)
+  }
+  console.log('invariants ok')
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main()
