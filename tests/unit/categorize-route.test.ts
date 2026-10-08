@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 //   so a write missing any guard cannot produce a result at all.
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 
+import { AuthRetryableFetchError, AuthSessionMissingError, type AuthError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
 import { POST } from '@/app/api/transactions/categorize/route'
 
@@ -25,6 +26,7 @@ const CARD_FILTER = 'pfc_detailed.is.null,pfc_detailed.neq.LOAN_PAYMENTS_CREDIT_
 
 function makeSupabase({
   user = { id: 'user-1' } as { id: string } | null,
+  authError = null as AuthError | null,
   row = null as Row | null,
   readError = null as Err,
   categories = [
@@ -35,6 +37,7 @@ function makeSupabase({
   update = { error: null as Err, count: 1 as number | null },
 }: Partial<{
   user: { id: string } | null
+  authError: AuthError | null
   row: Row | null
   readError: Err
   categories: Row[] | null
@@ -47,7 +50,8 @@ function makeSupabase({
     updates: [] as { payload: Row; options: unknown; filters: unknown[][] }[],
   }
   const client = {
-    auth: { getUser: vi.fn().mockResolvedValue({ data: { user } }) },
+    // getUser answers { user: null, error } on ANY auth failure, a dropped connection included.
+    auth: { getUser: vi.fn().mockResolvedValue({ data: { user }, error: authError }) },
     from: vi.fn((table: string) => {
       if (table === 'categories') {
         return {
@@ -144,6 +148,26 @@ describe('POST /api/transactions/categorize', () => {
     const res = await post({ transactionId: 'txn-1', category: 'Grocery' })
     expect(res.status).toBe(401)
     expect((await res.json()).error).toBe('Your session ended. Sign in again.')
+  })
+
+  // What supabase-js returns for a request with no session cookie, or one whose session was ended.
+  it('answers 401 when the auth error is a missing session', async () => {
+    const calls = makeSupabase({ user: null, authError: new AuthSessionMissingError() })
+    const res = await post({ transactionId: 'txn-1', category: 'Grocery' })
+    expect(res.status).toBe(401)
+    expect((await res.json()).error).toBe('Your session ended. Sign in again.')
+    expect(calls.updates).toHaveLength(0)
+  })
+
+  // Supabase Auth unreachable is not a signed-out person: telling them to sign in again would send
+  // them round a login that does not fix anything.
+  it('answers 503 and logs when the auth check itself fails', async () => {
+    const calls = makeSupabase({ user: null, authError: new AuthRetryableFetchError('fetch failed', 0) })
+    const res = await post({ transactionId: 'txn-1', category: 'Grocery' })
+    expect(res.status).toBe(503)
+    expect((await res.json()).error).toBe('That could not be saved. Please try again.')
+    expect(console.error).toHaveBeenCalledWith('[categorize] auth check failed', 'fetch failed')
+    expect(calls.updates).toHaveLength(0)
   })
 
   it('answers 500, not 404, when the read fails, and writes nothing', async () => {

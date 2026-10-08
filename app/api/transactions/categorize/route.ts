@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { isAuthSessionMissingError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
 import { isCardPaymentRow, CREDIT_CARD_PAYMENT_DETAILED } from '@/lib/categories'
 
@@ -25,9 +26,17 @@ export async function POST(req: Request) {
 
   // 2. Sign-in. proxy.ts usually redirects a signed-out /api call first; this stays as defence.
   const supabase = await createClient()
+  //    getUser answers `user: null` with an error on ANY auth failure, including Supabase Auth being
+  //    unreachable. Only a missing session means the person is signed out; anything else is the
+  //    check failing, and "sign in again" would send them round a login that fixes nothing.
   const {
     data: { user },
+    error: authError,
   } = await supabase.auth.getUser()
+  if (authError && !isAuthSessionMissingError(authError)) {
+    console.error('[categorize] auth check failed', authError.message)
+    return NextResponse.json({ error: SAVE_FAILED }, { status: 503 })
+  }
   if (!user) return NextResponse.json({ error: 'Your session ended. Sign in again.' }, { status: 401 })
 
   // 3. Read the row. Every column here is used below, or by learning in PR 3.
