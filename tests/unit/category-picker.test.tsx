@@ -285,6 +285,29 @@ describe('CategoryPicker', () => {
     expect(select().value).toBe('Travel')
   })
 
+  // The optimistic choice must be dropped once the server confirms it, or it would sit over every
+  // later server value: a refresh that brings another member's change would be ignored.
+  it('follows the server after a save that landed', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply(true, { ok: true })))
+    const { rerender } = render(<CategoryPicker {...props} />)
+    fireEvent.change(select(), { target: { value: 'Shopping' } })
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+    rerender(<CategoryPicker {...props} value="Shopping" />)
+    rerender(<CategoryPicker {...props} value="Travel" />)
+    expect(select().value).toBe('Travel')
+  })
+
+  // Between the save landing and the refresh bringing the new value, the picker must not snap back
+  // to the old one: that was the #97 symptom.
+  it('keeps the saved choice showing until the refresh brings it', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply(true, { ok: true })))
+    render(<CategoryPicker {...props} />)
+    fireEvent.change(select(), { target: { value: 'Shopping' } })
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+    expect(select().value).toBe('Shopping')
+    expect(select().disabled).toBe(false)
+  })
+
   it('clears its alert when the server value changes', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply(false, { error: 'No.' })))
     const { rerender } = render(<CategoryPicker {...props} />)

@@ -194,6 +194,7 @@ describe('POST /api/transactions/categorize', () => {
     const calls = makeSupabase({ row: { ...ROW, removed: true } })
     const res = await post({ transactionId: 'txn-1', category: 'Grocery' })
     expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('Your bank removed that transaction. Refresh and try again.')
     expect(calls.updates).toHaveLength(0)
   })
 
@@ -267,10 +268,36 @@ describe('POST /api/transactions/categorize', () => {
     expect((await res.json()).error).toBe('This transaction just changed. Refresh and try again.')
   })
 
+  // A count the server did not send is not a count of one. Treating it as a write would report a
+  // save that may never have happened.
+  it('answers 409 when the write returns no count', async () => {
+    makeSupabase({ row: ROW, update: { error: null, count: null } })
+    const res = await post({ transactionId: 'txn-1', category: 'Grocery' })
+    expect(res.status).toBe(409)
+  })
+
+  // Category names match exactly, as stored. A near-miss is not that category.
+  it('answers 400 for a category in the wrong case, and writes nothing', async () => {
+    const calls = makeSupabase({ row: ROW })
+    const res = await post({ transactionId: 'txn-1', category: 'grocery' })
+    expect(res.status).toBe(400)
+    expect(calls.updates).toHaveLength(0)
+  })
+
   // Spec §6.1 step 7: so a mistaken pick can be recovered from the logs.
   it('logs the previous and new category', async () => {
     makeSupabase({ row: { ...ROW, user_category: 'Food & Drink' } })
     await post({ transactionId: 'txn-1', category: 'Grocery' })
     expect(logs).toContainEqual(['[categorize] changed', { id: 'txn-1', from: 'Food & Drink', to: 'Grocery' }])
+  })
+
+  // The change log is the record of what was written; a write that did not happen must not be in it.
+  it.each([
+    ['a write that matched no rows', { error: null, count: 0 }],
+    ['a failed write', { error: { message: 'boom' }, count: null }],
+  ])('logs no change for %s', async (_, update) => {
+    makeSupabase({ row: ROW, update })
+    await post({ transactionId: 'txn-1', category: 'Grocery' })
+    expect(logs.some((l) => l[0] === '[categorize] changed')).toBe(false)
   })
 })

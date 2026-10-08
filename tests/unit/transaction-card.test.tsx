@@ -600,6 +600,15 @@ describe('TransactionCard sheet on a card payment', () => {
     expect(screen.getByRole('checkbox')).toBeTruthy()
   })
 
+  // busy for a card payment drops the picker's half (it has no picker) but must keep the
+  // reimbursable half, or the sheet closes over a tick in flight and discards its failure (#97).
+  it('will not close on Done while a reimbursable tick on a picked card payment is in flight', () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+    openSheet({ pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', user_category: 'Shopping' })
+    fireEvent.click(screen.getByRole('checkbox'))
+    expect((screen.getByRole('button', { name: 'Done' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
   it('shows neither picker nor reimbursable controls when it carries no pick', () => {
     openSheet({ pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' })
     expect(screen.queryByRole('combobox')).toBeNull()
