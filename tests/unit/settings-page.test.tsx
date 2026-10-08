@@ -36,6 +36,26 @@ vi.mock('@/lib/supabase/server', () => ({
       table === 'transactions' && paged.transactions ? paged.transactions.query() : chainFor(table),
   }),
 }))
+// Categories and rules come through lib/category-context.ts (#28), whose own test covers paging.
+// Built from `results.categories` / `results.category_rules`, so a failed categories read still
+// rejects with the page's message.
+vi.mock('@/lib/category-context', async () => {
+  const { testData } = await import('./helpers/category-context')
+  return {
+    fetchCategoryContext: async () => {
+      const c = results.categories ?? { data: [], error: null }
+      if (c.error) throw new Error(`could not read categories: ${c.error.message}`)
+      const r = results.category_rules ?? { data: [], error: null }
+      if (r.error) throw new Error(`could not read category rules: ${r.error.message}`)
+      return testData(c.data as never, r.data as never)
+    },
+    readTransactionsForCounts: async () => {
+      const t = results.transactions ?? { data: [], error: null }
+      if (t.error) throw new Error(`could not read transactions: ${t.error.message}`)
+      return t.data
+    },
+  }
+})
 // Settings also reads plaid_items/plaid_slot_ledger/manual_assets, all via the service-role
 // client (lib/supabase/admin) rather than the request-scoped one stubbed above. Stubbed out here
 // exactly like tests/unit/dashboard-page.test.tsx does for plaid-items and manual-assets, so the
@@ -77,6 +97,7 @@ beforeEach(() => {
     error: null
   }
   results.categories = { data: [], error: null }
+  results.category_rules = { data: [], error: null }
   results.transactions = { data: [], error: null }
   results.budgets = { data: [], error: null }
   paged.transactions = null
@@ -91,6 +112,15 @@ describe('Settings timezone control', () => {
     const props = findProps(tree, TimezoneCard)
     expect(props).not.toBeNull()
     expect(props?.current).toBe('America/Los_Angeles')
+  })
+})
+
+describe('Settings categories and rules (#28)', () => {
+  // Until Task 7 gives Settings its own "Couldn't load" state, a failed read must not render as a
+  // household with no categories, which offers to create the defaults again (#46).
+  it('throws when the rules cannot be read', async () => {
+    results.category_rules = { data: null, error: { message: 'boom' } }
+    await expect(SettingsPage()).rejects.toThrow(/could not read category rules/)
   })
 })
 

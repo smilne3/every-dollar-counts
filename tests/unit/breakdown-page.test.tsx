@@ -39,6 +39,26 @@ const chainFor = (table: string) => {
 vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({ from: (table: string) => chainFor(table) }),
 }))
+// Categories and rules come through lib/category-context.ts (#28), whose own test covers paging.
+// Built from `results.categories` / `results.category_rules`, so a failed categories read still
+// rejects with the page's message.
+vi.mock('@/lib/category-context', async () => {
+  const { testData } = await import('./helpers/category-context')
+  return {
+    fetchCategoryContext: async () => {
+      const c = results.categories ?? { data: [], error: null }
+      if (c.error) throw new Error(`could not read categories: ${c.error.message}`)
+      const r = results.category_rules ?? { data: [], error: null }
+      if (r.error) throw new Error(`could not read category rules: ${r.error.message}`)
+      return testData(c.data as never, r.data as never)
+    },
+    readTransactionsForCounts: async () => {
+      const t = results.transactions ?? { data: [], error: null }
+      if (t.error) throw new Error(`could not read transactions: ${t.error.message}`)
+      return t.data
+    },
+  }
+})
 vi.mock('@/lib/household', () => ({
   DEFAULT_TIMEZONE: 'America/New_York',
   householdTimezone: async () => tz.value,
@@ -50,6 +70,10 @@ vi.mock('@/lib/history-start', () => ({ historyStart: async () => history.value 
 import BreakdownPage from '@/app/(app)/breakdown/[metric]/page'
 import { BreakdownList } from '@/components/BreakdownList'
 
+const FOOD = { id: 'c-food', name: 'Food & Drink', pfc_primary: 'FOOD_AND_DRINK', sort_order: 0 }
+const GROCERY = { id: 'c-grocery', name: 'Grocery', pfc_primary: null, sort_order: 1 }
+const SAFEWAY_RULE = { id: 'r-safeway', household_id: 'hh-1', merchant_key: 'safeway', merchant_label: 'Safeway', category_id: 'c-grocery', origin: 'seeded' }
+
 const render = (metric: string) => BreakdownPage({ params: Promise.resolve({ metric }) })
 
 beforeEach(() => {
@@ -59,6 +83,7 @@ beforeEach(() => {
   results.accounts = { data: [], error: null }
   results.memberships = { data: { household_id: 'hh-1' }, error: null }
   results.categories = { data: [], error: null }
+  results.category_rules = { data: [], error: null }
   results.transactions = { data: [], error: null }
 })
 
@@ -170,5 +195,49 @@ describe('Saved breakdown: average per month (#126)', () => {
     const tree = await render('saved')
     expect(lists(tree)).toHaveLength(1)
     expect(textOf(tree)).toMatch(reason)
+  })
+})
+
+describe('Breakdown categories and rules (#28)', () => {
+  const safeway = { id: 't1', amount: 42, date: '2026-09-10', merchant_name: 'Safeway', user_category: null, pfc_primary: 'FOOD_AND_DRINK', pfc_detailed: null, reimbursable_amount: null }
+  beforeEach(() => {
+    vi.setSystemTime(new Date('2026-09-15T16:00:00Z'))
+  })
+
+  it('lists Safeway under Grocery through its rule', async () => {
+    results.categories = { data: [FOOD, GROCERY], error: null }
+    results.category_rules = { data: [SAFEWAY_RULE], error: null }
+    results.transactions = { data: [safeway], error: null }
+    const rows = lists(await render('spent'))[0].rows
+    expect(rows).toContainEqual(expect.objectContaining({ label: 'Grocery', amount: 42 }))
+    expect(rows.some((r) => r.label === 'Food & Drink')).toBe(false)
+  })
+
+  // #28 spec §5.4: a rule moves a dollar between categories, never in or out of Saved.
+  it('shows the same money in and out with and without the rule', async () => {
+    const INCOME = { id: 'c-income', name: 'Income', pfc_primary: 'INCOME', sort_order: 2 }
+    results.categories = { data: [FOOD, GROCERY, INCOME], error: null }
+    results.transactions = {
+      data: [
+        safeway,
+        { id: 't2', amount: -3000, date: '2026-09-05', merchant_name: 'Acme Payroll', user_category: null, pfc_primary: 'INCOME', pfc_detailed: null, reimbursable_amount: null },
+      ],
+      error: null,
+    }
+    const inOut = async () => lists(await render('saved'))[0].rows.map((r) => [r.label, r.amount])
+    const without = await inOut()
+    results.category_rules = { data: [SAFEWAY_RULE], error: null }
+    const withRule = await inOut()
+    expect(without).toEqual([
+      ['Money in (income)', 3000],
+      ['Money out (spending)', 42],
+    ])
+    expect(withRule).toEqual(without)
+  })
+
+  // A failed rules read rendered as "no rules" would quietly move every learned label back (#46).
+  it('throws when the categories and rules cannot be read', async () => {
+    results.category_rules = { data: null, error: { message: 'boom' } }
+    await expect(render('spent')).rejects.toThrow(/could not read category rules/)
   })
 })

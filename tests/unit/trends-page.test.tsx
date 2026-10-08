@@ -40,13 +40,39 @@ const chainFor = (table: string) => {
 vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({ from: (table: string) => chainFor(table) }),
 }))
+// Categories and rules come through lib/category-context.ts (#28), whose own test covers paging.
+// Built from `results.categories` / `results.category_rules`, so a failed categories read still
+// rejects with the page's message.
+vi.mock('@/lib/category-context', async () => {
+  const { testData } = await import('./helpers/category-context')
+  return {
+    fetchCategoryContext: async () => {
+      const c = results.categories ?? { data: [], error: null }
+      if (c.error) throw new Error(`could not read categories: ${c.error.message}`)
+      const r = results.category_rules ?? { data: [], error: null }
+      if (r.error) throw new Error(`could not read category rules: ${r.error.message}`)
+      return testData(c.data as never, r.data as never)
+    },
+    readTransactionsForCounts: async () => {
+      const t = results.transactions ?? { data: [], error: null }
+      if (t.error) throw new Error(`could not read transactions: ${t.error.message}`)
+      return t.data
+    },
+  }
+})
 
 import TrendsPage from '@/app/(app)/trends/page'
+import { SpendByCategoryChart } from '@/components/SpendByCategoryChart'
+
+const FOOD = { id: 'c-food', name: 'Food & Drink', pfc_primary: 'FOOD_AND_DRINK', sort_order: 0 }
+const GROCERY = { id: 'c-grocery', name: 'Grocery', pfc_primary: null, sort_order: 1 }
+const SAFEWAY_RULE = { id: 'r-safeway', household_id: 'hh-1', merchant_key: 'safeway', merchant_label: 'Safeway', category_id: 'c-grocery', origin: 'seeded' }
 
 const ok = { data: [], error: null }
 
 beforeEach(() => {
   results.categories = ok
+  results.category_rules = ok
   results.transactions = ok
   results.households = { data: { timezone: 'America/New_York' }, error: null }
   calls.gte = []
@@ -94,5 +120,45 @@ describe('Trends month window', () => {
     // Under 'UTC' these would instead be '2026-07-01' and '2026-08-31' — a whole month later.
     expect(calls.gte).not.toContain('2026-07-01')
     expect(calls.lte).not.toContain('2026-08-31')
+  })
+})
+
+// The chart's props, read straight off the unrendered Server Component tree.
+function findProps(node: unknown, type: unknown): Record<string, unknown> | null {
+  if (node == null || typeof node !== 'object') return null
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findProps(child, type)
+      if (found) return found
+    }
+    return null
+  }
+  const el = node as { type?: unknown; props?: { children?: unknown } }
+  if (el.type === type) return (el.props ?? {}) as Record<string, unknown>
+  if (el.props && 'children' in el.props) return findProps(el.props.children, type)
+  return null
+}
+
+describe('Trends categories and rules (#28)', () => {
+  it('charts Safeway under Grocery through its rule', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-15T12:00:00Z')) // the last complete month is August
+    results.categories = { data: [FOOD, GROCERY], error: null }
+    results.category_rules = { data: [SAFEWAY_RULE], error: null }
+    results.transactions = {
+      data: [
+        { id: 't1', amount: 42, date: '2026-08-10', merchant_name: 'Safeway', user_category: null, pfc_primary: 'FOOD_AND_DRINK', pfc_detailed: null, reimbursable_amount: null },
+      ],
+      error: null,
+    }
+    const chart = findProps(await TrendsPage(), SpendByCategoryChart) as { data: { category: string; amount: number }[] }
+    expect(chart.data).toContainEqual({ category: 'Grocery', amount: 42 })
+    expect(chart.data.some((r) => r.category === 'Food & Drink')).toBe(false)
+  })
+
+  // A failed rules read rendered as "no rules" would quietly move every learned label back (#46).
+  it('throws when the categories and rules cannot be read', async () => {
+    results.category_rules = { data: null, error: { message: 'boom' } }
+    await expect(TrendsPage()).rejects.toThrow(/could not read category rules/)
   })
 })

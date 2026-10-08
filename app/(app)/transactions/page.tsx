@@ -6,8 +6,9 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { SearchIcon } from '@/components/ui/icons'
 import { inputClass } from '@/components/ui/styles'
-import { effectiveCategory } from '@/lib/effective-category'
-import { pfcToName, isCreditCardPayment, type Category } from '@/lib/categories'
+import { isCreditCardPayment } from '@/lib/categories'
+import { fetchCategoryContext } from '@/lib/category-context'
+import { kindOf, resolveCategory } from '@/lib/category-rules'
 import { buildSpendContext } from '@/lib/spend-context'
 import { spendableAmount } from '@/lib/reimbursements'
 
@@ -47,16 +48,10 @@ export default async function TransactionsPage({
   const inMemoryFiltered = !!(category || flow === 'in' || flow === 'out')
 
   const supabase = await createClient()
-  const { data: cats, error: catsError } = await supabase
-    .from('categories')
-    .select('id, name, pfc_primary, sort_order')
-    .order('sort_order')
-  // effectiveCategory falls back to 'Uncategorized' with no map, so every row on the page would be
-  // relabelled and the category filter would match nothing (#46).
-  if (catsError) throw new Error(`could not read categories: ${catsError.message}`)
-  const categories = (cats ?? []) as Category[]
-  const pfcMap = pfcToName(categories)
-  const categoryOptions = categories.map((c) => c.name)
+  // Throws on a failed read: with no categories every row would be relabelled 'Uncategorized' and
+  // the category filter would match nothing (#46).
+  const data = await fetchCategoryContext()
+  const categoryOptions = data.categories.map((c) => c.name)
 
   // account_id -> name, for the phone sheet's Account row (TransactionCard's accountName prop —
   // see spec: "when I tap a transaction, I expect to see the more tiles"). Twelve accounts is
@@ -123,20 +118,20 @@ export default async function TransactionsPage({
   // The fifth money surface (design spec §6/§7): the same SpendContext the other four build, built
   // from this page's own fetched rows — reimbursable now lives on the transaction, so there is no
   // second query to keep in sync with this page's own filters/pagination.
-  const ctx = buildSpendContext({ categories, txns: (txns ?? []) as RealRow[] })
+  const ctx = buildSpendContext({ data, txns: (txns ?? []) as RealRow[] })
 
   let list: RealRow[] = (txns ?? []) as RealRow[]
 
   // Category and flow are on the transaction's EFFECTIVE category (computed), so filter in memory.
   if (category) {
-    list = list.filter((t) => effectiveCategory(t, pfcMap) === category)
+    list = list.filter((t) => resolveCategory(t, ctx).name === category)
   }
   if (flow === 'in' || flow === 'out') {
     list = list.filter((t) => {
       if (isCreditCardPayment(t)) return false
-      const cat = effectiveCategory(t, pfcMap)
-      if (ctx.transfers.has(cat)) return false
-      const isIncomeCat = ctx.nonSpending.has(cat) && !ctx.transfers.has(cat)
+      const kind = kindOf(resolveCategory(t, ctx).name, ctx)
+      if (kind === 'transfer') return false
+      const isIncomeCat = kind === 'income'
       // Netted through spendableAmount, matching monthlyFlows exactly: a fully-tagged reimbursable
       // transaction (either direction) nets to zero and must appear in NEITHER list. This is the
       // flow=in fix: an employer repayment fully tagged to a claim used to still show here even
@@ -236,7 +231,7 @@ export default async function TransactionsPage({
               <TransactionCard
                 key={t.id}
                 t={t}
-                categoryName={effectiveCategory(t, pfcMap)}
+                categoryName={resolveCategory(t, ctx).name}
                 categoryOptions={categoryOptions}
                 accountName={accountNameById.get(t.account_id)}
               />
@@ -279,7 +274,7 @@ export default async function TransactionsPage({
                   <TransactionRow
                     key={t.id}
                     t={t}
-                    categoryName={effectiveCategory(t, pfcMap)}
+                    categoryName={resolveCategory(t, ctx).name}
                     categoryOptions={categoryOptions}
                   />
                 ))}

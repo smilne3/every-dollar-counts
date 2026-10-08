@@ -12,11 +12,10 @@ import {
   savedAverage,
   AVERAGE_SAVED_MONTHS,
   sumManualAssets,
-  type FlowTxn,
 } from '@/lib/dashboard'
 import { listManualAssets } from '@/lib/manual-assets'
-import { spendByCategory, monthKey, type Txn } from '@/lib/budget'
-import { type Category } from '@/lib/categories'
+import { spendByCategory, monthKey } from '@/lib/budget'
+import { fetchCategoryContext } from '@/lib/category-context'
 import { buildSpendContext } from '@/lib/spend-context'
 import { fetchReceivable } from '@/lib/receivable'
 import { todayIn } from '@/lib/clock'
@@ -135,15 +134,9 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
     total = { label: 'Cash on hand', amount: cashOnHand(accounts), currency }
   } else {
     // spent / saved both need this month's flows
-    const { data: cats, error: catsError } = await supabase
-      .from('categories')
-      .select('id, name, pfc_primary, sort_order')
-      .order('sort_order')
-    // Same trap as the dashboard: with no categories the Income and Transfer exclusions never fire,
-    // so a paycheck is counted as negative spending and this breakdown explains a number that never
-    // happened (#46).
-    if (catsError) throw new Error(`could not read categories: ${catsError.message}`)
-    const categories = (cats ?? []) as Category[]
+    // Throws on a failed read. Same trap as the dashboard: with no categories a paycheck is counted
+    // as negative spending and this breakdown explains a number that never happened (#46).
+    const data = await fetchCategoryContext()
 
     // The household's day, not the server's — this month key is also embedded in the outbound
     // /transactions?...&month= links below, so a wrong month here propagates (#73).
@@ -156,7 +149,7 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
     const { data: flowTxns, error: flowError } = await readAllRows(() =>
       supabase
         .from('transactions')
-        .select('id, amount, date, user_category, pfc_primary, pfc_detailed, reimbursable_amount')
+        .select('id, amount, date, merchant_name, user_category, pfc_primary, pfc_detailed, reimbursable_amount')
         .eq('removed', false)
         .gte('date', readFrom)
     )
@@ -164,8 +157,8 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
 
     // The reimbursable map is built straight from this page's own transaction rows — see
     // buildSpendContext.
-    const ctx = buildSpendContext({ categories, txns: (flowTxns ?? []) as Txn[] })
-    const allRows = (flowTxns ?? []) as Txn[]
+    const allRows = flowTxns ?? []
+    const ctx = buildSpendContext({ data, txns: allRows })
     const monthTxns = allRows.filter((t) => monthKey(t.date) === thisKey)
 
     if (metric === 'spent') {
@@ -181,7 +174,7 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
       total = { label: 'Total spent', amount: spent, currency }
     } else {
       // saved
-      const flows = monthlyFlows(allRows as FlowTxn[], ctx, months)
+      const flows = monthlyFlows(allRows, ctx, months)
       const m = flows[flows.length - 1]
       rows = [
         {

@@ -1,9 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
-import { lastCompleteMonths, type Txn } from '@/lib/budget'
+import { lastCompleteMonths } from '@/lib/budget'
 import { trendsView } from '@/lib/trends'
 import { todayIn } from '@/lib/clock'
 import { householdTimezone } from '@/lib/household'
-import { type Category } from '@/lib/categories'
+import { fetchCategoryContext } from '@/lib/category-context'
 import { buildSpendContext } from '@/lib/spend-context'
 import { SpendByCategoryChart } from '@/components/SpendByCategoryChart'
 import { PeriodOverPeriodChart } from '@/components/PeriodOverPeriodChart'
@@ -25,15 +25,9 @@ export default async function TrendsPage() {
   // on the last evening of a month that moved this page forward a whole month early (#73).
   const windows = lastCompleteMonths(todayIn(await householdTimezone()))
 
-  const { data: cats, error: catsError } = await supabase
-    .from('categories')
-    .select('id, name, pfc_primary, sort_order')
-    .order('sort_order')
-  // Not merely cosmetic: with no categories, nothing maps to Income or Transfer, so the exclusions
-  // in spendByCategory never fire and a paycheck is charted as negative spending under
-  // "Uncategorized". A failed read must not become a plausible number (#46).
-  if (catsError) throw new Error(`could not read categories: ${catsError.message}`)
-  const categories = (cats ?? []) as Category[]
+  // Throws on a failed read: with no categories a paycheck is charted as negative spending under
+  // "Uncategorized", and a failed read must not become a plausible number (#46).
+  const data = await fetchCategoryContext()
 
   // Date-bounded at both ends. `previous.from` is the earliest date either card reads; the upper bound
   // is what stops a row dated beyond the window being fetched at all. `inRange` is what actually
@@ -42,7 +36,7 @@ export default async function TrendsPage() {
   const { data: txns, error: txnsError } = await readAllRows(() =>
     supabase
       .from('transactions')
-      .select('id, amount, date, user_category, pfc_primary, pfc_detailed, reimbursable_amount')
+      .select('id, amount, date, merchant_name, user_category, pfc_primary, pfc_detailed, reimbursable_amount')
       .eq('removed', false)
       .gte('date', windows.previous.from)
       .lte('date', windows.current.to)
@@ -52,8 +46,8 @@ export default async function TrendsPage() {
 
   // The reimbursable map is built straight from this page's own transaction rows — see
   // buildSpendContext.
-  const list = (txns ?? []) as Txn[]
-  const ctx = buildSpendContext({ categories, txns: list })
+  const list = txns ?? []
+  const ctx = buildSpendContext({ data, txns: list })
   const view = trendsView(windows, list, ctx)
 
   return (

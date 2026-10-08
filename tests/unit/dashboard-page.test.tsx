@@ -42,6 +42,26 @@ vi.mock('@/lib/supabase/server', () => ({
       table === 'transactions' && paged.transactions ? paged.transactions.query() : chainFor(table),
   }),
 }))
+// Categories and rules come through lib/category-context.ts (#28), whose own test covers paging.
+// Built from `results.categories` / `results.category_rules`, so a failed categories read still
+// rejects with the page's message.
+vi.mock('@/lib/category-context', async () => {
+  const { testData } = await import('./helpers/category-context')
+  return {
+    fetchCategoryContext: async () => {
+      const c = results.categories ?? { data: [], error: null }
+      if (c.error) throw new Error(`could not read categories: ${c.error.message}`)
+      const r = results.category_rules ?? { data: [], error: null }
+      if (r.error) throw new Error(`could not read category rules: ${r.error.message}`)
+      return testData(c.data as never, r.data as never)
+    },
+    readTransactionsForCounts: async () => {
+      const t = results.transactions ?? { data: [], error: null }
+      if (t.error) throw new Error(`could not read transactions: ${t.error.message}`)
+      return t.data
+    },
+  }
+})
 vi.mock('@/lib/household', () => ({
   DEFAULT_TIMEZONE: 'America/New_York',
   householdTimezone: async () => tz.value,
@@ -164,6 +184,7 @@ beforeEach(() => {
   results.accounts = { data: [{ id: 'a1', type: 'depository', current_balance: 100 }], error: null }
   results.memberships = { data: { household_id: 'hh-1' }, error: null }
   results.categories = { data: [], error: null }
+  results.category_rules = { data: [], error: null }
   results.transactions = { data: [], error: null }
   results.budgets = { data: [], error: null }
   paged.transactions = null
@@ -384,6 +405,13 @@ describe('Dashboard reads', () => {
   it('fails loudly when the categories read fails, rather than counting income as spending', async () => {
     results.categories = { data: null, error: { message: 'permission denied' } }
     await expect(render()).rejects.toThrow(/could not read categories: permission denied/)
+  })
+
+  // #28: a failed rules read rendered as "no rules" would quietly move every learned label back,
+  // which is #46's failure in a new place.
+  it('throws when the rules cannot be read', async () => {
+    results.category_rules = { data: null, error: { message: 'boom' } }
+    await expect(render()).rejects.toThrow(/could not read category rules/)
   })
 
   // #69: the six-month window passes PostgREST's 1,000-row cap near each month end. A plain read

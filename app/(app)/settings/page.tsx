@@ -11,8 +11,8 @@ import { listManualAssets } from '@/lib/manual-assets'
 import { CategoryManager, type CategoryUsage } from '@/components/CategoryManager'
 import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { effectiveCategory } from '@/lib/effective-category'
-import { pfcToName, type Category } from '@/lib/categories'
+import { fetchCategoryContext } from '@/lib/category-context'
+import { buildCategoryContext, resolveCategory } from '@/lib/category-rules'
 import { readAllRows } from '@/lib/read-all'
 
 export default async function SettingsPage() {
@@ -30,17 +30,15 @@ export default async function SettingsPage() {
   const slotsUsed = household ? await countSlotsUsed(household.id) : null
   const manualAssets = household ? await listManualAssets(household.id) : []
   const home = manualAssets.find((a) => a.name === 'Home') ?? null
-  const { data: categories, error: categoriesError } = await supabase
-    .from('categories')
-    .select('id, name, pfc_primary, sort_order')
-    .order('sort_order')
-  // An empty list here reads as "you have no categories" and offers to create the defaults again.
-  if (categoriesError) throw new Error(`could not read categories: ${categoriesError.message}`)
+  // Throws on a failed read: an empty list here reads as "you have no categories" and offers to
+  // create the defaults again.
+  const data = await fetchCategoryContext()
+  const categories = data.categories
 
   // What deleting each category would actually cost you, so the confirmation can say so.
   // Counts by EFFECTIVE category: auto-mapped transactions fall back to Uncategorized once
   // the category row is gone, exactly like user-overridden ones.
-  const pfcMap = pfcToName((categories ?? []) as Category[])
+  const ctx = buildCategoryContext(data)
   // Every transaction the household has, so this passed PostgREST's 1,000-row cap long ago and the
   // delete warning undercounted (#69); it pages. A failed read throws rather than showing every
   // category as unused. The budgets read beside it still does not check `error` (#91).
@@ -48,7 +46,7 @@ export default async function SettingsPage() {
     readAllRows(() =>
       supabase
         .from('transactions')
-        .select('id, date, user_category, pfc_primary')
+        .select('id, date, merchant_name, user_category, pfc_primary, pfc_detailed')
         .eq('removed', false)
     ),
     supabase.from('budgets').select('category'),
@@ -56,11 +54,11 @@ export default async function SettingsPage() {
   if (catTxnsError) throw new Error(`could not read transactions: ${catTxnsError.message}`)
   const budgeted = new Set((budgetRows ?? []).map((b) => b.category as string))
   const usage: CategoryUsage = {}
-  for (const c of categories ?? []) {
+  for (const c of categories) {
     usage[c.name] = { txns: 0, hasBudget: budgeted.has(c.name) }
   }
   for (const t of catTxns ?? []) {
-    const name = effectiveCategory(t, pfcMap)
+    const name = resolveCategory(t, ctx).name
     if (usage[name]) usage[name].txns++
   }
 
@@ -107,7 +105,7 @@ export default async function SettingsPage() {
           Rename or delete any category, or add your own. Renames update everywhere; deleting a
           category leaves its transactions uncategorized.
         </p>
-        <CategoryManager initialCategories={categories ?? []} usage={usage} />
+        <CategoryManager initialCategories={categories} usage={usage} />
       </Card>
     </div>
   )
