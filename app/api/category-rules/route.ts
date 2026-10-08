@@ -125,7 +125,7 @@ export async function DELETE(req: Request) {
   const body = (await req.json().catch(() => null)) as Record<string, unknown> | null
   const id = text(body?.id)
   const expectedCategoryId = text(body?.expectedCategoryId)
-  if (!id || !expectedCategoryId) return fail(400, 'Choose a category for this rule.')
+  if (!id || !expectedCategoryId) return fail(400, 'That rule could not be removed. Refresh and try again.')
 
   const auth = await authorize()
   if (auth instanceof NextResponse) return auth

@@ -170,6 +170,16 @@ describe('DELETE /api/category-rules (Remove)', () => {
     db.write = { error: { message: 'boom' }, count: null }
     expect((await remove()).status).toBe(500)
   })
+
+  // Remove has no category to choose, so PATCH's 400 message would mislead here.
+  it('answers 400 with its own message on a malformed body, without touching the database', async () => {
+    getUser.mockClear()
+    const res = await DELETE(req('DELETE', { id: 'r1' }))
+    expect(res.status).toBe(400)
+    expect(await error(res)).toBe('That rule could not be removed. Refresh and try again.')
+    expect(db.calls).toHaveLength(0)
+    expect(getUser).not.toHaveBeenCalled()
+  })
 })
 
 describe.each([
