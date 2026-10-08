@@ -6,27 +6,10 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { SearchIcon } from '@/components/ui/icons'
 import { inputClass } from '@/components/ui/styles'
-import { isCreditCardPayment } from '@/lib/categories'
 import { fetchCategoryContext } from '@/lib/category-context'
-import { kindOf, resolveCategory } from '@/lib/category-rules'
+import { resolveCategory } from '@/lib/category-rules'
+import { filterByCategory, filterByFlow } from '@/lib/category-views'
 import { buildSpendContext } from '@/lib/spend-context'
-import { spendableAmount } from '@/lib/reimbursements'
-
-type RealRow = {
-  id: string
-  name: string | null
-  merchant_name: string | null
-  amount: number
-  date: string
-  user_category: string | null
-  pfc_primary: string | null
-  pfc_detailed: string | null
-  // Selected below alongside everything else; carried in the type now because the phone sheet's
-  // Account row (TransactionCard's accountName prop) is keyed off it.
-  account_id: string
-  reimbursable_amount: number | null
-  reimbursable_note: string | null
-}
 
 export default async function TransactionsPage({
   searchParams,
@@ -118,31 +101,13 @@ export default async function TransactionsPage({
   // The fifth money surface (design spec §6/§7): the same SpendContext the other four build, built
   // from this page's own fetched rows — reimbursable now lives on the transaction, so there is no
   // second query to keep in sync with this page's own filters/pagination.
-  const ctx = buildSpendContext({ data, txns: (txns ?? []) as RealRow[] })
-
-  let list: RealRow[] = (txns ?? []) as RealRow[]
+  const rows = txns ?? []
+  const ctx = buildSpendContext({ data, txns: rows })
 
   // Category and flow are on the transaction's EFFECTIVE category (computed), so filter in memory.
-  if (category) {
-    list = list.filter((t) => resolveCategory(t, ctx).name === category)
-  }
-  if (flow === 'in' || flow === 'out') {
-    list = list.filter((t) => {
-      if (isCreditCardPayment(t)) return false
-      const kind = kindOf(resolveCategory(t, ctx).name, ctx)
-      if (kind === 'transfer') return false
-      const isIncomeCat = kind === 'income'
-      // Netted through spendableAmount, matching monthlyFlows exactly: a fully-tagged reimbursable
-      // transaction (either direction) nets to zero and must appear in NEITHER list. This is the
-      // flow=in fix: an employer repayment fully tagged to a claim used to still show here even
-      // though it contributes $0 to income, so the list didn't reconcile with the figure it drilled
-      // from. Without the sign guard below, an income-category *outflow* (a clawback, or a
-      // user-overridden row) would show here but never appear in the income total either.
-      const amt = spendableAmount(t, ctx.reimbursedByTxn)
-      if (amt === 0) return false
-      return flow === 'in' ? isIncomeCat && amt < 0 : !isIncomeCat
-    })
-  }
+  let list = rows
+  if (category) list = filterByCategory(list, category, ctx)
+  if (flow === 'in' || flow === 'out') list = filterByFlow(list, flow, ctx)
 
   // `totalMatching` (a SQL count) doesn't describe the in-memory-filtered views, so those show a
   // simple count and no paging (see inMemoryFiltered above).

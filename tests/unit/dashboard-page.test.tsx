@@ -604,7 +604,7 @@ describe('Dashboard reads', () => {
   // re-derive — `merchant_name ?? name ?? 'Transaction'` — IS presentTransaction's rule, so both
   // produce the same string for every input. Only the source can be distinguished, not the value:
   // this stamps the module's answer so a locally computed label cannot impersonate it. Restoring
-  // the old duplication at page.tsx:176 fails here and nowhere else.
+  // the old duplication in activityItem (lib/category-views.ts) fails here and nowhere else.
   it('takes the row label from presentTransaction rather than re-deriving the same rule', async () => {
     presentation.stampLabel = true
     results.transactions = {
@@ -624,6 +624,39 @@ describe('Dashboard reads', () => {
       error: null,
     }
     expect(recentItemsOf(await render())![0].label).toBe('presented:Joe S Den')
+  })
+
+  // #28 spec §7.2: Recent activity names a row through resolveCategory, as every total does, so a
+  // rule relabels it here too rather than leaving the dashboard on the bank's Food & Drink.
+  it('labels Safeway Grocery in Recent activity', async () => {
+    results.categories = {
+      data: [
+        { id: 'c-food', name: 'Food & Drink', pfc_primary: 'FOOD_AND_DRINK', sort_order: 0 },
+        { id: 'c-grocery', name: 'Grocery', pfc_primary: null, sort_order: 1 },
+      ],
+      error: null,
+    }
+    results.category_rules = {
+      data: [{ id: 'r-safeway', household_id: 'hh-1', merchant_key: 'safeway', merchant_label: 'Safeway', category_id: 'c-grocery', origin: 'seeded' }],
+      error: null,
+    }
+    results.transactions = {
+      data: [
+        {
+          id: 'r1',
+          name: 'SAFEWAY #123',
+          merchant_name: 'Safeway',
+          amount: 42,
+          date: '2026-09-01',
+          user_category: null,
+          pfc_primary: 'FOOD_AND_DRINK',
+          pfc_detailed: null,
+          reimbursable_amount: null,
+        },
+      ],
+      error: null,
+    }
+    expect(recentItemsOf(await render())![0].category).toBe('Grocery')
   })
 
   // The stage's entire visible payload is these two class strings and nothing else asserts them.

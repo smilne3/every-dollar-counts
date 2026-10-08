@@ -11,8 +11,7 @@ import { StatRows } from '@/components/ui/StatRows'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { money, moneyWhole, longDate, monthNameLong } from '@/lib/format'
 import { fetchCategoryContext } from '@/lib/category-context'
-import { resolveCategory } from '@/lib/category-rules'
-import { presentTransaction } from '@/lib/transaction-presentation'
+import { activityItem } from '@/lib/category-views'
 import {
   netWorth,
   cashOnHand,
@@ -171,21 +170,7 @@ export default async function DashboardPage({
     .limit(6)
   // Otherwise a failed read renders "No transactions yet" to a household with 696 of them.
   if (recentError) throw new Error(`could not read recent transactions: ${recentError.message}`)
-  const recentItems = (recentTxns ?? []).map((t) => {
-    // One source of meaning. The label fallback and the card-payment call used to be made here,
-    // independently of presentTransaction, which is exactly the duplication that module exists to
-    // end. `shareAmount` is unused by this list — it shows no reimbursable state.
-    const p = presentTransaction(t as Parameters<typeof presentTransaction>[0])
-    return {
-      id: t.id as string,
-      date: t.date as string,
-      category: resolveCategory(t, ctx).name,
-      label: p.label,
-      display: p.display,
-      tone: p.tone,
-      isInternal: p.isInternal,
-    }
-  })
+  const recentItems = (recentTxns ?? []).map((t) => activityItem(t, ctx))
 
   const worth = netWorth(accounts, owedToYou) + sumManualAssets(manualAssets)
   const cash = cashOnHand(accounts)
