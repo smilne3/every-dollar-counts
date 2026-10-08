@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { isAuthSessionMissingError } from '@supabase/supabase-js'
+import { isAuthRetryableFetchError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
 import { isCardPaymentRow, CREDIT_CARD_PAYMENT_DETAILED } from '@/lib/categories'
 
@@ -31,15 +31,18 @@ export async function POST(req: Request) {
   }
 
   // 2. Sign-in. proxy.ts usually redirects a signed-out /api call first; this stays as defence.
+  //    getUser answers `user: null` with an error on ANY auth failure. Only a transport failure
+  //    (Supabase Auth unreachable, or a 5xx from it) leaves the session's state unknown, and
+  //    for that alone the answer is "try again". Every other auth error means the session has ended:
+  //    a missing session, but also a dead refresh token on an expired one, which comes back as the
+  //    refresh call's own 4xx (refresh_token_not_found, refresh_token_already_used,
+  //    session_expired). "Try again" there would never succeed.
   const supabase = await createClient()
-  //    getUser answers `user: null` with an error on ANY auth failure, including Supabase Auth being
-  //    unreachable. Only a missing session means the person is signed out; anything else is the
-  //    check failing, and "sign in again" would send them round a login that fixes nothing.
   const {
     data: { user },
     error: authError,
   } = await supabase.auth.getUser()
-  if (authError && !isAuthSessionMissingError(authError)) {
+  if (isAuthRetryableFetchError(authError)) {
     console.error('[categorize] auth check failed', authError.message)
     return NextResponse.json({ error: SAVE_FAILED }, { status: 503 })
   }

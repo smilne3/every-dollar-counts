@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 //   and values those are (#140 tracks tightening the stand-in itself).
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 
-import { AuthRetryableFetchError, AuthSessionMissingError, type AuthError } from '@supabase/supabase-js'
+import { AuthApiError, AuthRetryableFetchError, AuthSessionMissingError, type AuthError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
 import { POST } from '@/app/api/transactions/categorize/route'
 
@@ -158,6 +158,19 @@ describe('POST /api/transactions/categorize', () => {
     expect((await res.json()).error).toBe('Your session ended. Sign in again.')
     expect(calls.updates).toHaveLength(0)
   })
+
+  // A dead refresh token on an expired session comes back as the refresh call's own 4xx error, not
+  // as a missing session. The session has still ended: "try again" would never succeed.
+  it.each(['refresh_token_not_found', 'refresh_token_already_used', 'session_expired'])(
+    'answers 401 for a %s auth error',
+    async (code) => {
+      const calls = makeSupabase({ user: null, authError: new AuthApiError('Invalid Refresh Token', 400, code) })
+      const res = await post({ transactionId: 'txn-1', category: 'Grocery' })
+      expect(res.status).toBe(401)
+      expect((await res.json()).error).toBe('Your session ended. Sign in again.')
+      expect(calls.updates).toHaveLength(0)
+    }
+  )
 
   // Supabase Auth unreachable is not a signed-out person: telling them to sign in again would send
   // them round a login that does not fix anything.
