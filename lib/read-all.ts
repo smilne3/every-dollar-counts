@@ -3,7 +3,7 @@
 // match: it ends on an empty page, never on a short one, so a lower cap costs requests, not rows.
 export const PAGE_SIZE = 1000
 
-type Failure = { data: null; error: { message: string } }
+type Failure = { data: null; error: { message: string; code?: string } }
 type Success<T> = { data: T[]; error: null }
 
 // The part of a Supabase query this needs. Structural, so callers pass the real builder without
@@ -50,5 +50,40 @@ export async function readAllRows<T extends { id: string; date: string }>(
     }
     all.push(...data)
     last = end
+  }
+}
+
+// The part of a Supabase query an id-keyed read needs.
+export interface IdPageableQuery<T> {
+  order(column: string, options?: { ascending?: boolean }): IdPageableQuery<T>
+  gt(column: string, value: string): IdPageableQuery<T>
+  limit(count: number): PromiseLike<{ data: T[] | null; error: { message: string; code?: string } | null }>
+}
+
+// readAllRows for a table with no `date` column (category_rules, #28): pages on `id` alone. The
+// same contract, for the same reasons: `build` returns a new, unbounded query each call; paging is
+// by key; the read ends only on an empty page; a failed page, an empty body, or a page that does
+// not move past the last id fails the whole read.
+//
+// Ids are uuids. Postgres orders uuid by its bytes, which is the order of their lowercase hex text,
+// so the string comparison below agrees with the server's `order by id`.
+export async function readAllById<T extends { id: string }>(
+  build: () => IdPageableQuery<T>
+): Promise<Success<T> | Failure> {
+  const all: T[] = []
+  let lastId: string | null = null
+  for (;;) {
+    let query = build().order('id')
+    if (lastId !== null) query = query.gt('id', lastId)
+    const { data, error } = await query.limit(PAGE_SIZE)
+    if (error) return { data: null, error }
+    if (!data) return { data: null, error: { message: 'read returned no data and no error' } }
+    if (data.length === 0) return { data: all, error: null }
+    const end = data[data.length - 1].id
+    if (lastId !== null && end <= lastId) {
+      return { data: null, error: { message: 'paged read did not advance past the last row' } }
+    }
+    all.push(...data)
+    lastId = end
   }
 }
