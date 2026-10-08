@@ -4,12 +4,20 @@
 -- still exists; it doesn't cross between spending, transfers and income (the same two-kind gate as
 -- lib/category-rules.ts resolveCategory); and it isn't the row's bank category.
 --
--- Run order, immediately before PR 2 deploys (spec §10.2 step 3): back up hand picks, run
--- 021_category_rules_checks.sql's pre-seed checks, run 021_category_rules_dry_run.sql, run this,
--- then the checks file's diff and verification queries.
+-- Run order, immediately before PR 2 deploys (spec §10.2 step 3), in this order:
+--   1. Back up hand picks to CSV: id, plaid_transaction_id, merchant_name, date, amount,
+--      user_category for rows with user_category set.
+--   2. Run `node --env-file=.env.local scripts/check-env-contamination.mjs`. It must print Clean.
+--   3. Run 021_category_rules_checks.sql's pre-seed checks 3a-3d.
+--   4. Record the current-month Spent, Income and Saved tiles, and each of the last six months'
+--      Income and Spending from the dashboard chart tooltip, plus the checks file's 3g fingerprint.
+--   5. Run 021_category_rules_dry_run.sql, then this seed, back to back.
+--   6. Immediately after, run the checks file's 3e diff (both sides must return 0 rows) and 3f
+--      verification, and review 3f's per-merchant list with the owner.
 --
--- Reset, ONLY before PR 2 deploys: delete from public.category_rules where origin = 'seeded';
--- then run this again. After PR 2 deploys there is no reset; changes go through Settings.
+-- Reset, and only before PR 2 deploys (the "never ... delete" below is about after):
+-- delete from public.category_rules where origin = 'seeded'; then run this again. After PR 2
+-- deploys there is no reset; changes go through Settings.
 --
 -- NOT PART OF SETUP. Run once on production, immediately before the category-rules deploy (PR 2).
 -- Never run it again after PR 2 is live: Remove deletes rules, so a re-run brings back every rule

@@ -22,7 +22,7 @@ select id, merchant_name, date, user_category, reimbursable_amount from public.t
 where removed = false and pfc_detailed = 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT'
   and (user_category is not null or reimbursable_amount is not null);
 
--- 3e. Seed diff, after running the seed. Both sides must return 0 rows.
+-- 3e. Seed diff, immediately after running the seed. Both sides must return 0 rows.
 --     `expected` is 021_category_rules_dry_run.sql's query, copied: keep the two in step.
 with expected as (
   with cats as (
