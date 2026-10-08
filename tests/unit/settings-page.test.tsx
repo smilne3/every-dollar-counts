@@ -63,6 +63,7 @@ vi.mock('@/lib/plaid-slots', () => ({ countSlotsUsed: async () => null, LIFETIME
 import SettingsPage from '@/app/(app)/settings/page'
 import { TimezoneCard } from '@/components/TimezoneCard'
 import { CategoryManager } from '@/components/CategoryManager'
+import { CategoryRulesCard } from '@/components/CategoryRulesCard'
 import { BankList } from '@/components/BankList'
 import { txnRows } from '../stubs/postgrest-pages'
 
@@ -161,6 +162,25 @@ describe('Settings categories and rules', () => {
     expect(props.usage.Grocery.impact).toMatchObject({ moved: [{ name: 'Food & Drink', count: 1 }], rulesRemoved: 1 })
   })
 
+  // #28 spec §8.3: each rule with what it does — the rows it relabels, and the merchant's
+  // hand-picked rows it leaves alone.
+  it('shows each rule with its counts', async () => {
+    const TRAVEL = { id: 'c-travel', name: 'Travel', pfc_primary: 'TRAVEL', sort_order: 2 }
+    results.categories = { data: [FOOD, GROCERY, TRAVEL], error: null }
+    results.category_rules = { data: [SAFEWAY_RULE], error: null }
+    results.transactions = {
+      data: [
+        { id: 't1', date: '2026-09-10', merchant_name: 'Safeway', user_category: null, pfc_primary: 'FOOD_AND_DRINK', pfc_detailed: null },
+        { id: 't2', date: '2026-09-11', merchant_name: 'Safeway', user_category: 'Travel', pfc_primary: 'FOOD_AND_DRINK', pfc_detailed: null },
+      ],
+      error: null,
+    }
+    const props = findProps(await SettingsPage(), CategoryRulesCard) as { rules: unknown }
+    expect(props.rules).toEqual([
+      expect.objectContaining({ id: 'r-safeway', merchantLabel: 'Safeway', categoryName: 'Grocery', changed: 1, pickedByHand: 1, matching: 2 }),
+    ])
+  })
+
   // Settings is the only place a bank can be reconnected (spec §7.3), so a failed categories,
   // rules, transactions or budgets read must not take the page down. It must not render as "no
   // categories" either (#46), which would offer to create the defaults again.
@@ -174,6 +194,7 @@ describe('Settings categories and rules', () => {
     const tree = await SettingsPage()
     expect(findProps(tree, BankList)).not.toBeNull()
     expect(findProps(tree, CategoryManager)).toBeNull()
+    expect(findProps(tree, CategoryRulesCard)).toBeNull()
     expect(alertText(tree)).toContain("Couldn't load categories and rules.")
   })
 })

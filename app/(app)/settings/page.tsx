@@ -12,19 +12,10 @@ import { CategoryManager, type CategoryUsage } from '@/components/CategoryManage
 import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { fetchCategoryContext, readTransactionsForCounts } from '@/lib/category-context'
-import { buildCategoryContext, kindOf, type Kind } from '@/lib/category-rules'
-import { categoryUsage, deleteImpact, type RuleCounts } from '@/lib/category-views'
+import { buildCategoryContext, kindOf } from '@/lib/category-rules'
+import { categoryUsage, deleteImpact } from '@/lib/category-views'
+import { CategoryRulesCard, type RuleView, type RuleCategory } from '@/components/CategoryRulesCard'
 import type { Category } from '@/lib/categories'
-
-// What the Category rules card shows per rule (Task 9 renders it).
-export type RuleView = RuleCounts & {
-  id: string
-  merchantLabel: string
-  categoryId: string
-  categoryName: string
-  origin: 'seeded' | 'learned'
-}
-export type RuleCategory = { id: string; name: string; kind: Kind }
 
 type CategorySettings = {
   categories: Category[]
@@ -153,6 +144,17 @@ export default async function SettingsPage() {
         </p>
         {categorySettings ? (
           <CategoryManager initialCategories={categorySettings.categories} usage={categorySettings.usage} />
+        ) : (
+          categoriesUnavailable
+        )}
+      </Card>
+
+      {/* scroll-mt clears the phone's sticky h-14 top bar (AppShell), so a #category-rules link
+          does not land the heading under it; there is no sticky bar from md up. */}
+      <Card id="category-rules" className="scroll-mt-20 md:scroll-mt-6 p-5 space-y-3">
+        <h2 className="text-base font-semibold text-ink">Category rules</h2>
+        {categorySettings ? (
+          <CategoryRulesCard rules={categorySettings.rules} categories={categorySettings.ruleCategories} />
         ) : (
           categoriesUnavailable
         )}
