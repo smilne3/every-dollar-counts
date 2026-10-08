@@ -1,370 +1,319 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-// app/api/transactions/categorize/route.ts is the only route that sets an arbitrary override on a
-// single transaction. Until #98 it wrote whatever it was handed after checking nothing but auth, so
-// both of the guards asserted here were enforced by the UI alone — TransactionRow and, since #96,
-// TransactionCard's sheet. Every new surface had to remember them independently, and stages 2-5 of
-// the mobile pass are still open.
-//
-// Same shape as tests/unit/reimbursable-route.test.ts, with two differences that exist because a
-// review mutation-tested the first draft of this file and three killed guards still passed:
-//   - select() PROJECTS the fixture down to the columns actually requested, so narrowing the query
-//     starves isCreditCardPayment exactly as it would in production instead of being papered over
-//     by a fixture that always carries every field.
-//   - update() is reachable only through .eq(), so an unscoped update — which would rewrite every
-//     row RLS lets the caller touch — cannot resolve at all.
-vi.mock('@/lib/supabase/server', () => ({
-  createClient: vi.fn(),
-}))
+// The only route that sets a category on one transaction (#28 spec §6.1, PR 1). The stand-in is
+// strict on purpose, because a permissive one hid three dead guards here before (#99):
+// - select() PROJECTS the fixture to the requested columns, so a narrowed read starves the guards;
+// - the categories read only resolves through .eq('household_id', …).order('sort_order');
+// - update() resolves only through two .eq()s and an .or(); the tests below assert which columns
+//   and values those are (#140 tracks tightening the stand-in itself).
+vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 
+import { AuthApiError, AuthRetryableFetchError, AuthSessionMissingError, type AuthError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
 import { POST } from '@/app/api/transactions/categorize/route'
 
 type Row = Record<string, unknown>
-type ReadResult = { data: Row | null; error: { message: string } | null }
-type ListResult = { data: { name: string }[] | null; error: { message: string } | null }
-type UpdateResult = { data: unknown; error: { message: string } | null; count: number | null }
+type Err = { message: string } | null
 
-// Return only the columns the caller asked for. `select('id')` must not hand back pfc_detailed.
-function project(result: ReadResult, columns: string): ReadResult {
-  if (!result.data) return result
-  const wanted = columns.split(',').map((c) => c.trim())
-  const data: Row = {}
-  for (const key of wanted) if (key in result.data) data[key] = result.data[key]
-  return { ...result, data }
+function project(data: Row | null, columns: string): Row | null {
+  if (!data) return data
+  const out: Row = {}
+  for (const c of columns.split(',').map((s) => s.trim())) if (c in data) out[c] = data[c]
+  return out
 }
+
+const CARD_FILTER = 'pfc_detailed.is.null,pfc_detailed.neq.LOAN_PAYMENTS_CREDIT_CARD_PAYMENT'
 
 function makeSupabase({
   user = { id: 'user-1' } as { id: string } | null,
-  readResult = { data: null, error: null } as ReadResult,
-  categories = { data: [{ name: 'Food & Drink' }, { name: 'Shopping' }], error: null } as ListResult,
-  updateResult = { data: null, error: null, count: 1 } as UpdateResult,
-  onSelect,
-  onUpdate,
-}: {
-  user?: { id: string } | null
-  readResult?: ReadResult
-  categories?: ListResult
-  updateResult?: UpdateResult
-  onSelect?: (columns: string) => void
-  onUpdate?: (payload: Row, filter: Row, options: Row | undefined) => void
-} = {}) {
-  return {
-    auth: {
-      getUser: vi.fn().mockResolvedValue({ data: { user } }),
-    },
+  authError = null as AuthError | null,
+  row = null as Row | null,
+  readError = null as Err,
+  categories = [
+    { id: 'c1', name: 'Food & Drink', pfc_primary: 'FOOD_AND_DRINK', sort_order: 1 },
+    { id: 'c2', name: 'Grocery', pfc_primary: null, sort_order: 2 },
+  ] as Row[] | null,
+  categoriesError = null as Err,
+  update = { error: null as Err, count: 1 as number | null },
+}: Partial<{
+  user: { id: string } | null
+  authError: AuthError | null
+  row: Row | null
+  readError: Err
+  categories: Row[] | null
+  categoriesError: Err
+  update: { error: Err; count: number | null }
+}> = {}) {
+  const calls = {
+    readColumns: '' as string,
+    categories: [] as unknown[][],
+    updates: [] as { payload: Row; options: unknown; filters: unknown[][] }[],
+  }
+  const client = {
+    // getUser answers { user: null, error } on ANY auth failure, a dropped connection included.
+    auth: { getUser: vi.fn().mockResolvedValue({ data: { user }, error: authError }) },
     from: vi.fn((table: string) => {
       if (table === 'categories') {
-        return { select: vi.fn().mockResolvedValue(categories) }
+        return {
+          select: (cols: string) => {
+            calls.categories.push(['select', cols])
+            return {
+              eq: (c: string, v: unknown) => {
+                calls.categories.push(['eq', c, v])
+                return {
+                  order: (c2: string) => {
+                    calls.categories.push(['order', c2])
+                    return Promise.resolve({ data: categories, error: categoriesError })
+                  },
+                }
+              },
+            }
+          },
+        }
       }
       return {
-        select: vi.fn((columns: string) => {
-          onSelect?.(columns)
+        select: (cols: string) => {
+          calls.readColumns = cols
+          return { eq: () => ({ maybeSingle: () => Promise.resolve({ data: project(row, cols), error: readError }) }) }
+        },
+        update: (payload: Row, options: unknown) => {
+          const entry = { payload, options, filters: [] as unknown[][] }
+          calls.updates.push(entry)
           return {
-            eq: vi.fn(() => ({
-              maybeSingle: vi.fn().mockResolvedValue(project(readResult, columns)),
-            })),
+            eq: (c1: string, v1: unknown) => {
+              entry.filters.push(['eq', c1, v1])
+              return {
+                eq: (c2: string, v2: unknown) => {
+                  entry.filters.push(['eq', c2, v2])
+                  return {
+                    or: (f: string) => {
+                      entry.filters.push(['or', f])
+                      return Promise.resolve(update)
+                    },
+                  }
+                },
+              }
+            },
           }
-        }),
-        // Deliberately NOT a thenable. The route must narrow the update with .eq() to get a result
-        // at all; `await` on this bare object would yield it verbatim and fail every assertion.
-        update: vi.fn((payload: Row, options: Row | undefined) => ({
-          eq: vi.fn((column: string, value: unknown) => {
-            onUpdate?.(payload, { [column]: value }, options)
-            return Promise.resolve(updateResult)
-          }),
-        })),
+        },
       }
     }),
   }
+  vi.mocked(createClient).mockResolvedValue(client as never)
+  return calls
 }
 
-function postRequest(body: unknown) {
-  return new Request('http://localhost/api/transactions/categorize', {
+const ROW = {
+  id: 'txn-1',
+  household_id: 'hh-1',
+  merchant_name: 'Safeway',
+  pfc_primary: 'FOOD_AND_DRINK',
+  pfc_detailed: 'FOOD_AND_DRINK_GROCERIES',
+  removed: false,
+  user_category: null,
+}
+
+const post = (body: unknown) =>
+  POST(new Request('http://localhost/api/transactions/categorize', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: typeof body === 'string' ? body : JSON.stringify(body),
+  }))
+
+let logs: unknown[][]
+beforeEach(() => {
+  vi.mocked(createClient).mockReset()
+  logs = []
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  vi.spyOn(console, 'info').mockImplementation((...a) => void logs.push(a))
+})
+afterEach(() => vi.restoreAllMocks())
+
+describe('POST /api/transactions/categorize: validation before the database', () => {
+  it.each([
+    ['malformed JSON', '{not json'],
+    ['no transactionId', { category: 'Grocery' }],
+    ['an empty category', { transactionId: 'txn-1', category: '' }],
+    ['a whitespace-only category', { transactionId: 'txn-1', category: '   ' }],
+  ])('answers 400 for %s without touching the database', async (_, body) => {
+    const res = await post(body)
+    expect(res.status).toBe(400)
+    expect(createClient).not.toHaveBeenCalled()
   })
-}
-
-const baseTxn = {
-  id: 'txn-1',
-  pfc_detailed: null as string | null,
-  user_category: null as string | null,
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const asClient = (s: ReturnType<typeof makeSupabase>) => s as any
+})
 
 describe('POST /api/transactions/categorize', () => {
-  beforeEach(() => {
-    vi.mocked(createClient).mockReset()
-    // The route logs the database's words on the two failure paths below. Silenced so a passing run
-    // stays clean; the assertions check the RESPONSE, which is the part the user sees.
-    vi.spyOn(console, 'error').mockImplementation(() => {})
-  })
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
-  it('refuses an unauthenticated caller with 401', async () => {
-    vi.mocked(createClient).mockResolvedValue(asClient(makeSupabase({ user: null })))
-    const res = await POST(postRequest({ transactionId: 'txn-1', category: 'Shopping' }))
+  it('answers 401 without a user, with a readable message', async () => {
+    makeSupabase({ user: null })
+    const res = await post({ transactionId: 'txn-1', category: 'Grocery' })
     expect(res.status).toBe(401)
+    expect((await res.json()).error).toBe('Your session ended. Sign in again.')
   })
 
-  // Fail CLOSED, exactly as /api/reimbursable does: "the query failed" and "no such transaction"
-  // are different facts, and a read error must never be mistaken for permission to write.
-  it('fails closed with 500, not 404, when the transaction read errors', async () => {
-    vi.mocked(createClient).mockResolvedValue(
-      asClient(makeSupabase({ readResult: { data: null, error: { message: 'connection reset' } } }))
-    )
-    const res = await POST(postRequest({ transactionId: 'txn-1', category: 'Shopping' }))
+  // What supabase-js returns for a request with no session cookie, or one whose session was ended.
+  it('answers 401 when the auth error is a missing session', async () => {
+    const calls = makeSupabase({ user: null, authError: new AuthSessionMissingError() })
+    const res = await post({ transactionId: 'txn-1', category: 'Grocery' })
+    expect(res.status).toBe(401)
+    expect((await res.json()).error).toBe('Your session ended. Sign in again.')
+    expect(calls.updates).toHaveLength(0)
+  })
+
+  // A dead refresh token on an expired session comes back as the refresh call's own 4xx error, not
+  // as a missing session. The session has still ended: "try again" would never succeed.
+  it.each(['refresh_token_not_found', 'refresh_token_already_used', 'session_expired'])(
+    'answers 401 for a %s auth error',
+    async (code) => {
+      const calls = makeSupabase({ user: null, authError: new AuthApiError('Invalid Refresh Token', 400, code) })
+      const res = await post({ transactionId: 'txn-1', category: 'Grocery' })
+      expect(res.status).toBe(401)
+      expect((await res.json()).error).toBe('Your session ended. Sign in again.')
+      expect(calls.updates).toHaveLength(0)
+    }
+  )
+
+  // Supabase Auth unreachable is not a signed-out person: telling them to sign in again would send
+  // them round a login that does not fix anything.
+  it('answers 503 and logs when the auth check itself fails', async () => {
+    const calls = makeSupabase({ user: null, authError: new AuthRetryableFetchError('fetch failed', 0) })
+    const res = await post({ transactionId: 'txn-1', category: 'Grocery' })
+    expect(res.status).toBe(503)
+    expect((await res.json()).error).toBe('That could not be saved. Please try again.')
+    expect(console.error).toHaveBeenCalledWith('[categorize] auth check failed', 'fetch failed')
+    expect(calls.updates).toHaveLength(0)
+  })
+
+  it('answers 500, not 404, when the read fails, and writes nothing', async () => {
+    const calls = makeSupabase({ readError: { message: 'boom' } })
+    const res = await post({ transactionId: 'txn-1', category: 'Grocery' })
     expect(res.status).toBe(500)
-    expect(res.status).not.toBe(404)
+    expect(calls.updates).toHaveLength(0)
   })
 
-  it('returns 404 when the transaction does not exist', async () => {
-    vi.mocked(createClient).mockResolvedValue(
-      asClient(makeSupabase({ readResult: { data: null, error: null } }))
-    )
-    const res = await POST(postRequest({ transactionId: 'nope', category: 'Shopping' }))
-    expect(res.status).toBe(404)
+  it('answers 404 when the transaction does not exist', async () => {
+    makeSupabase({ row: null })
+    expect((await post({ transactionId: 'txn-1', category: 'Grocery' })).status).toBe(404)
   })
 
-  // Without these two columns isCreditCardPayment evaluates `!undefined && undefined === '...'`,
-  // which is false for every row — the #98 guard silently stops guarding. A narrowed select is a
-  // one-word edit, so name the requirement rather than leaving it to the fixture.
-  it('reads the columns the card-payment guard depends on', async () => {
-    let columns = ''
-    vi.mocked(createClient).mockResolvedValue(
-      asClient(
-        makeSupabase({
-          readResult: { data: baseTxn, error: null },
-          onSelect: (c) => {
-            columns = c
-          },
-        })
-      )
-    )
-    await POST(postRequest({ transactionId: 'txn-1', category: 'Shopping' }))
-    expect(columns).toContain('pfc_detailed')
-    expect(columns).toContain('user_category')
+  it('reads every column the later steps need', async () => {
+    const calls = makeSupabase({ row: ROW })
+    await post({ transactionId: 'txn-1', category: 'Grocery' })
+    for (const col of ['id', 'household_id', 'merchant_name', 'pfc_primary', 'pfc_detailed', 'removed', 'user_category']) {
+      expect(calls.readColumns.split(',').map((c) => c.trim())).toContain(col)
+    }
   })
 
-  // The #98 guard. isCreditCardPayment is `!user_category && pfc_detailed === ...`, so writing ANY
-  // override here flips that predicate false for good and re-enters the leg you categorized into
-  // the totals: measured on a real row, September spending went from $3,949.16 to -$3,917.53.
-  it('refuses to categorize a credit-card payment with 400', async () => {
-    let captured: Row | null = null
-    vi.mocked(createClient).mockResolvedValue(
-      asClient(
-        makeSupabase({
-          readResult: {
-            data: { ...baseTxn, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', user_category: null },
-            error: null,
-          },
-          onUpdate: (payload) => {
-            captured = payload
-          },
-        })
-      )
-    )
-    const res = await POST(postRequest({ transactionId: 'txn-1', category: 'Shopping' }))
+  it('answers 400 for a row the bank removed, and writes nothing', async () => {
+    const calls = makeSupabase({ row: { ...ROW, removed: true } })
+    const res = await post({ transactionId: 'txn-1', category: 'Grocery' })
     expect(res.status).toBe(400)
-    // The status alone would pass even if the write had already happened.
-    expect(captured).toBeNull()
+    expect((await res.json()).error).toBe('Your bank removed that transaction. Refresh and try again.')
+    expect(calls.updates).toHaveLength(0)
   })
 
-  // The override-wins contract (lib/categories.ts) is deliberate: once a human has said what this
-  // row is, respect it. Only an AUTO-categorized card payment is refused, so a legacy override
-  // stays correctable rather than frozen — and the correction must actually be written.
-  it('allows a card payment that the user has already overridden', async () => {
-    let captured: Row | null = null
-    vi.mocked(createClient).mockResolvedValue(
-      asClient(
-        makeSupabase({
-          readResult: {
-            data: {
-              ...baseTxn,
-              pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT',
-              user_category: 'Shopping',
-            },
-            error: null,
-          },
-          onUpdate: (payload) => {
-            captured = payload
-          },
-        })
-      )
-    )
-    const res = await POST(postRequest({ transactionId: 'txn-1', category: 'Food & Drink' }))
-    expect(res.status).toBe(200)
-    expect(captured).toEqual({ user_category: 'Food & Drink' })
-  })
-
-  // effectiveCategory returns user_category verbatim, so an unvalidated string becomes its own
-  // spending bucket — absent from nonSpendingNames AND transferNames, counted as real spending.
-  it('refuses a category that is not one of the household categories', async () => {
-    let captured: Row | null = null
-    vi.mocked(createClient).mockResolvedValue(
-      asClient(
-        makeSupabase({
-          readResult: { data: baseTxn, error: null },
-          onUpdate: (payload) => {
-            captured = payload
-          },
-        })
-      )
-    )
-    const res = await POST(postRequest({ transactionId: 'txn-1', category: 'Not A Category' }))
+  // #59: on an unpicked card payment, any user_category re-enters it into every total. An already-
+  // picked one stays refused: changing it can move it between spending and income, and a pick
+  // cannot be cleared back to the exclusion (spec decision 7).
+  it.each([
+    ['an unpicked card payment', null],
+    ['a card payment someone already filed by hand', 'Shopping'],
+  ])('answers 400 for %s, and writes nothing', async (_, pick) => {
+    const calls = makeSupabase({
+      row: { ...ROW, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', user_category: pick },
+    })
+    const res = await post({ transactionId: 'txn-1', category: 'Grocery' })
     expect(res.status).toBe(400)
-    expect(captured).toBeNull()
+    expect((await res.json()).error).toBe('A credit-card payment is already kept out of spending and income.')
+    expect(calls.updates).toHaveLength(0)
   })
 
-  it('fails closed with 500 when the category list cannot be read', async () => {
-    vi.mocked(createClient).mockResolvedValue(
-      asClient(
-        makeSupabase({
-          readResult: { data: baseTxn, error: null },
-          categories: { data: null, error: { message: 'connection reset' } },
-        })
-      )
-    )
-    const res = await POST(postRequest({ transactionId: 'txn-1', category: 'Shopping' }))
+  it("reads the row's household's categories, in order", async () => {
+    const calls = makeSupabase({ row: ROW })
+    await post({ transactionId: 'txn-1', category: 'Grocery' })
+    expect(calls.categories).toEqual([
+      ['select', 'id, name, pfc_primary, sort_order'],
+      ['eq', 'household_id', 'hh-1'],
+      ['order', 'sort_order'],
+    ])
+  })
+
+  it('answers 500 when the categories read fails, and writes nothing', async () => {
+    const calls = makeSupabase({ row: ROW, categoriesError: { message: 'boom' } })
+    const res = await post({ transactionId: 'txn-1', category: 'Grocery' })
     expect(res.status).toBe(500)
+    expect((await res.json()).error).toBe('That could not be saved. Please try again.')
+    expect(calls.updates).toHaveLength(0)
   })
 
-  it('writes a category that the household actually has, to that row alone', async () => {
-    let captured: Row | null = null
-    let filter: Row | null = null
-    let options: Row | undefined
-    vi.mocked(createClient).mockResolvedValue(
-      asClient(
-        makeSupabase({
-          readResult: { data: baseTxn, error: null },
-          onUpdate: (p, f, o) => {
-            captured = p
-            filter = f
-            options = o
-          },
-        })
-      )
-    )
-    const res = await POST(postRequest({ transactionId: 'txn-1', category: 'Shopping' }))
+  // A name that is not one of the household's categories, including the display fallback
+  // 'Uncategorized' (spec decision 7: clearing is not supported).
+  it.each(['Uncategorized', 'Not A Category'])('answers 400 for %s, and writes nothing', async (category) => {
+    const calls = makeSupabase({ row: ROW })
+    const res = await post({ transactionId: 'txn-1', category })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('That category no longer exists. Refresh and try again.')
+    expect(calls.updates).toHaveLength(0)
+  })
+
+  it('writes the category with every guard inside the update', async () => {
+    const calls = makeSupabase({ row: ROW })
+    const res = await post({ transactionId: 'txn-1', category: '  Grocery  ' })
     expect(res.status).toBe(200)
-    expect(captured).toEqual({ user_category: 'Shopping' })
-    // An update that is not narrowed to this id rewrites every row RLS lets the caller reach.
-    expect(filter).toEqual({ id: 'txn-1' })
-    // Supabase sends no count header unless asked, and without a count a write that matched nothing
-    // is indistinguishable from a write that worked. See the zero-row test below.
-    expect(options).toEqual({ count: 'exact' })
+    expect(await res.json()).toEqual({ ok: true })
+    expect(calls.updates).toEqual([
+      {
+        payload: { user_category: 'Grocery' },
+        options: { count: 'exact' },
+        filters: [['eq', 'id', 'txn-1'], ['eq', 'removed', false], ['or', CARD_FILTER]],
+      },
+    ])
   })
 
-  // 'Uncategorized' is a DISPLAY sentinel from effectiveCategory, never a row in `categories` —
-  // but CategoryPicker keeps it in the option list whenever it is the current value. Validating it
-  // like a real name would reject an option that is on screen; writing it literally would create
-  // the phantom bucket above. Choosing it means "no override".
-  it('clears the override when Uncategorized is chosen, rather than refusing it', async () => {
-    let captured: Row | null = null
-    vi.mocked(createClient).mockResolvedValue(
-      asClient(
-        makeSupabase({
-          readResult: { data: { ...baseTxn, user_category: 'Shopping' }, error: null },
-          onUpdate: (payload) => {
-            captured = payload
-          },
-        })
-      )
-    )
-    const res = await POST(postRequest({ transactionId: 'txn-1', category: 'Uncategorized' }))
-    expect(res.status).toBe(200)
-    expect(captured).toEqual({ user_category: null })
-  })
-
-  it('clears the override when the category is empty', async () => {
-    let captured: Row | null = null
-    vi.mocked(createClient).mockResolvedValue(
-      asClient(
-        makeSupabase({
-          readResult: { data: { ...baseTxn, user_category: 'Shopping' }, error: null },
-          onUpdate: (payload) => {
-            captured = payload
-          },
-        })
-      )
-    )
-    const res = await POST(postRequest({ transactionId: 'txn-1', category: '' }))
-    expect(res.status).toBe(200)
-    expect(captured).toEqual({ user_category: null })
-  })
-
-  // Without the trim, a padded name fails validation against a list that plainly contains it.
-  it('accepts a category with surrounding whitespace', async () => {
-    let captured: Row | null = null
-    vi.mocked(createClient).mockResolvedValue(
-      asClient(
-        makeSupabase({
-          readResult: { data: baseTxn, error: null },
-          onUpdate: (payload) => {
-            captured = payload
-          },
-        })
-      )
-    )
-    const res = await POST(postRequest({ transactionId: 'txn-1', category: '  Shopping  ' }))
-    expect(res.status).toBe(200)
-    expect(captured).toEqual({ user_category: 'Shopping' })
-  })
-
-  // And without it, a cell of spaces is stored verbatim: a category whose name is invisible.
-  it('treats a whitespace-only category as clearing the override', async () => {
-    let captured: Row | null = null
-    vi.mocked(createClient).mockResolvedValue(
-      asClient(
-        makeSupabase({
-          readResult: { data: baseTxn, error: null },
-          onUpdate: (payload) => {
-            captured = payload
-          },
-        })
-      )
-    )
-    const res = await POST(postRequest({ transactionId: 'txn-1', category: '   ' }))
-    expect(res.status).toBe(200)
-    expect(captured).toEqual({ user_category: null })
-  })
-
-  // A write that fails must not report success. CategoryPicker keeps its optimistic value on a 200,
-  // so a swallowed write error is #97 reproduced from the server side.
-  it('reports a failed write as 500 rather than success', async () => {
-    vi.mocked(createClient).mockResolvedValue(
-      asClient(
-        makeSupabase({
-          readResult: { data: baseTxn, error: null },
-          updateResult: { data: null, error: { message: 'deadlock detected' }, count: null },
-        })
-      )
-    )
-    const res = await POST(postRequest({ transactionId: 'txn-1', category: 'Shopping' }))
+  it('answers 500 for a failed write, without the database text', async () => {
+    makeSupabase({ row: ROW, update: { error: { message: 'new row violates row-level security' }, count: null } })
+    const res = await post({ transactionId: 'txn-1', category: 'Grocery' })
     expect(res.status).toBe(500)
-    const body = await res.json()
-    // The database's words are logged, not shown (app/api/manual-assets/route.ts:47-53).
-    expect(body.error).not.toContain('deadlock')
+    expect((await res.json()).error).toBe('That could not be saved. Please try again.')
   })
 
-  // How #73 hid: no update policy, the write matched nothing, Supabase reported no error, and the
-  // old value came back forever. The row count is the only thing that distinguishes the two.
-  it('reports an update that matched no rows as 500 rather than success', async () => {
-    vi.mocked(createClient).mockResolvedValue(
-      asClient(
-        makeSupabase({
-          readResult: { data: baseTxn, error: null },
-          updateResult: { data: null, error: null, count: 0 },
-        })
-      )
-    )
-    const res = await POST(postRequest({ transactionId: 'txn-1', category: 'Shopping' }))
-    expect(res.status).toBe(500)
+  // The row changed between the read and the write: Plaid removed or re-tagged it.
+  it('answers 409 when the write matched no rows', async () => {
+    makeSupabase({ row: ROW, update: { error: null, count: 0 } })
+    const res = await post({ transactionId: 'txn-1', category: 'Grocery' })
+    expect(res.status).toBe(409)
+    expect((await res.json()).error).toBe('This transaction just changed. Refresh and try again.')
+  })
+
+  // A count the server did not send is not a count of one. Treating it as a write would report a
+  // save that may never have happened.
+  it('answers 409 when the write returns no count', async () => {
+    makeSupabase({ row: ROW, update: { error: null, count: null } })
+    const res = await post({ transactionId: 'txn-1', category: 'Grocery' })
+    expect(res.status).toBe(409)
+  })
+
+  // Category names match exactly, as stored. A near-miss is not that category.
+  it('answers 400 for a category in the wrong case, and writes nothing', async () => {
+    const calls = makeSupabase({ row: ROW })
+    const res = await post({ transactionId: 'txn-1', category: 'grocery' })
+    expect(res.status).toBe(400)
+    expect(calls.updates).toHaveLength(0)
+  })
+
+  // Spec §6.1 step 7: so a mistaken pick can be recovered from the logs.
+  it('logs the previous and new category', async () => {
+    makeSupabase({ row: { ...ROW, user_category: 'Food & Drink' } })
+    await post({ transactionId: 'txn-1', category: 'Grocery' })
+    expect(logs).toContainEqual(['[categorize] changed', { id: 'txn-1', from: 'Food & Drink', to: 'Grocery' }])
+  })
+
+  // The change log is the record of what was written; a write that did not happen must not be in it.
+  it.each([
+    ['a write that matched no rows', { error: null, count: 0 }],
+    ['a failed write', { error: { message: 'boom' }, count: null }],
+  ])('logs no change for %s', async (_, update) => {
+    makeSupabase({ row: ROW, update })
+    await post({ transactionId: 'txn-1', category: 'Grocery' })
+    expect(logs.some((l) => l[0] === '[categorize] changed')).toBe(false)
   })
 })

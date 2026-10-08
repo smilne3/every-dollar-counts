@@ -4,6 +4,12 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { selectClass } from './ui/styles'
 
+const SAVE_FAILED = 'That could not be saved.'
+const SESSION_ENDED = 'Your session ended. Sign in again.'
+// The request may have reached the server and written before the reply was lost (a phone dropping
+// signal mid-request), so "could not be saved" would be a guess. Say so, and reload to show the truth.
+const MAY_NOT_HAVE_SAVED = 'It may not have saved. Showing the latest.'
+
 export function CategoryPicker({
   transactionId,
   value,
@@ -15,22 +21,33 @@ export function CategoryPicker({
   value: string
   options: string[]
   label?: string
-  // Told whenever a save starts and stops, so a host that can UNMOUNT this control — the phone
-  // sheet, whose children are gated on `open` — can refuse to close over a request in flight. The
-  // error below is set after the await, and React silently no-ops a setState on an unmounted
-  // component, so without somewhere for it to land a failed save is discarded before it is shown.
-  // Optional: the desktop row is mounted for the life of the page and passes nothing.
+  // Told whenever a save starts and stops, so a host that can UNMOUNT this control (the phone sheet)
+  // can refuse to close over a request in flight; a failed save's message would otherwise land on an
+  // unmounted component and be lost. The desktop row passes nothing.
   onBusyChange?: (busy: boolean) => void
 }) {
   const router = useRouter()
-  const [val, setVal] = useState(value)
+  // The choice being saved, shown in place of the server's value until the save settles. On failure
+  // it is dropped, so the picker falls back to the server's CURRENT value, even one that arrived by
+  // refresh while the request was in flight. Rolling back to the value captured at event time would
+  // undo that newer value with nothing left to correct it (#102).
+  const [pending, setPending] = useState<string | null>(null)
+  const val = pending ?? value
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Follow the server. When a refresh brings a new value (another household member, or a category
+  // rule), show it and drop any optimistic choice or alert. React's documented way to adjust state
+  // when a prop changes; the same idiom as components/ReimbursableCheckbox.tsx.
+  const [seen, setSeen] = useState(value)
+  if (seen !== value) {
+    setSeen(value)
+    setPending(null)
+    setError(null)
+  }
 
-  // Ensure the current value is selectable even if it's 'Uncategorized' or stale.
+  // The current value is always selectable, even when it is 'Uncategorized' or a stale name.
   const opts = options.includes(val) ? options : [val, ...options]
 
-  // One place to change both, so the host's view of "in flight" cannot drift from the control's own.
   function working(now: boolean) {
     setSaving(now)
     onBusyChange?.(now)
@@ -38,59 +55,75 @@ export function CategoryPicker({
 
   async function change(e: React.ChangeEvent<HTMLSelectElement>) {
     const category = e.target.value
-    // What to fall back to if the save is refused. Read before the optimistic update, not after.
-    const previous = val
-    setVal(category)
+    setPending(category)
     working(true)
     setError(null)
-    let saved = false
+    // What to do once the request has settled: reload after a save, or after one whose outcome is
+    // unknown. Never while it is in flight, and never after a refusal.
+    let reload = false
     try {
       const res = await fetch('/api/transactions/categorize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transactionId, category }),
       })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        // Put the picker back where the server still has it. An optimistic value that survives a
-        // rejection is a lie: it shows a category that was never saved, and the next refresh
-        // silently replaces it with the old one for no visible reason (#97).
-        setVal(previous)
-        // The route's refusals are written to be read aloud — an unknown category, or a
-        // credit-card payment (#98). A generic message would discard the only actionable part.
-        setError(body.error ?? 'That could not be saved.')
+      const isJson = (res.headers.get('content-type') ?? '').includes('application/json')
+      // A signed-out call is redirected to /login and fetch follows it to an HTML page: a 200 that
+      // saved nothing. The route always answers in JSON, so a 200 that is not JSON is not its reply.
+      // A non-OK reply that is not JSON (an HTML 5xx page, say) is a failed save, not an ended
+      // session, and falls through.
+      if (res.redirected || (res.ok && !isJson)) {
+        setPending(null)
+        setError(SESSION_ENDED)
         return
       }
-      saved = true
-    } catch {
-      // Same reasoning as the !res.ok branch — the request never landed, so the value must not stand.
-      setVal(previous)
-      setError('That could not be saved.')
+      let body: { ok?: unknown; error?: unknown } | null = null
+      let unreadable: { err: unknown } | null = null
+      if (isJson) {
+        try {
+          body = await res.json()
+        } catch (err) {
+          unreadable = { err }
+        }
+      }
+      if (res.ok && unreadable) {
+        // The route's own 200 that cannot be read. It only answers 200 after the write, so the save
+        // probably landed, but nothing here can say so. Treated like a request that never landed.
+        throw unreadable.err
+      }
+      if (!res.ok || body?.ok !== true) {
+        // Back to what the server has (the prop), not to the last local value (#102).
+        setPending(null)
+        setError(typeof body?.error === 'string' ? body.error : SAVE_FAILED)
+        return
+      }
+      reload = true
+    } catch (err) {
+      // The request failed in flight, or its 200 could not be read. Neither means it never reached
+      // the server.
+      console.error('[CategoryPicker] save failed', err)
+      setPending(null)
+      setError(MAY_NOT_HAVE_SAVED)
+      reload = true
     } finally {
-      // `disabled` means "in flight", never "has failed": leaving it disabled after a rejection
-      // would strand the user on the wrong category with no way to try again.
+      // `disabled` means "in flight", never "has failed".
       working(false)
     }
-    // Outside the try, deliberately. A throw from router.refresh() is not a failed save, and inside
-    // the catch it would revert the value and show an error on a write the server has already
-    // accepted — this component's own bug, inverted.
-    if (saved) router.refresh()
+    // Outside the try: a throw from refresh is not a failed save.
+    if (reload) router.refresh()
   }
 
-  // A fragment, deliberately: this component contributes no box of its own, so each surface keeps
-  // full control of how the picker is placed and sized. Width now comes from `selectClass` itself,
-  // which carries `w-full md:w-auto` for the 44px phone tap target (§7) — full width in the sheet
-  // (TransactionCard.tsx), content width in the desktop <td> (TransactionRow.tsx). That `md:w-auto`
-  // is load-bearing, not tidiness: drop it and `w-full` reaches desktop and stretches the picker
-  // across the whole category column, measured at 357px in a 389px cell against 133px today.
-  //
-  // A wrapper would not change the width any more — `w-full` would fill it — but it would still
-  // insert a box between the picker and whatever layout the surface has built, and the error below
-  // would be trapped inside it rather than laying out as the surface's own child. `block` on that
-  // error gives it its own line in the table cell and is a no-op in the sheet, where flex items are
-  // blockified.
+  // One wrapper for the select and its alert: a column at every width, the alert in flow directly
+  // under the select. Spec §8.2 asks for one line so a routine tap never moves other rows (the
+  // principle behind #50). A failed save is rare and has to be readable, and in the narrow fixed
+  // Category column every no-growth layout failed: truncated beside the select it hid the message,
+  // floated below it covered the next row, and on the last row the table's overflow-x-auto box
+  // clipped it. So while a save error shows, that one row grows, until the next pick, a new value
+  // from the server, or a page reload clears it. On desktop the column stretches the select to the
+  // Category cell's width, and `md:max-w-full` keeps it inside the cell, which also stops a long
+  // option name running into the Amount column (#138).
   return (
-    <>
+    <span className="flex w-full min-w-0 flex-col gap-1 md:w-auto md:max-w-full">
       <select
         value={val}
         onChange={change}
@@ -105,10 +138,10 @@ export function CategoryPicker({
         ))}
       </select>
       {error && (
-        <span role="alert" className="block text-xs text-coral">
+        <span role="alert" className="text-xs text-coral">
           {error}
         </span>
       )}
-    </>
+    </span>
   )
 }

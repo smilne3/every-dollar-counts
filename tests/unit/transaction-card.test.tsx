@@ -397,12 +397,14 @@ describe('TransactionCard sheet with a save in flight', () => {
   // A fetch the test settles by hand, so "in flight" is a state the test controls rather than
   // races. Resolving it is how the failure is delivered.
   function pendingFetch() {
-    let settle!: (res: { ok: boolean; json: () => Promise<unknown> }) => void
+    let settle!: (res: { ok: boolean; headers: Headers; json: () => Promise<unknown> }) => void
     const fetchMock = vi.fn(() => new Promise((resolve) => { settle = resolve }))
     vi.stubGlobal('fetch', fetchMock)
+    // Both routes answer in JSON, and CategoryPicker reads the content type to know the reply is theirs.
+    const headers = () => new Headers({ 'content-type': 'application/json' })
     return {
-      refuse: () => settle({ ok: false, json: async () => ({ error: 'nope' }) }),
-      accept: () => settle({ ok: true, json: async () => ({}) }),
+      refuse: () => settle({ ok: false, headers: headers(), json: async () => ({ error: 'nope' }) }),
+      accept: () => settle({ ok: true, headers: headers(), json: async () => ({}) }),
     }
   }
 
@@ -531,6 +533,31 @@ describe('TransactionCard sheet with a save in flight', () => {
     expect((done() as HTMLButtonElement).disabled).toBe(false)
   })
 
+  // The same, for the picker alone: a refresh that turns this row into a card payment WITH a pick
+  // removes the picker but keeps the reimbursable controls (they follow isCC). The picker's stale
+  // "in flight" must stop counting the moment it is unmounted.
+  it('does not lock the sheet shut when only the picker disappears mid-flight', () => {
+    pendingFetch()
+    const { rerender } = render(
+      <TransactionCard t={txn} categoryName="Food" categoryOptions={['Food', 'Grocery']} />
+    )
+    fireEvent.click(screen.getByRole('button', { name: /edit/ }))
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Grocery' } })
+    expect((done() as HTMLButtonElement).disabled).toBe(true)
+
+    rerender(
+      <TransactionCard
+        t={{ ...txn, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', user_category: 'Shopping' }}
+        categoryName="Shopping"
+        categoryOptions={['Food', 'Grocery']}
+      />
+    )
+
+    expect(screen.queryByRole('combobox')).toBeNull()
+    expect(screen.queryByRole('checkbox')).not.toBeNull()
+    expect((done() as HTMLButtonElement).disabled).toBe(false)
+  })
+
   // Nothing is in flight here, so the ordinary way out must be untouched.
   it('still closes on Done when no save is in flight', () => {
     openSheet()
@@ -539,5 +566,53 @@ describe('TransactionCard sheet with a save in flight', () => {
     fireEvent.click(done())
 
     expect(screen.queryByRole('checkbox')).toBeNull()
+  })
+})
+
+describe('TransactionCard card payment with a pick', () => {
+  const picked = { pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', user_category: 'Shopping' }
+
+  it('names the pick on the row', () => {
+    renderCard(picked)
+    expect(screen.getByText(/2026-08-29 · Shopping/)).toBeTruthy()
+  })
+
+  it('offers no picker in the sheet', () => {
+    renderCard(picked)
+    fireEvent.click(screen.getByRole('button', { name: /Joe S Den/ }))
+    expect(screen.queryByRole('combobox')).toBeNull()
+    expect(screen.getByText(/Shopping · card payment, moves between your accounts\./)).toBeTruthy()
+  })
+})
+
+// Spec §8.1/§12: only the category control goes. The reimbursable route still accepts a mark on a
+// card payment that carries a pick (isCC is false for it), and the desktop row still offers it, so
+// the phone sheet must too.
+describe('TransactionCard sheet on a card payment', () => {
+  function openSheet(overrides: Partial<typeof txn>) {
+    renderCard(overrides)
+    fireEvent.click(screen.getByRole('button', { name: /Joe S Den/ }))
+  }
+
+  it('keeps the reimbursable controls when the card payment carries a pick', () => {
+    openSheet({ pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', user_category: 'Shopping' })
+    expect(screen.queryByRole('combobox')).toBeNull()
+    expect(screen.getByRole('checkbox')).toBeTruthy()
+  })
+
+  // busy for a card payment drops the picker's half (it has no picker) but must keep the
+  // reimbursable half, or the sheet closes over a tick in flight and discards its failure (#97).
+  it('will not close on Done while a reimbursable tick on a picked card payment is in flight', () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+    openSheet({ pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', user_category: 'Shopping' })
+    fireEvent.click(screen.getByRole('checkbox'))
+    expect((screen.getByRole('button', { name: 'Done' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('shows neither picker nor reimbursable controls when it carries no pick', () => {
+    openSheet({ pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' })
+    expect(screen.queryByRole('combobox')).toBeNull()
+    expect(screen.queryByRole('checkbox')).toBeNull()
+    expect(screen.queryByRole('button', { name: /partial reimbursable amount/ })).toBeNull()
   })
 })

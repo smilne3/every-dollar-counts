@@ -42,15 +42,28 @@ export const TRANSFER_PFC = new Set(['TRANSFER_IN', 'TRANSFER_OUT'])
 // income) — and neither is real: the purchases were already counted as spending when they happened.
 // So credit-card payments must be excluded from both spending and income. Genuine loan payments
 // (mortgage, car, student) are real single-counted outflows and are NOT excluded.
-const CREDIT_CARD_PAYMENT_DETAILED = 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT'
+export const CREDIT_CARD_PAYMENT_DETAILED = 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT'
 
 // True for an auto-categorized credit-card payment. A user override wins (existing contract): if
-// they deliberately recategorized it, respect that and let normal category logic apply.
+// they deliberately recategorized it, respect that and let normal category logic apply. That only
+// governs how an already-picked card payment is COUNTED (picked before #28, or picked before Plaid
+// re-tagged the row as a card payment): since #28 the categorize route refuses to set a pick on any
+// card payment (see isCardPaymentRow below).
 export function isCreditCardPayment(t: {
   pfc_detailed: string | null
   user_category: string | null
 }): boolean {
   return !t.user_category && t.pfc_detailed === CREDIT_CARD_PAYMENT_DETAILED
+}
+
+// True for any credit-card payment, whether or not someone has picked a category for it (#28).
+// Not the same question as isCreditCardPayment, which asks whether the row is still KEPT OUT of the
+// totals and so turns false once a pick is set. This one asks whether the row may be recategorized:
+// never. On an unpicked one any user_category re-enters it into every total (#59). An already-picked
+// one stays refused too: changing it can move it between spending and income, and a pick cannot be
+// cleared back to the exclusion (spec decision 7).
+export function isCardPaymentRow(pfcDetailed: string | null): boolean {
+  return pfcDetailed === CREDIT_CARD_PAYMENT_DETAILED
 }
 
 // Map: Plaid PFC primary -> the household's category name for it.

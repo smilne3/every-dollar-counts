@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { isCardPaymentRow } from '@/lib/categories'
 import { money, shortDate } from '@/lib/format'
 import { presentTransaction, TONE_CLASS } from '@/lib/transaction-presentation'
 import { Dialog } from '@/components/ui/Dialog'
@@ -58,12 +59,16 @@ export function TransactionCard({
   // `label` is never null — presentTransaction owns the fallback so this card and the desktop row
   // cannot answer "what is this called?" differently (spec §9).
   const { label: name, display, tone, isCC, shareAmount } = presentTransaction(t)
-  // Gated on isCC as well, so that a refresh which turns this row INTO a card payment — replacing
-  // all three controls with the explanatory line — cannot leave a stale "in flight" behind and lock the sheet shut
-  // for good. Holding someone inside a sheet they cannot leave is a worse bug than the one this
-  // is here to prevent, so the state that withholds the exit is tied to the controls existing.
-  const busy = !isCC && (pickerBusy || checkboxBusy || editorBusy)
-  const categoryLabel = isCC ? 'Card payment' : categoryName
+  // As TransactionRow: the route refuses every card payment, picked or not (#28).
+  const cardPayment = isCardPaymentRow(t.pfc_detailed)
+  // Each flag counts only while its control is mounted: the picker while this is not a card payment,
+  // the checkbox and editor while !isCC (a card payment that carries a pick keeps them). A refresh
+  // that removes a control mid-flight — turning this row INTO a card payment — must not leave a stale
+  // "in flight" behind and lock the sheet shut for good. Holding someone inside a sheet they cannot
+  // leave is a worse bug than the one this is here to prevent, so the state that withholds the exit
+  // is tied to the controls existing.
+  const busy = (!cardPayment && pickerBusy) || (!isCC && (checkboxBusy || editorBusy))
+  const categoryLabel = cardPayment ? (t.user_category ?? 'Card payment') : categoryName
   const shareLabel = shareAmount !== null ? `, your share ${money(shareAmount)}` : ''
 
   // The whole row is the control: a 390px row has no room for a separate affordance, and the
@@ -140,12 +145,18 @@ export function TransactionCard({
               )}
             </dl>
 
-            {isCC ? (
-              // Same exemption the desktop row enforces. A user_category here re-enters both legs
-              // of the payment into every total — see TransactionRow.tsx:48-58.
-              <p className="mt-4 text-sm text-muted">Card payment — moves between your accounts.</p>
-            ) : (
-              <div className="mt-4 flex flex-col gap-4">
+            {/* The category is text for ANY card payment — the categorize route refuses them all,
+                picked or not (#28) — exactly as in TransactionRow's Category cell. The reimbursable
+                controls follow isCC on both surfaces: hidden on an unpicked card payment, kept on
+                one that already carries a pick, which the reimbursable route still accepts. */}
+            <div className="mt-4 flex flex-col gap-4">
+              {cardPayment ? (
+                <p className="text-sm text-muted">
+                  {t.user_category
+                    ? `${t.user_category} · card payment, moves between your accounts.`
+                    : 'Card payment — moves between your accounts.'}
+                </p>
+              ) : (
                 <label className="flex flex-col gap-1.5">
                   <span className="text-xs font-semibold uppercase tracking-wide text-faint">Category</span>
                   <CategoryPicker
@@ -156,32 +167,36 @@ export function TransactionCard({
                     onBusyChange={setPickerBusy}
                   />
                 </label>
+              )}
 
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-faint">Reimbursable</span>
-                  <ReimbursableCheckbox
+              {!isCC && (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-faint">Reimbursable</span>
+                    <ReimbursableCheckbox
+                      transactionId={t.id}
+                      amount={t.amount}
+                      reimbursableAmount={t.reimbursable_amount}
+                      note={t.reimbursable_note}
+                      label={name}
+                      pfcDetailed={t.pfc_detailed}
+                      userCategory={t.user_category}
+                      onBusyChange={setCheckboxBusy}
+                    />
+                  </div>
+
+                  <ReimbursableEditor
                     transactionId={t.id}
                     amount={t.amount}
                     reimbursableAmount={t.reimbursable_amount}
                     note={t.reimbursable_note}
                     label={name}
-                    pfcDetailed={t.pfc_detailed}
-                    userCategory={t.user_category}
-                    onBusyChange={setCheckboxBusy}
+                    date={t.date}
+                    onBusyChange={setEditorBusy}
                   />
-                </div>
-
-                <ReimbursableEditor
-                  transactionId={t.id}
-                  amount={t.amount}
-                  reimbursableAmount={t.reimbursable_amount}
-                  note={t.reimbursable_note}
-                  label={name}
-                  date={t.date}
-                  onBusyChange={setEditorBusy}
-                />
-              </div>
-            )}
+                </>
+              )}
+            </div>
           </>
         )}
       </Dialog>
