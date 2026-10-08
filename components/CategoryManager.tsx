@@ -5,9 +5,16 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/Button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { inputClass } from '@/components/ui/styles'
+import type { DeleteImpact } from '@/lib/category-views'
 
 type Cat = { id: string; name: string; pfc_primary: string | null }
-export type CategoryUsage = Record<string, { txns: number; hasBudget: boolean }>
+export type CategoryUsage = Record<string, { txns: number; hasBudget: boolean; impact: DeleteImpact }>
+
+const NO_USAGE: CategoryUsage[string] = {
+  txns: 0,
+  hasBudget: false,
+  impact: { uncategorized: 0, moved: [], movedMore: 0, rulesRemoved: 0, toSpending: 0 },
+}
 
 export function CategoryManager({
   initialCategories,
@@ -51,7 +58,7 @@ export function CategoryManager({
           key={c.id}
           cat={c}
           busy={busy}
-          usage={usage[c.name] ?? { txns: 0, hasBudget: false }}
+          usage={usage[c.name] ?? NO_USAGE}
           onSave={(name) => call('PATCH', { id: c.id, name }, `Renamed to “${name}”.`)}
           onDelete={() => call('DELETE', { id: c.id }, `Deleted “${c.name}”.`)}
         />
@@ -92,7 +99,7 @@ function CategoryRow({
 }: {
   cat: Cat
   busy: boolean
-  usage: { txns: number; hasBudget: boolean }
+  usage: CategoryUsage[string]
   onSave: (name: string) => void
   onDelete: () => void
 }) {
@@ -148,19 +155,42 @@ function CategoryRow({
           onDelete()
         }}
       >
-        {usage.txns > 0 ? (
-          <p>
-            <strong className="font-semibold text-ink">
-              {usage.txns} transaction{usage.txns === 1 ? '' : 's'}
-            </strong>{' '}
-            will become Uncategorized.
-          </p>
-        ) : (
-          <p>No transactions currently use this category.</p>
-        )}
+        <DeleteImpactLines name={cat.name} impact={usage.impact} />
         {usage.hasBudget && <p>Its monthly budget will be deleted.</p>}
         <p>This can’t be undone.</p>
       </ConfirmDialog>
     </div>
+  )
+}
+
+const txns = (n: number) => `${n} transaction${n === 1 ? '' : 's'}`
+
+// What deleting this category would actually do (#28 spec §8.4), from deleteImpact. It used to say
+// every row "will become Uncategorized", which was wrong for hand picks (they take their merchant's
+// rule, or their bank category) and would be wrong again for rule-labelled rows.
+function DeleteImpactLines({ name, impact }: { name: string; impact: DeleteImpact }) {
+  const moving = impact.uncategorized + impact.moved.reduce((s, m) => s + m.count, 0) + impact.movedMore
+  return (
+    <>
+      {moving === 0 && <p>No transactions currently use this category.</p>}
+      {impact.uncategorized > 0 && (
+        <p>
+          <strong className="font-semibold text-ink">{txns(impact.uncategorized)}</strong> will become Uncategorized.
+        </p>
+      )}
+      {impact.moved.map((m) => (
+        <p key={m.name}>
+          <strong className="font-semibold text-ink">{txns(m.count)}</strong> will move to {m.name}.
+        </p>
+      ))}
+      {impact.movedMore > 0 && <p>And {impact.movedMore} more will move to other categories.</p>}
+      {impact.rulesRemoved > 0 && (
+        <p>
+          {impact.rulesRemoved} merchant rule{impact.rulesRemoved === 1 ? '' : 's'} that file into {name} will be
+          removed.
+        </p>
+      )}
+      {impact.toSpending > 0 && <p>{impact.toSpending} of these will start counting as spending.</p>}
+    </>
   )
 }

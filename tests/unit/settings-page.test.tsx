@@ -2,11 +2,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 // vi.hoisted for the same reason as tests/unit/dashboard-page.test.tsx: the static page import
 // below is linked before this file's body runs, firing the mock factory.
-const { results, paged } = vi.hoisted(() => ({
+const { results } = vi.hoisted(() => ({
   results: {} as Record<string, { data: unknown; error: { message: string } | null }>,
-  // When set, `transactions` is served by a PostgREST-like stub that caps each response at 1,000
-  // rows, so the test can tell a paged read from a plain one (#69).
-  paged: { transactions: null as null | { query: () => Record<string, unknown> } },
 }))
 
 // A supabase query is a builder awaited at the end, so the stub returns itself for every chained
@@ -32,8 +29,7 @@ const chainFor = (table: string) => {
 
 vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({
-    from: (table: string) =>
-      table === 'transactions' && paged.transactions ? paged.transactions.query() : chainFor(table),
+    from: (table: string) => chainFor(table),
   }),
 }))
 // Categories and rules come through lib/category-context.ts (#28), whose own test covers paging.
@@ -67,7 +63,12 @@ vi.mock('@/lib/plaid-slots', () => ({ countSlotsUsed: async () => null, LIFETIME
 import SettingsPage from '@/app/(app)/settings/page'
 import { TimezoneCard } from '@/components/TimezoneCard'
 import { CategoryManager } from '@/components/CategoryManager'
-import { pagedTable, txnRows } from '../stubs/postgrest-pages'
+import { BankList } from '@/components/BankList'
+import { txnRows } from '../stubs/postgrest-pages'
+
+const FOOD = { id: 'c-food', name: 'Food & Drink', pfc_primary: 'FOOD_AND_DRINK', sort_order: 0 }
+const GROCERY = { id: 'c-grocery', name: 'Grocery', pfc_primary: null, sort_order: 1 }
+const SAFEWAY_RULE = { id: 'r-safeway', household_id: 'hh-1', merchant_key: 'safeway', merchant_label: 'Safeway', category_id: 'c-grocery', origin: 'seeded' }
 
 // Server Components return an unrendered React element tree — no DOM, no hooks fired — so the
 // prop SettingsPage hands TimezoneCard can be read straight off that tree without mounting
@@ -87,6 +88,30 @@ function findProps(node: unknown, type: unknown): Record<string, unknown> | null
   return null
 }
 
+// The children of the first element with role="alert", walked the same way as findProps. Only
+// finds markup the page itself writes: a component's own output is not in an unrendered tree.
+function alertText(node: unknown): string | null {
+  if (node == null || typeof node !== 'object') return null
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = alertText(child)
+      if (found != null) return found
+    }
+    return null
+  }
+  const el = node as { props?: { role?: unknown; children?: unknown } }
+  if (el.props?.role === 'alert') return flatText(el.props.children)
+  if (el.props && 'children' in el.props) return alertText(el.props.children)
+  return null
+}
+
+function flatText(node: unknown): string {
+  if (node == null || typeof node === 'boolean') return ''
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(flatText).join('')
+  return flatText((node as { props?: { children?: unknown } }).props?.children)
+}
+
 beforeEach(() => {
   results.households = {
     data: [{ id: 'hh-1', name: 'Test Household', timezone: 'America/Los_Angeles' }],
@@ -100,7 +125,6 @@ beforeEach(() => {
   results.category_rules = { data: [], error: null }
   results.transactions = { data: [], error: null }
   results.budgets = { data: [], error: null }
-  paged.transactions = null
 })
 
 describe('Settings timezone control', () => {
@@ -115,36 +139,41 @@ describe('Settings timezone control', () => {
   })
 })
 
-describe('Settings categories and rules (#28)', () => {
-  // Until Task 7 gives Settings its own "Couldn't load" state, a failed read must not render as a
-  // household with no categories, which offers to create the defaults again (#46).
-  it('throws when the rules cannot be read', async () => {
-    results.category_rules = { data: null, error: { message: 'boom' } }
-    await expect(SettingsPage()).rejects.toThrow(/could not read category rules/)
-  })
-})
-
-describe('Settings category usage (#69)', () => {
-  // The delete-category warning says how many transactions would move. On 2026-10-05 the household
-  // had 1,366, and the unpaged read counted 1,000 of them: the warning undercounted by 366. A plain
-  // read against this stub gets 1,000 too, so this fails if the page stops paging.
+describe('Settings categories and rules', () => {
+  // The delete-category dialog says how many transactions would move. On 2026-10-05 the household
+  // had 1,366, and an unpaged read counted 1,000 of them (#69). readTransactionsForCounts pages (its
+  // own test covers that); this pins that Settings counts every row it returns.
   it('counts every transaction, past the 1,000-row cap', async () => {
-    results.categories = {
-      data: [{ id: 'c1', name: 'Groceries', pfc_primary: 'FOOD_AND_DRINK', sort_order: 0 }],
+    results.categories = { data: [{ id: 'c1', name: 'Groceries', pfc_primary: 'FOOD_AND_DRINK', sort_order: 0 }], error: null }
+    results.transactions = {
+      data: txnRows(1366, '2025-10-18', { merchant_name: null, user_category: 'Groceries', pfc_primary: 'FOOD_AND_DRINK', pfc_detailed: null }),
       error: null,
     }
-    paged.transactions = pagedTable(
-      txnRows(1366, '2025-10-18', { user_category: 'Groceries', pfc_primary: 'FOOD_AND_DRINK' })
-    )
-    const tree = await SettingsPage()
-    const props = findProps(tree, CategoryManager) as { usage: Record<string, { txns: number }> }
+    const props = findProps(await SettingsPage(), CategoryManager) as { usage: Record<string, { txns: number }> }
     expect(props.usage.Groceries.txns).toBe(1366)
   })
 
-  // A failed read used to show every category as "0 transactions" (#91), and paging adds requests
-  // that can fail. It must fail loudly instead, so app/(app)/error.tsx shows a retry.
-  it('throws when the transactions read fails on a later page', async () => {
-    paged.transactions = pagedTable(txnRows(1366, '2025-10-18'), { failOnRequest: 2 })
-    await expect(SettingsPage()).rejects.toThrow(/could not read transactions/)
+  it('hands the delete dialog what a delete would move', async () => {
+    results.categories = { data: [FOOD, GROCERY], error: null }
+    results.category_rules = { data: [SAFEWAY_RULE], error: null }
+    results.transactions = { data: [{ id: 't1', date: '2026-09-10', merchant_name: 'Safeway', user_category: null, pfc_primary: 'FOOD_AND_DRINK', pfc_detailed: null }], error: null }
+    const props = findProps(await SettingsPage(), CategoryManager) as { usage: Record<string, { impact: unknown }> }
+    expect(props.usage.Grocery.impact).toMatchObject({ moved: [{ name: 'Food & Drink', count: 1 }], rulesRemoved: 1 })
+  })
+
+  // Settings is the only place a bank can be reconnected (spec §7.3), so a failed categories,
+  // rules, transactions or budgets read must not take the page down. It must not render as "no
+  // categories" either (#46), which would offer to create the defaults again.
+  it.each([
+    ['categories', () => (results.categories = { data: null, error: { message: 'boom' } })],
+    ['rules', () => (results.category_rules = { data: null, error: { message: 'boom' } })],
+    ['transactions', () => (results.transactions = { data: null, error: { message: 'boom' } })],
+    ['budgets', () => (results.budgets = { data: null, error: { message: 'boom' } })],
+  ])('keeps Banks usable and shows an alert when the %s read fails', async (_name, fail) => {
+    fail()
+    const tree = await SettingsPage()
+    expect(findProps(tree, BankList)).not.toBeNull()
+    expect(findProps(tree, CategoryManager)).toBeNull()
+    expect(alertText(tree)).toContain("Couldn't load categories and rules.")
   })
 })

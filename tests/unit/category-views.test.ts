@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { filterByCategory, filterByFlow, activityItem } from '@/lib/category-views'
+import { filterByCategory, filterByFlow, activityItem, categoryUsage, deleteImpact } from '@/lib/category-views'
 import { spendByCategory } from '@/lib/budget'
 import { monthlyFlows } from '@/lib/dashboard'
 import { spendableAmount } from '@/lib/reimbursements'
 import { buildSpendContext } from '@/lib/spend-context'
 import { kindOf } from '@/lib/category-rules'
-import { DEFAULTS, GROCERY, rule, testData } from './helpers/category-context'
+import { DEFAULTS, GROCERY, cat, rule, testData } from './helpers/category-context'
 
 // #28 spec §7.2. These used to sit inline in pages, where nothing tested them. The parity tests
 // run the real functions against each other: a Breakdown row and the list it opens must add up.
@@ -91,5 +91,59 @@ describe('activityItem', () => {
   it('labels a Safeway row Grocery', () => {
     const t = { ...ROWS[2], name: 'SAFEWAY #123' }
     expect(activityItem(t, ctx)).toMatchObject({ id: 'c', date: '2026-09-10', category: 'Grocery' })
+  })
+})
+
+describe('categoryUsage', () => {
+  it("counts each category's rows exactly as its drill-down lists them", () => {
+    const { categories } = categoryUsage(ROWS, data, new Set(['Grocery']))
+    for (const c of DEFAULTS) {
+      expect(categories[c.name].txns, c.name).toBe(filterByCategory(ROWS, c.name, ctx).length)
+    }
+    expect(categories.Grocery).toEqual({ txns: 3, hasBudget: true })
+    expect(categories['Loan Payments'].txns).toBe(1) // the mortgage; the card payment is left out
+  })
+
+  it('counts, per rule, the rows it relabels, the hand picks, and every matching row', () => {
+    const { rules } = categoryUsage(ROWS, data, new Set())
+    expect(rules['r-safeway']).toEqual({ changed: 3, pickedByHand: 1, matching: 4 })
+  })
+
+  it('reports a rule with no current rows as matching nothing', () => {
+    const d = testData(DEFAULTS, [rule('Gone Market', GROCERY.id)])
+    expect(categoryUsage(ROWS, d, new Set()).rules['r-gone market']).toEqual({ changed: 0, pickedByHand: 0, matching: 0 })
+  })
+})
+
+describe('deleteImpact', () => {
+  it("counts a pick of the deleted category as moving to its merchant's rule", () => {
+    const rows = [r('p', '2026-09', 'Safeway', 9, 'FOOD_AND_DRINK', { user_category: 'Travel' })]
+    const d = testData(DEFAULTS, [rule('Safeway', GROCERY.id)])
+    expect(deleteImpact(rows, d, 'c-Travel')).toMatchObject({ uncategorized: 0, moved: [{ name: 'Grocery', count: 1 }] })
+  })
+
+  it('never counts a pick of the deleted category as staying', () => {
+    const rows = [r('p', '2026-09', 'Nobody', 9, 'TRAVEL', { user_category: 'Travel' })]
+    expect(deleteImpact(rows, testData(DEFAULTS), 'c-Travel')).toMatchObject({ uncategorized: 1, moved: [] })
+  })
+
+  // Review Focus 5.
+  it('counts rule-labelled rows as moving to their bank category', () => {
+    expect(deleteImpact(ROWS, data, GROCERY.id)).toMatchObject({ uncategorized: 0, moved: [{ name: 'Food & Drink', count: 3 }], rulesRemoved: 1, toSpending: 0 })
+  })
+
+  it('counts rows that start counting as spending when Transfer Out is deleted', () => {
+    expect(deleteImpact(ROWS, data, 'c-Transfer Out')).toMatchObject({ uncategorized: 1, toSpending: 1 })
+  })
+
+  it('lists the top three destinations and counts the rest as rows', () => {
+    const cats = [...DEFAULTS, cat('A'), cat('B'), cat('C'), cat('D')]
+    const rows = ['A', 'A', 'A', 'B', 'B', 'C', 'D', 'D', 'D', 'D'].map((n, i) =>
+      r(`x${i}`, '2026-09', `M${n}`, 1, 'GENERAL_MERCHANDISE', { user_category: 'Shopping' })
+    )
+    const d = testData(cats, ['A', 'B', 'C', 'D'].map((n) => rule(`M${n}`, `c-${n}`)))
+    const impact = deleteImpact(rows, d, 'c-Shopping')
+    expect(impact.moved).toEqual([{ name: 'D', count: 4 }, { name: 'A', count: 3 }, { name: 'B', count: 2 }])
+    expect(impact.movedMore).toBe(1)
   })
 })

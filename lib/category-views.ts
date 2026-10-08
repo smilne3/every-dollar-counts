@@ -2,7 +2,16 @@
 // Every function resolves through resolveCategory, so a rule relabels a row the same way in a
 // list, a filter, a count and a total.
 import { isCreditCardPayment } from './categories'
-import { kindOf, resolveCategory, type CategorizableTxn, type CategoryContext } from './category-rules'
+import {
+  buildCategoryContext,
+  changedByRule,
+  kindOf,
+  merchantKey,
+  resolveCategory,
+  type CategorizableTxn,
+  type CategoryContext,
+  type CategoryData,
+} from './category-rules'
 import { spendableAmount, type ReimbursableTxn } from './reimbursements'
 import type { SpendContext } from './spend-context'
 import { presentTransaction } from './transaction-presentation'
@@ -56,5 +65,86 @@ export function activityItem(
     display: p.display,
     tone: p.tone,
     isInternal: p.isInternal,
+  }
+}
+
+export type RuleCounts = {
+  changed: number // rows this rule relabels (changedByRule)
+  pickedByHand: number // the merchant's rows that carry a hand pick
+  matching: number // every row with the rule's merchant key; 0 shows "No current transactions"
+}
+
+// Settings' counts. Per category: how many rows show it, matching its drill-down exactly (so card
+// payments without a pick are skipped, as filterByCategory skips them). Per rule: the counts the
+// Category rules card shows. Takes CategoryData, not a context, because the per-rule counts need
+// each rule's merchant key and a context deliberately hides its rules.
+export function categoryUsage(
+  rows: CategorizableTxn[],
+  data: CategoryData,
+  budgetNames: Set<string>
+): { categories: Record<string, { txns: number; hasBudget: boolean }>; rules: Record<string, RuleCounts> } {
+  const ctx = buildCategoryContext(data)
+  const categories: Record<string, { txns: number; hasBudget: boolean }> = {}
+  for (const c of data.categories) categories[c.name] = { txns: 0, hasBudget: budgetNames.has(c.name) }
+  const rules: Record<string, RuleCounts> = {}
+  const ruleIdByKey = new Map<string, string>()
+  for (const r of data.rules) {
+    rules[r.id] = { changed: 0, pickedByHand: 0, matching: 0 }
+    ruleIdByKey.set(r.merchant_key, r.id)
+  }
+  for (const t of rows) {
+    if (isCreditCardPayment(t)) continue
+    const resolved = resolveCategory(t, ctx)
+    if (Object.hasOwn(categories, resolved.name)) categories[resolved.name].txns++
+    if (resolved.ruleId && changedByRule(resolved)) rules[resolved.ruleId].changed++
+    const key = merchantKey(t.merchant_name)
+    const ruleId = key ? ruleIdByKey.get(key) : undefined
+    if (ruleId) {
+      rules[ruleId].matching++
+      if (t.user_category) rules[ruleId].pickedByHand++
+    }
+  }
+  return { categories, rules }
+}
+
+export type DeleteImpact = {
+  uncategorized: number
+  moved: { name: string; count: number }[] // the top three destinations, by count
+  movedMore: number // ROWS moving anywhere else
+  rulesRemoved: number
+  toSpending: number // rows whose kind becomes spending
+}
+
+// What deleting a category would do to each row, for the delete dialog (spec §8.4). Evaluates
+// EVERY row, not only those showing the category: deleting a category can also expose another
+// category that shares its Plaid primary. "After" mirrors the DELETE route, which removes the
+// category (and, through the FK, its rules) and then clears picks carrying its name.
+export function deleteImpact(rows: CategorizableTxn[], data: CategoryData, categoryId: string): DeleteImpact {
+  const deleted = data.categories.find((c) => c.id === categoryId)
+  const rulesRemoved = data.rules.filter((r) => r.category_id === categoryId).length
+  if (!deleted) return { uncategorized: 0, moved: [], movedMore: 0, rulesRemoved, toSpending: 0 }
+  const before = buildCategoryContext(data)
+  const after = buildCategoryContext(data, { withoutCategoryId: categoryId })
+  const destinations = new Map<string, number>()
+  let uncategorized = 0
+  let toSpending = 0
+  for (const t of rows) {
+    if (isCreditCardPayment(t)) continue
+    const b = resolveCategory(t, before)
+    const a = resolveCategory({ ...t, user_category: t.user_category === deleted.name ? null : t.user_category }, after)
+    if (a.name === b.name) continue
+    if (a.name === 'Uncategorized') uncategorized++
+    else destinations.set(a.name, (destinations.get(a.name) ?? 0) + 1)
+    if (kindOf(b.name, before) !== 'spending' && kindOf(a.name, after) === 'spending') toSpending++
+  }
+  const ranked = [...destinations]
+    .map(([name, count]) => ({ name, count }))
+    .sort((x, y) => y.count - x.count || x.name.localeCompare(y.name))
+  return {
+    uncategorized,
+    moved: ranked.slice(0, 3),
+    movedMore: ranked.slice(3).reduce((s, m) => s + m.count, 0),
+    rulesRemoved,
+    toSpending,
   }
 }
