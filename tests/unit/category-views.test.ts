@@ -136,6 +136,17 @@ describe('deleteImpact', () => {
     expect(deleteImpact(ROWS, data, 'c-Transfer Out')).toMatchObject({ uncategorized: 1, toSpending: 1 })
   })
 
+  // The delete clears the pick, so a picked card payment goes back to being an unpicked one: shown
+  // as "Card payment" and in no total. It leaves the deleted category and joins no other.
+  it('counts a picked card payment as moving nowhere once its pick is cleared', () => {
+    const card = { pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' }
+    const travel = [r('p', '2026-09', 'Chase', 500, 'LOAN_PAYMENTS', { ...card, user_category: 'Travel' })]
+    expect(deleteImpact(travel, testData(DEFAULTS), 'c-Travel')).toMatchObject({ uncategorized: 0, moved: [], movedMore: 0, toSpending: 0 })
+    // Out of Transfer Out into Loan Payments would count as starting to count as spending.
+    const transfer = [r('q', '2026-09', 'Chase', 500, 'LOAN_PAYMENTS', { ...card, user_category: 'Transfer Out' })]
+    expect(deleteImpact(transfer, testData(DEFAULTS), 'c-Transfer Out')).toMatchObject({ uncategorized: 0, moved: [], movedMore: 0, toSpending: 0 })
+  })
+
   it('lists the top three destinations and counts the rest as rows', () => {
     const cats = [...DEFAULTS, cat('A'), cat('B'), cat('C'), cat('D')]
     const rows = ['A', 'A', 'A', 'B', 'B', 'C', 'D', 'D', 'D', 'D'].map((n, i) =>

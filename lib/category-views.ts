@@ -131,7 +131,11 @@ export function deleteImpact(rows: CategorizableTxn[], data: CategoryData, categ
   for (const t of rows) {
     if (isCreditCardPayment(t)) continue
     const b = resolveCategory(t, before)
-    const a = resolveCategory({ ...t, user_category: t.user_category === deleted.name ? null : t.user_category }, after)
+    const afterRow = { ...t, user_category: t.user_category === deleted.name ? null : t.user_category }
+    // A card payment whose pick is cleared goes back to "Card payment", in no category and no total:
+    // it leaves the deleted category and joins none, so it is neither moved nor new spending (#28).
+    if (isCreditCardPayment(afterRow)) continue
+    const a = resolveCategory(afterRow, after)
     if (a.name === b.name) continue
     if (a.name === 'Uncategorized') uncategorized++
     else destinations.set(a.name, (destinations.get(a.name) ?? 0) + 1)
