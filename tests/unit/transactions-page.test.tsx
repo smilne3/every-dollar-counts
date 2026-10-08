@@ -184,14 +184,23 @@ describe('Transactions page dual layout', () => {
       // Same object, not merely equal: the page maps one `list` twice, and anything that made it
       // map two different lists would show up here first.
       expect(card.props?.t).toBe(row.props?.t)
-      expect(card.props?.categoryName).toBe(row.props?.categoryName)
+      expect(card.props?.category).toEqual(row.props?.category)
       expect(card.props?.categoryOptions).toEqual(row.props?.categoryOptions)
     }
   })
 
   it('derives the category the same way for an override, a PFC mapping and a rule', async () => {
     const { cards } = await branches()
-    expect(cards.map((c) => c.props?.categoryName)).toEqual(['Food & Drink', 'Grocery', 'Uncategorized', 'Grocery'])
+    expect(cards.map((c) => (c.props?.category as { name: string }).name)).toEqual(['Food & Drink', 'Grocery', 'Uncategorized', 'Grocery'])
+  })
+
+  // #28 spec §8.1: the learned marker needs the REASON for a name, not just the name, so each row
+  // is handed the whole ResolvedCategory.
+  it('hands each row its resolved category, source included', async () => {
+    const { cards, rows } = await branches()
+    const learned = { name: 'Grocery', source: 'rule', ruleId: 'r-safeway', bankName: 'Food & Drink' }
+    expect(rows.find((r) => r.key === 't4')?.props?.category).toEqual(learned)
+    expect(cards.find((c) => c.key === 't4')?.props?.category).toEqual(learned)
   })
 
   // #28 spec §7.2: the drill-down filters through resolveCategory, so a rule files a row the same

@@ -196,7 +196,7 @@ export default async function TransactionsPage({
               <TransactionCard
                 key={t.id}
                 t={t}
-                categoryName={resolveCategory(t, ctx).name}
+                category={resolveCategory(t, ctx)}
                 categoryOptions={categoryOptions}
                 accountName={accountNameById.get(t.account_id)}
               />
@@ -239,7 +239,7 @@ export default async function TransactionsPage({
                   <TransactionRow
                     key={t.id}
                     t={t}
-                    categoryName={resolveCategory(t, ctx).name}
+                    category={resolveCategory(t, ctx)}
                     categoryOptions={categoryOptions}
                   />
                 ))}

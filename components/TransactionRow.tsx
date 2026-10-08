@@ -1,7 +1,9 @@
 import { isCardPaymentRow } from '@/lib/categories'
+import { changedByRule, type ResolvedCategory } from '@/lib/category-rules'
 import { money } from '@/lib/format'
 import { presentTransaction, TONE_CLASS } from '@/lib/transaction-presentation'
 import { CategoryPicker } from './CategoryPicker'
+import { LearnedMarker } from './LearnedMarker'
 import { ReimbursableCheckbox } from './ReimbursableCheckbox'
 import { ReimbursableEditor } from './ReimbursableEditor'
 
@@ -22,11 +24,11 @@ type Txn = {
 
 export function TransactionRow({
   t,
-  categoryName,
+  category,
   categoryOptions,
 }: {
   t: Txn
-  categoryName: string
+  category: ResolvedCategory
   categoryOptions: string[]
 }) {
   // Meaning (sign convention, colour rule, card-payment exemption) lives once in
@@ -60,12 +62,22 @@ export function TransactionRow({
         {cardPayment ? (
           <span className="text-sm text-muted">{t.user_category ?? 'Card payment'}</span>
         ) : (
-          <CategoryPicker
-            transactionId={t.id}
-            value={categoryName}
-            options={categoryOptions}
-            label={label}
-          />
+          // One horizontal line (#28 spec §8.1, plan Ruling 1): the picker fills what the marker
+          // leaves, and the marker never wraps under it. items-start: a save error shows under the
+          // select and grows this one row (PR 1), and the marker stays beside the select, not
+          // centred on the taller cell.
+          <span className="flex min-w-0 flex-nowrap items-start gap-1.5">
+            <span className="min-w-0 flex-1">
+              <CategoryPicker
+                transactionId={t.id}
+                value={category.name}
+                source={category.source}
+                options={categoryOptions}
+                label={label}
+              />
+            </span>
+            {changedByRule(category) && <LearnedMarker category={category.name} merchant={t.merchant_name} />}
+          </span>
         )}
       </td>
       {/* A credit-card payment is neither spending nor income — it moves your own money between two

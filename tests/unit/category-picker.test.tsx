@@ -17,6 +17,7 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }))
 const props = {
   transactionId: 't1',
   value: 'Food & Drink',
+  source: 'bank' as const,
   options: ['Food & Drink', 'Shopping', 'Travel'],
   label: 'Starbucks',
 }
@@ -33,6 +34,18 @@ const reply = (ok: boolean, body: unknown) => ({
 })
 
 describe('CategoryPicker', () => {
+  // #28 spec §8.2: keyed on source and value, so a row whose REASON for a name changes (a rule equal
+  // to the bank's category is removed: rule → bank, same name) still drops a stale alert.
+  it('clears its alert when the source changes and the name does not', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply(false, { error: 'This transaction just changed. Refresh and try again.' })))
+    const { rerender } = render(<CategoryPicker {...props} source="rule" />)
+    fireEvent.change(select(), { target: { value: 'Shopping' } })
+    expect(await screen.findByRole('alert')).toBeTruthy()
+    rerender(<CategoryPicker {...props} source="bank" />)
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(select().value).toBe('Food & Drink')
+  })
+
   it('saves the chosen category', async () => {
     const fetchMock = vi.fn().mockResolvedValue(reply(true, { ok: true }))
     vi.stubGlobal('fetch', fetchMock)

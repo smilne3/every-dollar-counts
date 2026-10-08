@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import type { ResolvedCategory } from '@/lib/category-rules'
 import { selectClass } from './ui/styles'
 
 const SAVE_FAILED = 'That could not be saved.'
@@ -13,12 +14,15 @@ const MAY_NOT_HAVE_SAVED = 'It may not have saved. Showing the latest.'
 export function CategoryPicker({
   transactionId,
   value,
+  source,
   options,
   label,
   onBusyChange,
 }: {
   transactionId: string
   value: string
+  // Why the server shows `value`: a pick, a rule or the bank. Part of the re-sync key below.
+  source: ResolvedCategory['source']
   options: string[]
   label?: string
   // Told whenever a save starts and stops, so a host that can UNMOUNT this control (the phone sheet)
@@ -35,12 +39,14 @@ export function CategoryPicker({
   const val = pending ?? value
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // Follow the server. When a refresh brings a new value (another household member, or a category
-  // rule), show it and drop any optimistic choice or alert. React's documented way to adjust state
-  // when a prop changes; the same idiom as components/ReimbursableCheckbox.tsx.
-  const [seen, setSeen] = useState(value)
-  if (seen !== value) {
-    setSeen(value)
+  // Follow the server. When a refresh brings a new value, or the same name for a new reason (a rule
+  // equal to the bank's category is removed: rule → bank), show it and drop any optimistic choice
+  // or alert. React's documented way to adjust state when a prop changes; the same idiom as
+  // components/ReimbursableCheckbox.tsx.
+  const serverKey = `${source}:${value}`
+  const [seen, setSeen] = useState(serverKey)
+  if (seen !== serverKey) {
+    setSeen(serverKey)
     setPending(null)
     setError(null)
   }
