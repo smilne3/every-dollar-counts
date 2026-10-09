@@ -42,6 +42,26 @@ vi.mock('@/lib/supabase/server', () => ({
       table === 'transactions' && paged.transactions ? paged.transactions.query() : chainFor(table),
   }),
 }))
+// Categories and rules come through lib/category-context.ts (#28), whose own test covers paging.
+// Built from `results.categories` / `results.category_rules`, so a failed categories read still
+// rejects with the page's message.
+vi.mock('@/lib/category-context', async () => {
+  const { testData } = await import('./helpers/category-context')
+  return {
+    fetchCategoryContext: async () => {
+      const c = results.categories ?? { data: [], error: null }
+      if (c.error) throw new Error(`could not read categories: ${c.error.message}`)
+      const r = results.category_rules ?? { data: [], error: null }
+      if (r.error) throw new Error(`could not read category rules: ${r.error.message}`)
+      return testData(c.data as never, r.data as never)
+    },
+    readTransactionsForCounts: async () => {
+      const t = results.transactions ?? { data: [], error: null }
+      if (t.error) throw new Error(`could not read transactions: ${t.error.message}`)
+      return t.data
+    },
+  }
+})
 vi.mock('@/lib/household', () => ({
   DEFAULT_TIMEZONE: 'America/New_York',
   householdTimezone: async () => tz.value,
@@ -164,6 +184,7 @@ beforeEach(() => {
   results.accounts = { data: [{ id: 'a1', type: 'depository', current_balance: 100 }], error: null }
   results.memberships = { data: { household_id: 'hh-1' }, error: null }
   results.categories = { data: [], error: null }
+  results.category_rules = { data: [], error: null }
   results.transactions = { data: [], error: null }
   results.budgets = { data: [], error: null }
   paged.transactions = null
@@ -386,6 +407,13 @@ describe('Dashboard reads', () => {
     await expect(render()).rejects.toThrow(/could not read categories: permission denied/)
   })
 
+  // #28: a failed rules read rendered as "no rules" would quietly move every learned label back,
+  // which is #46's failure in a new place.
+  it('throws when the rules cannot be read', async () => {
+    results.category_rules = { data: null, error: { message: 'boom' } }
+    await expect(render()).rejects.toThrow(/could not read category rules/)
+  })
+
   // #69: the six-month window passes PostgREST's 1,000-row cap near each month end. A plain read
   // against this stub gets the first 1,000 of these 1,050 one-dollar purchases, so "Spent" would
   // read $1,000.
@@ -576,7 +604,7 @@ describe('Dashboard reads', () => {
   // re-derive — `merchant_name ?? name ?? 'Transaction'` — IS presentTransaction's rule, so both
   // produce the same string for every input. Only the source can be distinguished, not the value:
   // this stamps the module's answer so a locally computed label cannot impersonate it. Restoring
-  // the old duplication at page.tsx:176 fails here and nowhere else.
+  // the old duplication in activityItem (lib/category-views.ts) fails here and nowhere else.
   it('takes the row label from presentTransaction rather than re-deriving the same rule', async () => {
     presentation.stampLabel = true
     results.transactions = {
@@ -596,6 +624,39 @@ describe('Dashboard reads', () => {
       error: null,
     }
     expect(recentItemsOf(await render())![0].label).toBe('presented:Joe S Den')
+  })
+
+  // #28 spec §7.2: Recent activity names a row through resolveCategory, as every total does, so a
+  // rule relabels it here too rather than leaving the dashboard on the bank's Food & Drink.
+  it('labels Safeway Grocery in Recent activity', async () => {
+    results.categories = {
+      data: [
+        { id: 'c-food', name: 'Food & Drink', pfc_primary: 'FOOD_AND_DRINK', sort_order: 0 },
+        { id: 'c-grocery', name: 'Grocery', pfc_primary: null, sort_order: 1 },
+      ],
+      error: null,
+    }
+    results.category_rules = {
+      data: [{ id: 'r-safeway', household_id: 'hh-1', merchant_key: 'safeway', merchant_label: 'Safeway', category_id: 'c-grocery', origin: 'seeded' }],
+      error: null,
+    }
+    results.transactions = {
+      data: [
+        {
+          id: 'r1',
+          name: 'SAFEWAY #123',
+          merchant_name: 'Safeway',
+          amount: 42,
+          date: '2026-09-01',
+          user_category: null,
+          pfc_primary: 'FOOD_AND_DRINK',
+          pfc_detailed: null,
+          reimbursable_amount: null,
+        },
+      ],
+      error: null,
+    }
+    expect(recentItemsOf(await render())![0].category).toBe('Grocery')
   })
 
   // The stage's entire visible payload is these two class strings and nothing else asserts them.

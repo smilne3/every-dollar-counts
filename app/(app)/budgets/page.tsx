@@ -1,7 +1,8 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
-import { spendByCategory, type Txn } from '@/lib/budget'
-import { spendingCategoryNames, type Category } from '@/lib/categories'
+import { spendByCategory } from '@/lib/budget'
+import { spendingCategoryNames } from '@/lib/categories'
+import { fetchCategoryContext } from '@/lib/category-context'
 import { buildSpendContext } from '@/lib/spend-context'
 import { BudgetEditor } from '@/components/BudgetEditor'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -24,21 +25,16 @@ export default async function BudgetsPage() {
   const next = new Date(Date.UTC(year, month, 1))
   const nextMonthStart = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-01`
 
-  const { data: cats, error: catsError } = await supabase
-    .from('categories')
-    .select('id, name, pfc_primary, sort_order')
-    .order('sort_order')
-  // With no categories there is nothing to budget, so the page renders as though the household had
+  // Throws on a failed read: with no categories the page would render as though the household had
   // never set any up (#46).
-  if (catsError) throw new Error(`could not read categories: ${catsError.message}`)
-  const categories = (cats ?? []) as Category[]
-  const categoryNames = spendingCategoryNames(categories)
+  const data = await fetchCategoryContext()
+  const categoryNames = spendingCategoryNames(data.categories)
 
   // Paged, so the month cannot silently pass the 1,000-row cap (#69).
   const { data: txns, error: txnsError } = await readAllRows(() =>
     supabase
       .from('transactions')
-      .select('id, amount, date, user_category, pfc_primary, pfc_detailed, reimbursable_amount')
+      .select('id, amount, date, merchant_name, user_category, pfc_primary, pfc_detailed, reimbursable_amount')
       .eq('removed', false)
       .gte('date', monthStart)
       .lt('date', nextMonthStart)
@@ -53,8 +49,9 @@ export default async function BudgetsPage() {
 
   // The reimbursable map is built straight from this page's own transaction rows — see
   // buildSpendContext.
-  const ctx = buildSpendContext({ categories, txns: (txns ?? []) as Txn[] })
-  const spend = spendByCategory((txns ?? []) as Txn[], ctx)
+  const rows = txns ?? []
+  const ctx = buildSpendContext({ data, txns: rows })
+  const spend = spendByCategory(rows, ctx)
   const initialLimits: Record<string, number> = {}
   for (const b of budgets ?? []) initialLimits[b.category] = Number(b.monthly_limit)
 

@@ -1,29 +1,21 @@
-import { pfcToName, nonSpendingNames, transferNames, type Category } from './categories'
+import { buildCategoryContext, type CategoryContext, type CategoryData } from './category-rules'
 import { reimbursableByTxn, type ReimbursableTxn } from './reimbursements'
 
-// Everything the spending calculations need, assembled once per page. Bundled into one object
-// because the five money surfaces used to assemble these by hand: a page that forgot the reimbursable
-// map would still compile and silently report reimbursable money as spending.
-export type SpendContext = {
-  pfcMap: Record<string, string> // Plaid PFC primary -> category NAME
-  nonSpending: Set<string> // income + transfers (excluded from spending)
-  transfers: Set<string> // transfers only (excluded from income too)
-  reimbursedByTxn: Record<string, number> // transaction id -> reimbursable amount
+// Everything the spending calculations need, assembled once per page: the household's categories
+// and rules (a CategoryContext, so resolveCategory and kindOf work on it) plus the reimbursable map.
+// Bundled because the five money surfaces used to assemble these by hand, and a page that forgot
+// one still compiled and silently miscounted.
+// Branded (type-only), so a page cannot hand-build one: a SpendContext comes only from
+// buildSpendContext, the one place that casts it.
+declare const SPEND_BRAND: unique symbol
+export type SpendContext = CategoryContext & {
+  readonly reimbursedByTxn: Readonly<Record<string, number>> // transaction id -> reimbursable amount
+  readonly [SPEND_BRAND]: true
 }
 
-// `txns` are the surface's OWN rows. Reimbursable now lives on the transaction, so the map is built
-// from what the page already fetched — there is no second query to forget, and no window mismatch
-// between the transactions and the thing that modifies them. This deletes the whole class of bug the
-// old `writeOffs` field existed to prevent, by removing the second source of data rather than
-// guarding it.
-export function buildSpendContext(input: {
-  categories: Category[]
-  txns: ReimbursableTxn[]
-}): SpendContext {
-  return {
-    pfcMap: pfcToName(input.categories),
-    nonSpending: nonSpendingNames(input.categories),
-    transfers: transferNames(input.categories),
-    reimbursedByTxn: reimbursableByTxn(input.txns),
-  }
+// `data` comes only from fetchCategoryContext (lib/category-context.ts), so a page cannot build a
+// context without the rules. `txns` are the surface's OWN rows: reimbursable lives on the
+// transaction, so there is no second query to forget.
+export function buildSpendContext(input: { data: CategoryData; txns: ReimbursableTxn[] }): SpendContext {
+  return { ...buildCategoryContext(input.data), reimbursedByTxn: reimbursableByTxn(input.txns) } as SpendContext
 }

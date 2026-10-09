@@ -22,6 +22,9 @@ beforeAll(() => {
   }
 })
 
+// The resolved category of a row nothing relabelled: the bank's own name.
+const bank = (name: string) => ({ name, source: 'bank' as const, ruleId: null, bankName: name })
+
 const txn = {
   id: 't1',
   date: '2026-08-29',
@@ -37,7 +40,7 @@ const txn = {
 
 function renderCard(overrides: Partial<typeof txn> = {}) {
   return render(
-    <TransactionCard t={{ ...txn, ...overrides }} categoryName="Food" categoryOptions={['Food', 'Grocery']} />
+    <TransactionCard t={{ ...txn, ...overrides }} category={bank('Food')} categoryOptions={['Food', 'Grocery']} />
   )
 }
 
@@ -158,7 +161,7 @@ describe('phone card and desktop row agree', () => {
   // `date · amount` line, so anything scoped to the whole card can be satisfied by the sheet.
   function phone(t: typeof txn): Surface {
     const { container } = render(
-      <TransactionCard t={t} categoryName="Food" categoryOptions={['Food']} />
+      <TransactionCard t={t} category={bank('Food')} categoryOptions={['Food']} />
     )
     const row = container.querySelector('button') as HTMLElement
     const [main, amount] = Array.from(row.children)
@@ -176,7 +179,7 @@ describe('phone card and desktop row agree', () => {
   function desktop(t: typeof txn): Surface {
     const { container } = render(
       <table><tbody>
-        <TransactionRow t={t} categoryName="Food" categoryOptions={['Food']} />
+        <TransactionRow t={t} category={bank('Food')} categoryOptions={['Food']} />
       </tbody></table>
     )
     const cells = container.querySelectorAll('td')
@@ -292,7 +295,7 @@ describe('TransactionCard sheet', () => {
     render(
       <TransactionCard
         t={{ ...txn, ...overrides }}
-        categoryName="Food"
+        category={bank('Food')}
         categoryOptions={['Food', 'Grocery']}
         {...props}
       />
@@ -410,7 +413,7 @@ describe('TransactionCard sheet with a save in flight', () => {
 
   function openSheet(overrides: Partial<typeof txn> = {}) {
     render(
-      <TransactionCard t={{ ...txn, ...overrides }} categoryName="Food" categoryOptions={['Food', 'Grocery']} />
+      <TransactionCard t={{ ...txn, ...overrides }} category={bank('Food')} categoryOptions={['Food', 'Grocery']} />
     )
     fireEvent.click(screen.getByRole('button', { name: /edit/ }))
   }
@@ -515,7 +518,7 @@ describe('TransactionCard sheet with a save in flight', () => {
   it('does not lock the sheet shut when the controls disappear mid-flight', () => {
     pendingFetch()
     const { rerender } = render(
-      <TransactionCard t={txn} categoryName="Food" categoryOptions={['Food']} />
+      <TransactionCard t={txn} category={bank('Food')} categoryOptions={['Food']} />
     )
     fireEvent.click(screen.getByRole('button', { name: /edit/ }))
     fireEvent.click(screen.getByRole('checkbox'))
@@ -524,7 +527,7 @@ describe('TransactionCard sheet with a save in flight', () => {
     rerender(
       <TransactionCard
         t={{ ...txn, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', amount: -7866.69 }}
-        categoryName="Food"
+        category={bank('Food')}
         categoryOptions={['Food']}
       />
     )
@@ -539,7 +542,7 @@ describe('TransactionCard sheet with a save in flight', () => {
   it('does not lock the sheet shut when only the picker disappears mid-flight', () => {
     pendingFetch()
     const { rerender } = render(
-      <TransactionCard t={txn} categoryName="Food" categoryOptions={['Food', 'Grocery']} />
+      <TransactionCard t={txn} category={bank('Food')} categoryOptions={['Food', 'Grocery']} />
     )
     fireEvent.click(screen.getByRole('button', { name: /edit/ }))
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Grocery' } })
@@ -548,7 +551,7 @@ describe('TransactionCard sheet with a save in flight', () => {
     rerender(
       <TransactionCard
         t={{ ...txn, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', user_category: 'Shopping' }}
-        categoryName="Shopping"
+        category={bank('Shopping')}
         categoryOptions={['Food', 'Grocery']}
       />
     )
@@ -614,5 +617,78 @@ describe('TransactionCard sheet on a card payment', () => {
     expect(screen.queryByRole('combobox')).toBeNull()
     expect(screen.queryByRole('checkbox')).toBeNull()
     expect(screen.queryByRole('button', { name: /partial reimbursable amount/ })).toBeNull()
+  })
+})
+
+describe('TransactionCard learned marker (#28)', () => {
+  const learned = { name: 'Grocery', source: 'rule' as const, ruleId: 'r1', bankName: 'Food' }
+
+  it('says so in the row and its accessible name, without a link inside the button', () => {
+    render(<TransactionCard t={txn} category={learned} categoryOptions={['Food', 'Grocery']} />)
+    const button = screen.getByRole('button', { name: /learned from Joe S Den/ })
+    expect(button.querySelector('a')).toBeNull()
+    expect(button.querySelector('svg')).not.toBeNull()
+  })
+
+  it('shows where the rule lives in the sheet', () => {
+    render(<TransactionCard t={txn} category={learned} categoryOptions={['Food', 'Grocery']} />)
+    fireEvent.click(screen.getByRole('button', { name: /edit/ }))
+    expect(screen.getByText(/Learned from Joe S Den\./)).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Manage in Settings', hidden: true }).getAttribute('href')).toBe('/settings#category-rules')
+  })
+
+  // Done is withheld while a save is in flight so its failure is seen; the link must not be a
+  // second way out of the sheet in that window.
+  it('hides Manage in Settings while a category save is in flight, and brings it back after', async () => {
+    let settle!: (res: unknown) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { settle = resolve })))
+    render(<TransactionCard t={txn} category={learned} categoryOptions={['Food', 'Grocery']} />)
+    fireEvent.click(screen.getByRole('button', { name: /edit/ }))
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Food' } })
+    expect(screen.queryByRole('link', { name: 'Manage in Settings', hidden: true })).toBeNull()
+    expect(screen.getByText(/Learned from Joe S Den\./)).toBeTruthy()
+    settle({ ok: false, headers: new Headers({ 'content-type': 'application/json' }), json: async () => ({ error: 'nope' }) })
+    await waitFor(() => expect(screen.getByRole('link', { name: 'Manage in Settings', hidden: true })).toBeTruthy())
+  })
+
+  // CategoryPicker keys its stale-alert reset on source as well as name, so the sheet must hand it
+  // the source: a rule equal to the bank's category being removed changes the reason, not the name.
+  it("passes the category's source to the picker, so a change of reason clears its alert", async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      redirected: false,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ error: 'This transaction just changed. Refresh and try again.' }),
+    }))
+    const agreeing = { name: 'Food', source: 'rule' as const, ruleId: 'r1', bankName: 'Food' }
+    const { rerender } = render(<TransactionCard t={txn} category={agreeing} categoryOptions={['Food', 'Grocery']} />)
+    fireEvent.click(screen.getByRole('button', { name: /edit/ }))
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Grocery' } })
+    expect(await screen.findByRole('alert')).toBeTruthy()
+    rerender(<TransactionCard t={txn} category={bank('Food')} categoryOptions={['Food', 'Grocery']} />)
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  // changedByRule, not source === 'rule': a rule that agrees with the bank changed nothing.
+  it('a rule that names the bank\'s own category shows no marker', () => {
+    render(<TransactionCard t={txn} category={{ ...learned, name: 'Food' }} categoryOptions={['Food', 'Grocery']} />)
+    expect(screen.queryByRole('button', { name: /learned from/ })).toBeNull()
+    expect(screen.getByRole('button', { name: /edit/ }).querySelector('svg')).toBeNull()
+  })
+
+  // resolveCategory never hands a card payment a rule; the card does not trust that alone, since a
+  // marker there would point at a rule that cannot apply to the row.
+  it('never marks a card payment', () => {
+    render(<TransactionCard t={{ ...txn, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' }} category={learned} categoryOptions={['Food', 'Grocery']} />)
+    expect(screen.queryByRole('button', { name: /learned from/ })).toBeNull()
+    expect(screen.getByRole('button', { name: /edit/ }).querySelector('svg')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /edit/ }))
+    expect(screen.queryByText(/Learned from/)).toBeNull()
+  })
+
+  // The marker means "a rule filed this"; a pick the person made is not a rule's doing.
+  it('a hand pick shows no marker', () => {
+    render(<TransactionCard t={{ ...txn, user_category: 'Grocery' }} category={{ ...learned, source: 'pick', ruleId: null }} categoryOptions={['Food', 'Grocery']} />)
+    expect(screen.queryByRole('button', { name: /learned from/ })).toBeNull()
   })
 })

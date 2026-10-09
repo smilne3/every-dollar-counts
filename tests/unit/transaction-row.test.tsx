@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import { TransactionRow } from '@/components/TransactionRow'
+import type { ResolvedCategory } from '@/lib/category-rules'
 
 afterEach(cleanup)
 
@@ -19,12 +20,15 @@ const txn = {
   reimbursable_note: null as string | null,
 }
 
+const FOOD: ResolvedCategory = { name: 'Food', source: 'bank', ruleId: null, bankName: 'Food' }
+const LEARNED: ResolvedCategory = { name: 'Grocery', source: 'rule', ruleId: 'r1', bankName: 'Food' }
+
 // TransactionRow renders a <tr>, which is only valid inside a table.
-function renderRow(overrides: Partial<typeof txn> = {}) {
+function renderRow(overrides: Partial<typeof txn> = {}, category: ResolvedCategory = FOOD) {
   return render(
     <table>
       <tbody>
-        <TransactionRow t={{ ...txn, ...overrides }} categoryName="Food" categoryOptions={['Food']} />
+        <TransactionRow t={{ ...txn, ...overrides }} category={category} categoryOptions={['Food', 'Grocery']} />
       </tbody>
     </table>
   )
@@ -147,5 +151,89 @@ describe('TransactionRow card payment with a pick', () => {
     renderRow({ pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' })
     expect(screen.getByText('Card payment')).toBeTruthy()
     expect(screen.queryByRole('combobox')).toBeNull()
+  })
+})
+
+describe('TransactionRow learned marker (#28)', () => {
+  const marker = () => screen.queryByRole('link', { name: /learned from/ })
+
+  it('appears only when a rule changed the name', () => {
+    renderRow({}, LEARNED)
+    const link = marker()!
+    expect(link.getAttribute('href')).toBe('/settings#category-rules')
+    expect(link.getAttribute('aria-label')).toBe('Grocery, learned from Joe S Den. Manage in Settings → Category rules.')
+    expect(link.getAttribute('title')).toBe(link.getAttribute('aria-label'))
+    cleanup()
+    renderRow({}, { name: 'Food', source: 'rule', ruleId: 'r1', bankName: 'Food' })
+    expect(marker()).toBeNull()
+    cleanup()
+    renderRow({}, FOOD)
+    expect(marker()).toBeNull()
+  })
+
+  // The marker means "a rule filed this"; a pick the person made is not a rule's doing.
+  it('a hand pick shows no marker', () => {
+    renderRow({ user_category: 'Grocery' }, { name: 'Grocery', source: 'pick', ruleId: null, bankName: 'Food' })
+    expect(marker()).toBeNull()
+  })
+
+  // The card-payment cell is text and never takes a rule; a marker there would point at nothing.
+  it('never marks a card payment', () => {
+    renderRow({ pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' }, LEARNED)
+    expect(marker()).toBeNull()
+  })
+
+  // The marker stays on the picker's line (#28 spec §8.1): only the picker container and the marker
+  // sit in it.
+  it('keeps the cell to one no-wrap line: the picker container, then the marker', () => {
+    const { container } = renderRow({}, LEARNED)
+    const cell = container.querySelectorAll('td')[2]
+    const line = cell.firstElementChild as HTMLElement
+    expect(line.className).toContain('flex-nowrap')
+    expect(line.className).toContain('items-start')
+    expect(line.children).toHaveLength(2)
+    expect((line.children[0] as HTMLElement).className).toMatch(/\bmin-w-0\b.*\bflex-1\b|\bflex-1\b.*\bmin-w-0\b/)
+    expect(line.children[0].querySelector('select')).not.toBeNull()
+    expect(line.children[1]).toBe(marker())
+    expect((line.children[1] as HTMLElement).className).toContain('shrink-0')
+  })
+
+  // A save error renders inside the picker container, so it cannot push the marker off the line.
+  it('keeps the marker beside the select while an error shows', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, redirected: false, headers: new Headers({ 'content-type': 'application/json' }), json: async () => ({ error: 'This transaction just changed. Refresh and try again.' }) }))
+    const { container } = renderRow({}, LEARNED)
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Food' } })
+    const alert = await screen.findByRole('alert')
+    const line = container.querySelectorAll('td')[2].firstElementChild as HTMLElement
+    expect(line.children[0].contains(alert)).toBe(true)
+    expect(line.children[1]).toBe(marker())
+    vi.unstubAllGlobals()
+  })
+})
+
+// CategoryPicker keys its stale-alert reset on source as well as name, so the row must hand it the
+// source: a rule equal to the bank's category being removed changes the reason, not the name.
+describe('TransactionRow category source', () => {
+  it("passes the category's source to the picker, so a change of reason clears its alert", async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      redirected: false,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ error: 'This transaction just changed. Refresh and try again.' }),
+    }))
+    const agreeing: ResolvedCategory = { name: 'Food', source: 'rule', ruleId: 'r1', bankName: 'Food' }
+    const row = (category: ResolvedCategory) => (
+      <table>
+        <tbody>
+          <TransactionRow t={txn} category={category} categoryOptions={['Food', 'Grocery']} />
+        </tbody>
+      </table>
+    )
+    const { rerender } = render(row(agreeing))
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Grocery' } })
+    expect(await screen.findByRole('alert')).toBeTruthy()
+    rerender(row(FOOD))
+    expect(screen.queryByRole('alert')).toBeNull()
+    vi.unstubAllGlobals()
   })
 })

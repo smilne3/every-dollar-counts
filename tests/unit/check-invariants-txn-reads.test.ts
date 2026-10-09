@@ -173,3 +173,18 @@ const { data, error } = await readAllRows(
     expect(check(`await supabase.from('transactions').update({ x: 1 }).eq('id', id)`).ok).toBe(true)
   })
 })
+
+// main() walks scripts/ only when it exists (these scratch trees have none). Any other failure to
+// read it must stop the check, not pass it with scripts/ unscanned.
+describe('check-invariants: the scripts/ walk', () => {
+  it('fails, rather than passing unscanned, when scripts/ cannot be read', () => {
+    dir = mkdtempSync(join(tmpdir(), 'invariants-'))
+    for (const d of ['app', 'lib', 'components']) mkdirSync(join(dir, d), { recursive: true })
+    // A file where the directory should be: readdirSync throws ENOTDIR.
+    writeFileSync(join(dir, 'scripts'), '')
+    const run = spawnSync(process.execPath, [SCRIPT], { cwd: dir, encoding: 'utf8' })
+    expect(run.status).not.toBe(0)
+    expect(run.stdout).not.toContain('invariants ok')
+    expect(run.stderr).toContain('ENOTDIR')
+  })
+})

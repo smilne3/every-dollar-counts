@@ -1,4 +1,4 @@
-import { effectiveCategory } from './effective-category'
+import { kindOf, resolveCategory } from './category-rules'
 import { isCreditCardPayment } from './categories'
 import { spendableAmount } from './reimbursements'
 import type { SpendContext } from './spend-context'
@@ -7,6 +7,7 @@ export type Txn = {
   id: string
   amount: number
   date: string
+  merchant_name: string | null
   user_category: string | null
   pfc_primary: string | null
   pfc_detailed: string | null
@@ -23,8 +24,8 @@ export function spendByCategory(txns: Txn[], ctx: SpendContext): Record<string, 
   const out: Record<string, number> = {}
   for (const t of txns) {
     if (isCreditCardPayment(t)) continue // internal transfer, not spending
-    const cat = effectiveCategory(t, ctx.pfcMap)
-    if (ctx.nonSpending.has(cat)) continue // income + transfers
+    const cat = resolveCategory(t, ctx).name
+    if (kindOf(cat, ctx) !== 'spending') continue // income + transfers
     // spendableAmount, not t.amount: the reimbursable portion is not the user's spending, and a
     // tagged repayment contributes 0 rather than netting the category down like a refund.
     // Outflows add; genuine refunds (untagged inflows in a spending category) still net down.

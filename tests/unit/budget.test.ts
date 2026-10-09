@@ -8,7 +8,8 @@ import {
   lastCompleteMonths,
   type DateWindow,
 } from '@/lib/budget'
-import type { SpendContext } from '@/lib/spend-context'
+import { buildSpendContext, type SpendContext } from '@/lib/spend-context'
+import { categoriesFromMap, markedTxns, testData } from './helpers/category-context'
 
 const pfcMap: Record<string, string> = {
   FOOD_AND_DRINK: 'Food & Drink',
@@ -17,20 +18,17 @@ const pfcMap: Record<string, string> = {
   TRANSFER_OUT: 'Transfer Out',
   ENTERTAINMENT: 'Entertainment',
 }
-const nonSpending = new Set(['Income', 'Transfer In', 'Transfer Out'])
-
 // A context with no reimbursables — the baseline every pre-existing test uses. These tests passing
-// unchanged is the proof that an empty split map is a no-op.
+// unchanged is the proof that an empty split map is a no-op. TRANSFER_IN is added because the old
+// hand-built context's transfer set always held "Transfer In", whatever the map.
 const ctx = (
-  over: Partial<SpendContext> = {},
+  over: { reimbursedByTxn?: Record<string, number> } = {},
   map: Record<string, string> = pfcMap
-): SpendContext => ({
-  pfcMap: map,
-  nonSpending,
-  transfers: new Set(['Transfer In', 'Transfer Out']),
-  reimbursedByTxn: {},
-  ...over,
-})
+): SpendContext =>
+  buildSpendContext({
+    data: testData(categoriesFromMap({ TRANSFER_IN: 'Transfer In', ...map })),
+    txns: markedTxns(over.reimbursedByTxn ?? {}),
+  })
 
 let seq = 0
 const t = (
@@ -44,6 +42,7 @@ const t = (
   id,
   amount,
   date,
+  merchant_name: null,
   pfc_primary: pfc,
   pfc_detailed,
   user_category: override,
@@ -145,6 +144,7 @@ describe('spendByCategory', () => {
           id: 'writeoff:c1:0',
           amount: 540,
           date: '2026-11-03',
+          merchant_name: null,
           user_category: 'Food & Drink',
           pfc_primary: null,
           pfc_detailed: null,

@@ -1,10 +1,7 @@
-// A transaction's effective category NAME: the user's override if set, otherwise
-// the household category mapped from Plaid's PFC primary, else 'Uncategorized'.
-export function effectiveCategory(
-  t: { user_category: string | null; pfc_primary: string | null },
-  pfcToName: Record<string, string>
-): string {
-  if (t.user_category) return t.user_category
-  if (t.pfc_primary && pfcToName[t.pfc_primary]) return pfcToName[t.pfc_primary]
-  return 'Uncategorized'
+import { resolveCategory, type CategorizableTxn, type CategoryContext } from './category-rules'
+
+// A transaction's effective category NAME: its hand pick, else its merchant's rule (#28), else the
+// household category its Plaid primary maps to, else 'Uncategorized'. See resolveCategory.
+export function effectiveCategory(t: CategorizableTxn, ctx: CategoryContext): string {
+  return resolveCategory(t, ctx).name
 }

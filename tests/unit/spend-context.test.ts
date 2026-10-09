@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { buildSpendContext } from '@/lib/spend-context'
+import { kindOf, resolveCategory } from '@/lib/category-rules'
 import type { Category } from '@/lib/categories'
+import { DEFAULTS, GROCERY, rule, testData } from './helpers/category-context'
 
 const categories: Category[] = [
   { id: '1', name: 'Income', pfc_primary: 'INCOME', sort_order: 0 },
@@ -8,45 +10,41 @@ const categories: Category[] = [
   { id: '3', name: 'Food & Drink', pfc_primary: 'FOOD_AND_DRINK', sort_order: 2 },
   { id: '4', name: 'Reimbursable-ish custom', pfc_primary: null, sort_order: 3 },
 ]
+const bankRow = (pfc_primary: string) => ({ user_category: null, pfc_primary, pfc_detailed: null, merchant_name: null })
 
 describe('buildSpendContext', () => {
-  // Ported from the pre-refactor suite (arguments updated to { categories, txns }, assertions
-  // unchanged) — buildSpendContext is what every one of the five money surfaces calls, and nothing
-  // else in the suite constructs a SpendContext through it: tests/unit/budget.test.ts and
-  // tests/unit/dashboard.test.ts both hand-build a SpendContext object literal, which exercises the
-  // arithmetic that CONSUMES the context but not the wiring inside buildSpendContext itself.
+  // Ported from the pre-refactor suite (arguments now { data, txns }; the exclusion sets are
+  // checked through kindOf and resolveCategory). buildSpendContext is what all five money surfaces
+  // call.
   it('derives the pfc map, the exclusion sets and the reimbursable totals in one pass', () => {
     const ctx = buildSpendContext({
-      categories,
+      data: testData(categories),
       txns: [{ id: 't1', amount: 1000, reimbursable_amount: 500 }],
     })
-    expect(ctx.pfcMap['FOOD_AND_DRINK']).toBe('Food & Drink')
-    expect(ctx.nonSpending.has('Income')).toBe(true)
-    expect(ctx.nonSpending.has('Transfer In')).toBe(true)
-    expect(ctx.nonSpending.has('Food & Drink')).toBe(false)
-    expect(ctx.transfers.has('Transfer In')).toBe(true)
-    expect(ctx.transfers.has('Income')).toBe(false)
+    expect(resolveCategory(bankRow('FOOD_AND_DRINK'), ctx).bankName).toBe('Food & Drink')
+    expect(kindOf('Income', ctx)).toBe('income')
+    expect(kindOf('Transfer In', ctx)).toBe('transfer')
+    expect(kindOf('Food & Drink', ctx)).toBe('spending')
     expect(ctx.reimbursedByTxn['t1']).toBeCloseTo(500)
   })
 
   it('builds a usable context with no reimbursable transactions', () => {
-    const ctx = buildSpendContext({ categories, txns: [] })
+    const ctx = buildSpendContext({ data: testData(categories), txns: [] })
     expect(ctx.reimbursedByTxn).toEqual({})
-    expect(ctx.pfcMap['INCOME']).toBe('Income')
+    expect(resolveCategory(bankRow('INCOME'), ctx).bankName).toBe('Income')
   })
 
   // A custom category (pfc_primary null) is spending — it is neither income nor a transfer.
   it('treats a custom category as spending', () => {
-    const ctx = buildSpendContext({ categories, txns: [] })
-    expect(ctx.nonSpending.has('Reimbursable-ish custom')).toBe(false)
-    expect(ctx.transfers.has('Reimbursable-ish custom')).toBe(false)
+    const ctx = buildSpendContext({ data: testData(categories), txns: [] })
+    expect(kindOf('Reimbursable-ish custom', ctx)).toBe('spending')
   })
 
   // The context is built from the SAME rows the surface renders, so a page cannot fetch its
   // transactions and then forget to fetch what is reimbursable about them — they arrive together.
   it('builds the reimbursable map from the transactions themselves', () => {
     const ctx = buildSpendContext({
-      categories,
+      data: testData(categories),
       txns: [
         { id: 't1', amount: 105, reimbursable_amount: 105 },
         { id: 't2', amount: 17.16, reimbursable_amount: null },
@@ -56,7 +54,18 @@ describe('buildSpendContext', () => {
   })
 
   it('carries an empty map when nothing is marked', () => {
-    const ctx = buildSpendContext({ categories, txns: [{ id: 't1', amount: 40, reimbursable_amount: null }] })
+    const ctx = buildSpendContext({ data: testData(categories), txns: [{ id: 't1', amount: 40, reimbursable_amount: null }] })
     expect(ctx.reimbursedByTxn).toEqual({})
+  })
+
+  // #28: the context a money page builds carries the rules, not just the categories.
+  it('resolves a rule through a built SpendContext', () => {
+    const ctx = buildSpendContext({
+      data: testData(DEFAULTS, [rule('Safeway', GROCERY.id)]),
+      txns: [{ id: 't1', amount: 50, reimbursable_amount: 20 }],
+    })
+    const safeway = { user_category: null, pfc_primary: 'FOOD_AND_DRINK', pfc_detailed: null, merchant_name: 'Safeway' }
+    expect(resolveCategory(safeway, ctx).name).toBe('Grocery')
+    expect(ctx.reimbursedByTxn).toEqual({ t1: 20 })
   })
 })

@@ -10,9 +10,8 @@ import { StatCard } from '@/components/ui/StatCard'
 import { StatRows } from '@/components/ui/StatRows'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { money, moneyWhole, longDate, monthNameLong } from '@/lib/format'
-import { effectiveCategory } from '@/lib/effective-category'
-import { pfcToName, type Category } from '@/lib/categories'
-import { presentTransaction } from '@/lib/transaction-presentation'
+import { fetchCategoryContext } from '@/lib/category-context'
+import { activityItem } from '@/lib/category-views'
 import {
   netWorth,
   cashOnHand,
@@ -21,11 +20,10 @@ import {
   savedAverage,
   AVERAGE_SAVED_MONTHS,
   sumManualAssets,
-  type FlowTxn,
 } from '@/lib/dashboard'
 import { listItemsForHousehold } from '@/lib/plaid-items'
 import { listManualAssets } from '@/lib/manual-assets'
-import { budgetedSpend, spendByCategory, monthKey, type Txn } from '@/lib/budget'
+import { budgetedSpend, spendByCategory, monthKey } from '@/lib/budget'
 import { buildSpendContext } from '@/lib/spend-context'
 import { fetchReceivable } from '@/lib/receivable'
 import { todayIn, hourIn } from '@/lib/clock'
@@ -103,17 +101,10 @@ export default async function DashboardPage({
 
   const currency = accounts[0]?.iso_currency_code ?? 'USD'
 
-  const { data: catsData, error: catsError } = await supabase
-    .from('categories')
-    .select('id, name, pfc_primary, sort_order')
-    .order('sort_order')
-  // The sharpest one on this page. With no categories nothing maps to Income or Transfer, so the
-  // exclusions in monthlyFlows never fire and a paycheck is counted as negative spending: measured
-  // on real rows, "Spent" reads -$1,796.70 and "Saved" +$1,796.70 where the truth is $3,929.35 and
-  // $1,796.70. A failed read must not become a plausible number (#46).
-  if (catsError) throw new Error(`could not read categories: ${catsError.message}`)
-  const categories = (catsData ?? []) as Category[]
-  const pfcMap = pfcToName(categories)
+  // Throws on a failed read. With no categories nothing maps to Income or Transfer and a paycheck
+  // counts as negative spending (measured: "Spent" -$1,796.70 against a true $3,929.35), so a
+  // failure must not become a plausible number (#46).
+  const data = await fetchCategoryContext()
 
   // The average's six complete months plus this one, which never counts toward it (#126). The
   // chart shows the last six of these ("Last 6 months" below), so AVERAGE_SAVED_MONTHS must not drop
@@ -126,7 +117,7 @@ export default async function DashboardPage({
   const { data: flowTxns, error: flowError } = await readAllRows(() =>
     supabase
       .from('transactions')
-      .select('id, amount, date, user_category, pfc_primary, pfc_detailed, reimbursable_amount')
+      .select('id, amount, date, merchant_name, user_category, pfc_primary, pfc_detailed, reimbursable_amount')
       .eq('removed', false)
       .gte('date', windowStart)
   )
@@ -141,10 +132,10 @@ export default async function DashboardPage({
 
   // The reimbursable map is built straight from this page's own transaction rows — see
   // buildSpendContext.
-  const ctx = buildSpendContext({ categories, txns: (flowTxns ?? []) as Txn[] })
-  const allRows = (flowTxns ?? []) as Txn[]
+  const allRows = flowTxns ?? []
+  const ctx = buildSpendContext({ data, txns: allRows })
 
-  const flows = monthlyFlows(allRows as FlowTxn[], ctx, months)
+  const flows = monthlyFlows(allRows, ctx, months)
   const thisMonth = flows[flows.length - 1]
   const spent = thisMonth.spending
   const income = thisMonth.income
@@ -179,21 +170,7 @@ export default async function DashboardPage({
     .limit(6)
   // Otherwise a failed read renders "No transactions yet" to a household with 696 of them.
   if (recentError) throw new Error(`could not read recent transactions: ${recentError.message}`)
-  const recentItems = (recentTxns ?? []).map((t) => {
-    // One source of meaning. The label fallback and the card-payment call used to be made here,
-    // independently of presentTransaction, which is exactly the duplication that module exists to
-    // end. `shareAmount` is unused by this list — it shows no reimbursable state.
-    const p = presentTransaction(t as Parameters<typeof presentTransaction>[0])
-    return {
-      id: t.id as string,
-      date: t.date as string,
-      category: effectiveCategory(t, pfcMap),
-      label: p.label,
-      display: p.display,
-      tone: p.tone,
-      isInternal: p.isInternal,
-    }
-  })
+  const recentItems = (recentTxns ?? []).map((t) => activityItem(t, ctx))
 
   const worth = netWorth(accounts, owedToYou) + sumManualAssets(manualAssets)
   const cash = cashOnHand(accounts)

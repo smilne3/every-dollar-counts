@@ -10,7 +10,7 @@
 // is why the fixtures in page tests carry only rows the page's own filters would keep.
 
 type Row = { id: string; date: string } & Record<string, unknown>
-type Result = { data: Row[] | null; error: { message: string } | null }
+type Result = { data: Row[] | null; error: { message: string; code?: string } | null }
 
 export type PagedTable = {
   // Every request's [after-cursor, limit], so a test can see how the read was paged.
@@ -23,7 +23,7 @@ const KEYSET = /^date\.gt\.([^,]+),and\(date\.eq\.([^,]+),id\.gt\.([^)]+)\)$/
 
 export function pagedTable(
   rows: Row[],
-  opts: { serverCap?: number; failOnRequest?: number; emptyBodyOnRequest?: number } = {}
+  opts: { serverCap?: number; failOnRequest?: number; failCode?: string; emptyBodyOnRequest?: number } = {}
 ): PagedTable {
   const cap = opts.serverCap ?? 1000
   const requests: PagedTable['requests'] = []
@@ -52,7 +52,8 @@ export function pagedTable(
       requests.push({ after: after ? `${after.date}/${after.id}` : null, limit })
       const n = requests.length
       if (opts.failOnRequest === n) {
-        return Promise.resolve({ data: null, error: { message: 'boom' } }).then(resolve)
+        const error = opts.failCode ? { message: 'boom', code: opts.failCode } : { message: 'boom' }
+        return Promise.resolve({ data: null, error }).then(resolve)
       }
       if (opts.emptyBodyOnRequest === n) {
         return Promise.resolve({ data: null, error: null }).then(resolve)
@@ -85,5 +86,79 @@ export function txnRows(n: number, start = '2026-05-01', extra: Record<string, u
     id: `t${String(i).padStart(5, '0')}`,
     date: new Date(base + Math.floor(i / 6) * 86_400_000).toISOString().slice(0, 10),
     ...extra,
+  }))
+}
+
+// The same stand-in for a table with no `date`, read by lib/read-all.ts's readAllById, which pages
+// on `id` alone: `.order('id')`, then `.gt('id', last)` from the second page on. Rows come back in
+// id order only when ordered by id; otherwise in an arbitrary (reversed) order, as Postgres may.
+export type IdPagedTable = {
+  requests: { after: string | null; limit: number | null; ordered: boolean }[]
+  // Every `.select()` argument, one per request, so a test can pin the columns read.
+  selects: string[]
+  query: () => Record<string, unknown>
+}
+
+export function idPagedTable<R extends { id: string }>(
+  rows: R[],
+  opts: { serverCap?: number; failOnRequest?: number; emptyBodyOnRequest?: number } = {}
+): IdPagedTable {
+  const cap = opts.serverCap ?? 1000
+  const requests: IdPagedTable['requests'] = []
+  const selects: string[] = []
+
+  const query = () => {
+    let after: string | null = null
+    let limit: number | null = null
+    let ordered = false
+    const chain: Record<string, unknown> = {}
+    chain.select = (cols: string) => {
+      selects.push(cols)
+      return chain
+    }
+    chain.eq = () => chain
+    chain.order = (col: string) => {
+      if (col !== 'id') throw new Error(`unexpected .order(): ${col}`)
+      ordered = true
+      return chain
+    }
+    chain.gt = (col: string, value: string) => {
+      if (col !== 'id') throw new Error(`unexpected .gt(): ${col}`)
+      after = value
+      return chain
+    }
+    chain.limit = (n: number) => {
+      limit = n
+      return chain
+    }
+    chain.then = (resolve: (r: unknown) => unknown) => {
+      requests.push({ after, limit, ordered })
+      const n = requests.length
+      if (opts.failOnRequest === n) {
+        return Promise.resolve({ data: null, error: { message: 'boom', code: 'XX000' } }).then(resolve)
+      }
+      if (opts.emptyBodyOnRequest === n) {
+        return Promise.resolve({ data: null, error: null }).then(resolve)
+      }
+      const sorted = ordered ? [...rows].sort((x, y) => (x.id < y.id ? -1 : 1)) : [...rows].reverse()
+      const a = after
+      const rest = a === null ? sorted : sorted.filter((r) => r.id > a)
+      return Promise.resolve({ data: rest.slice(0, Math.min(limit ?? cap, cap)), error: null }).then(resolve)
+    }
+    return chain
+  }
+
+  return { requests, selects, query }
+}
+
+// `n` category_rules rows with sortable ids, all in one household.
+export function ruleRows(n: number) {
+  return Array.from({ length: n }, (_, i) => ({
+    id: `r${String(i).padStart(5, '0')}`,
+    household_id: 'hh-1',
+    merchant_key: `merchant ${i}`,
+    merchant_label: `Merchant ${i}`,
+    category_id: 'c-grocery',
+    origin: 'seeded' as const,
   }))
 }

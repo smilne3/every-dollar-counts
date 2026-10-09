@@ -1,12 +1,16 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { isCardPaymentRow } from '@/lib/categories'
+import { changedByRule, type ResolvedCategory } from '@/lib/category-rules'
 import { money, shortDate } from '@/lib/format'
 import { presentTransaction, TONE_CLASS } from '@/lib/transaction-presentation'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { CategoryPicker } from '@/components/CategoryPicker'
+import { learnedText } from '@/components/LearnedMarker'
+import { LearnedIcon } from '@/components/ui/icons'
 import { ReimbursableCheckbox } from '@/components/ReimbursableCheckbox'
 import { ReimbursableEditor } from '@/components/ReimbursableEditor'
 
@@ -28,12 +32,12 @@ type Txn = {
 // the two cannot disagree about what the transaction is.
 export function TransactionCard({
   t,
-  categoryName,
+  category,
   categoryOptions,
   accountName,
 }: {
   t: Txn
-  categoryName: string
+  category: ResolvedCategory
   categoryOptions: string[]
   // Optional so the component degrades rather than breaks when the page's account lookup has
   // nothing for this transaction's account_id: the Account row is omitted below rather than
@@ -68,7 +72,10 @@ export function TransactionCard({
   // leave is a worse bug than the one this is here to prevent, so the state that withholds the exit
   // is tied to the controls existing.
   const busy = (!cardPayment && pickerBusy) || (!isCC && (checkboxBusy || editorBusy))
-  const categoryLabel = cardPayment ? (t.user_category ?? 'Card payment') : categoryName
+  const categoryLabel = cardPayment ? (t.user_category ?? 'Card payment') : category.name
+  // A merchant rule relabelled this row (#28 spec §8.1). Never on a card payment: it takes no rule.
+  const learned = !cardPayment && changedByRule(category)
+  const merchant = t.merchant_name?.trim() || 'this merchant'
   const shareLabel = shareAmount !== null ? `, your share ${money(shareAmount)}` : ''
 
   // The whole row is the control: a 390px row has no room for a separate affordance, and the
@@ -83,13 +90,15 @@ export function TransactionCard({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        aria-label={`${name}, ${categoryLabel}, ${money(display)}${shareLabel} — edit`}
+        aria-label={`${name}, ${categoryLabel}${learned ? `, learned from ${merchant}` : ''}, ${money(display)}${shareLabel} — edit`}
         className="flex w-full items-start justify-between gap-3 border-b border-line px-4 py-3 text-left transition-colors last:border-b-0 active:bg-surface-2"
       >
         <span className="min-w-0 flex-1">
           <span className="block truncate font-medium text-ink">{name}</span>
           <span className="mt-0.5 block truncate text-xs text-muted">
             {t.date} · {categoryLabel}
+            {/* An icon only: a link inside this <button> is invalid HTML. The aria-label above says it. */}
+            {learned && <LearnedIcon className="ml-1 inline-block h-3 w-3 align-[-1px] text-faint" />}
             {shareAmount !== null && ` · your share ${money(shareAmount)}`}
           </span>
         </span>
@@ -157,16 +166,36 @@ export function TransactionCard({
                     : 'Card payment — moves between your accounts.'}
                 </p>
               ) : (
-                <label className="flex flex-col gap-1.5">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-faint">Category</span>
-                  <CategoryPicker
-                    transactionId={t.id}
-                    value={categoryName}
-                    options={categoryOptions}
-                    label={name}
-                    onBusyChange={setPickerBusy}
-                  />
-                </label>
+                <>
+                  <label className="flex flex-col gap-1.5">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-faint">Category</span>
+                    <CategoryPicker
+                      transactionId={t.id}
+                      value={category.name}
+                      source={category.source}
+                      options={categoryOptions}
+                      label={name}
+                      onBusyChange={setPickerBusy}
+                    />
+                  </label>
+                  {learned && (
+                    <p className="flex items-center gap-1.5 text-xs text-muted" title={learnedText(category.name, t.merchant_name)}>
+                      <LearnedIcon className="h-3.5 w-3.5 shrink-0" />
+                      <span>
+                        Learned from {merchant}.
+                        {/* Not while a save is in flight: like Done, it would close over its failure. */}
+                        {!busy && (
+                          <>
+                            {' '}
+                            <Link href="/settings#category-rules" className="font-medium text-emerald hover:text-emerald-600">
+                              Manage in Settings
+                            </Link>
+                          </>
+                        )}
+                      </span>
+                    </p>
+                  )}
+                </>
               )}
 
               {!isCC && (

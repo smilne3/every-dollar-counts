@@ -11,9 +11,63 @@ import { listManualAssets } from '@/lib/manual-assets'
 import { CategoryManager, type CategoryUsage } from '@/components/CategoryManager'
 import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { effectiveCategory } from '@/lib/effective-category'
-import { pfcToName, type Category } from '@/lib/categories'
-import { readAllRows } from '@/lib/read-all'
+import { fetchCategoryContext, readTransactionsForCounts } from '@/lib/category-context'
+import { buildCategoryContext, kindOf } from '@/lib/category-rules'
+import { categoryUsage, deleteImpact } from '@/lib/category-views'
+import { CategoryRulesCard, type RuleView, type RuleCategory } from '@/components/CategoryRulesCard'
+import type { Category } from '@/lib/categories'
+
+type CategorySettings = {
+  categories: Category[]
+  usage: CategoryUsage
+  rules: RuleView[]
+  ruleCategories: RuleCategory[]
+}
+
+type Supabase = Awaited<ReturnType<typeof createClient>>
+
+async function readBudgetNames(supabase: Supabase): Promise<Set<string>> {
+  const { data: budgetRows, error: budgetsError } = await supabase.from('budgets').select('category')
+  // Checked (#91): unchecked, a failed read showed every budget as absent in the delete dialog.
+  if (budgetsError) {
+    const code = budgetsError.code ? `${budgetsError.code} ` : ''
+    throw new Error(`could not read budgets: ${code}${budgetsError.message}`)
+  }
+  // No data and no error is not "no budgets" (#46).
+  if (!budgetRows) throw new Error('could not read budgets: read returned no data and no error')
+  return new Set(budgetRows.map((b) => b.category as string))
+}
+
+// Everything the Categories and Category rules cards need. Throws if any read fails; the page
+// catches it, because Settings is the only place a bank can be reconnected (spec §7.3).
+async function loadCategorySettings(supabase: Supabase): Promise<CategorySettings> {
+  const [data, rows, budgetNames] = await Promise.all([
+    fetchCategoryContext(),
+    readTransactionsForCounts(),
+    readBudgetNames(supabase),
+  ])
+  const ctx = buildCategoryContext(data)
+  const counts = categoryUsage(rows, data, budgetNames)
+  const usage: CategoryUsage = {}
+  for (const c of data.categories) {
+    usage[c.name] = { ...counts.categories[c.name], impact: deleteImpact(rows, data, c.id) }
+  }
+  const nameById = new Map(data.categories.map((c) => [c.id, c.name]))
+  return {
+    categories: data.categories,
+    usage,
+    rules: data.rules.map((r) => ({
+      id: r.id,
+      merchantLabel: r.merchant_label,
+      categoryId: r.category_id,
+      // The FK deletes a rule with its category, so a missing name is a race with a delete.
+      categoryName: nameById.get(r.category_id) ?? 'a deleted category',
+      origin: r.origin,
+      ...counts.rules[r.id],
+    })),
+    ruleCategories: data.categories.map((c) => ({ id: c.id, name: c.name, kind: kindOf(c.name, ctx) })),
+  }
+}
 
 export default async function SettingsPage() {
   const supabase = await createClient()
@@ -30,39 +84,25 @@ export default async function SettingsPage() {
   const slotsUsed = household ? await countSlotsUsed(household.id) : null
   const manualAssets = household ? await listManualAssets(household.id) : []
   const home = manualAssets.find((a) => a.name === 'Home') ?? null
-  const { data: categories, error: categoriesError } = await supabase
-    .from('categories')
-    .select('id, name, pfc_primary, sort_order')
-    .order('sort_order')
-  // An empty list here reads as "you have no categories" and offers to create the defaults again.
-  if (categoriesError) throw new Error(`could not read categories: ${categoriesError.message}`)
-
-  // What deleting each category would actually cost you, so the confirmation can say so.
-  // Counts by EFFECTIVE category: auto-mapped transactions fall back to Uncategorized once
-  // the category row is gone, exactly like user-overridden ones.
-  const pfcMap = pfcToName((categories ?? []) as Category[])
-  // Every transaction the household has, so this passed PostgREST's 1,000-row cap long ago and the
-  // delete warning undercounted (#69); it pages. A failed read throws rather than showing every
-  // category as unused. The budgets read beside it still does not check `error` (#91).
-  const [{ data: catTxns, error: catTxnsError }, { data: budgetRows }] = await Promise.all([
-    readAllRows(() =>
-      supabase
-        .from('transactions')
-        .select('id, date, user_category, pfc_primary')
-        .eq('removed', false)
-    ),
-    supabase.from('budgets').select('category'),
-  ])
-  if (catTxnsError) throw new Error(`could not read transactions: ${catTxnsError.message}`)
-  const budgeted = new Set((budgetRows ?? []).map((b) => b.category as string))
-  const usage: CategoryUsage = {}
-  for (const c of categories ?? []) {
-    usage[c.name] = { txns: 0, hasBudget: budgeted.has(c.name) }
+  // On Settings alone a failed categories, rules, transactions or budgets read is caught: the
+  // Categories and Category rules cards say so, and Household, Banks and Home value still render.
+  // No number is shown in their place, so this still honours #46.
+  let categorySettings: CategorySettings | null = null
+  try {
+    categorySettings = await loadCategorySettings(supabase)
+  } catch (e) {
+    console.error('[settings] could not load categories and rules', e)
   }
-  for (const t of catTxns ?? []) {
-    const name = effectiveCategory(t, pfcMap)
-    if (usage[name]) usage[name].txns++
-  }
+  // Inline markup, not a component, so it appears in the unrendered tree the page test reads.
+  // `Try again.` is a plain link so it works in the installed app, which has no reload button (#139).
+  const categoriesUnavailable = (
+    <p role="alert" className="text-sm text-coral">
+      Couldn&apos;t load categories and rules.{' '}
+      <a href="/settings" className="font-medium underline">
+        Try again.
+      </a>
+    </p>
+  )
 
   return (
     <div className="space-y-6">
@@ -104,10 +144,25 @@ export default async function SettingsPage() {
       <Card className="p-5 space-y-3">
         <h2 className="text-base font-semibold text-ink">Categories</h2>
         <p className="text-sm text-muted">
-          Rename or delete any category, or add your own. Renames update everywhere; deleting a
-          category leaves its transactions uncategorized.
+          Rename or delete any category, or add your own. Renames update everywhere. Before you delete
+          one, it shows where that category&apos;s transactions will go.
         </p>
-        <CategoryManager initialCategories={categories ?? []} usage={usage} />
+        {categorySettings ? (
+          <CategoryManager initialCategories={categorySettings.categories} usage={categorySettings.usage} />
+        ) : (
+          categoriesUnavailable
+        )}
+      </Card>
+
+      {/* scroll-mt clears the phone's sticky h-14 top bar (AppShell), so a #category-rules link
+          does not land the heading under it; there is no sticky bar from md up. */}
+      <Card id="category-rules" className="scroll-mt-20 md:scroll-mt-6 p-5 space-y-3">
+        <h2 className="text-base font-semibold text-ink">Category rules</h2>
+        {categorySettings ? (
+          <CategoryRulesCard rules={categorySettings.rules} categories={categorySettings.ruleCategories} />
+        ) : (
+          categoriesUnavailable
+        )}
       </Card>
     </div>
   )

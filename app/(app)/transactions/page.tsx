@@ -6,26 +6,10 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { SearchIcon } from '@/components/ui/icons'
 import { inputClass } from '@/components/ui/styles'
-import { effectiveCategory } from '@/lib/effective-category'
-import { pfcToName, isCreditCardPayment, type Category } from '@/lib/categories'
+import { fetchCategoryContext } from '@/lib/category-context'
+import { resolveCategory } from '@/lib/category-rules'
+import { filterByCategory, filterByFlow } from '@/lib/category-views'
 import { buildSpendContext } from '@/lib/spend-context'
-import { spendableAmount } from '@/lib/reimbursements'
-
-type RealRow = {
-  id: string
-  name: string | null
-  merchant_name: string | null
-  amount: number
-  date: string
-  user_category: string | null
-  pfc_primary: string | null
-  pfc_detailed: string | null
-  // Selected below alongside everything else; carried in the type now because the phone sheet's
-  // Account row (TransactionCard's accountName prop) is keyed off it.
-  account_id: string
-  reimbursable_amount: number | null
-  reimbursable_note: string | null
-}
 
 export default async function TransactionsPage({
   searchParams,
@@ -47,16 +31,10 @@ export default async function TransactionsPage({
   const inMemoryFiltered = !!(category || flow === 'in' || flow === 'out')
 
   const supabase = await createClient()
-  const { data: cats, error: catsError } = await supabase
-    .from('categories')
-    .select('id, name, pfc_primary, sort_order')
-    .order('sort_order')
-  // effectiveCategory falls back to 'Uncategorized' with no map, so every row on the page would be
-  // relabelled and the category filter would match nothing (#46).
-  if (catsError) throw new Error(`could not read categories: ${catsError.message}`)
-  const categories = (cats ?? []) as Category[]
-  const pfcMap = pfcToName(categories)
-  const categoryOptions = categories.map((c) => c.name)
+  // Throws on a failed read: with no categories every row would be relabelled 'Uncategorized' and
+  // the category filter would match nothing (#46).
+  const data = await fetchCategoryContext()
+  const categoryOptions = data.categories.map((c) => c.name)
 
   // account_id -> name, for the phone sheet's Account row (TransactionCard's accountName prop —
   // see spec: "when I tap a transaction, I expect to see the more tiles"). Twelve accounts is
@@ -123,31 +101,13 @@ export default async function TransactionsPage({
   // The fifth money surface (design spec §6/§7): the same SpendContext the other four build, built
   // from this page's own fetched rows — reimbursable now lives on the transaction, so there is no
   // second query to keep in sync with this page's own filters/pagination.
-  const ctx = buildSpendContext({ categories, txns: (txns ?? []) as RealRow[] })
-
-  let list: RealRow[] = (txns ?? []) as RealRow[]
+  const rows = txns ?? []
+  const ctx = buildSpendContext({ data, txns: rows })
 
   // Category and flow are on the transaction's EFFECTIVE category (computed), so filter in memory.
-  if (category) {
-    list = list.filter((t) => effectiveCategory(t, pfcMap) === category)
-  }
-  if (flow === 'in' || flow === 'out') {
-    list = list.filter((t) => {
-      if (isCreditCardPayment(t)) return false
-      const cat = effectiveCategory(t, pfcMap)
-      if (ctx.transfers.has(cat)) return false
-      const isIncomeCat = ctx.nonSpending.has(cat) && !ctx.transfers.has(cat)
-      // Netted through spendableAmount, matching monthlyFlows exactly: a fully-tagged reimbursable
-      // transaction (either direction) nets to zero and must appear in NEITHER list. This is the
-      // flow=in fix: an employer repayment fully tagged to a claim used to still show here even
-      // though it contributes $0 to income, so the list didn't reconcile with the figure it drilled
-      // from. Without the sign guard below, an income-category *outflow* (a clawback, or a
-      // user-overridden row) would show here but never appear in the income total either.
-      const amt = spendableAmount(t, ctx.reimbursedByTxn)
-      if (amt === 0) return false
-      return flow === 'in' ? isIncomeCat && amt < 0 : !isIncomeCat
-    })
-  }
+  let list = rows
+  if (category) list = filterByCategory(list, category, ctx)
+  if (flow === 'in' || flow === 'out') list = filterByFlow(list, flow, ctx)
 
   // `totalMatching` (a SQL count) doesn't describe the in-memory-filtered views, so those show a
   // simple count and no paging (see inMemoryFiltered above).
@@ -236,7 +196,7 @@ export default async function TransactionsPage({
               <TransactionCard
                 key={t.id}
                 t={t}
-                categoryName={effectiveCategory(t, pfcMap)}
+                category={resolveCategory(t, ctx)}
                 categoryOptions={categoryOptions}
                 accountName={accountNameById.get(t.account_id)}
               />
@@ -279,7 +239,7 @@ export default async function TransactionsPage({
                   <TransactionRow
                     key={t.id}
                     t={t}
-                    categoryName={effectiveCategory(t, pfcMap)}
+                    category={resolveCategory(t, ctx)}
                     categoryOptions={categoryOptions}
                   />
                 ))}

@@ -28,6 +28,26 @@ const chainFor = (table: string) => {
 vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({ from: (table: string) => chainFor(table) }),
 }))
+// Categories and rules come through lib/category-context.ts (#28), whose own test covers paging.
+// Built from `results.categories` / `results.category_rules`, so a failed categories read still
+// rejects with the page's message.
+vi.mock('@/lib/category-context', async () => {
+  const { testData } = await import('./helpers/category-context')
+  return {
+    fetchCategoryContext: async () => {
+      const c = results.categories ?? { data: [], error: null }
+      if (c.error) throw new Error(`could not read categories: ${c.error.message}`)
+      const r = results.category_rules ?? { data: [], error: null }
+      if (r.error) throw new Error(`could not read category rules: ${r.error.message}`)
+      return testData(c.data as never, r.data as never)
+    },
+    readTransactionsForCounts: async () => {
+      const t = results.transactions ?? { data: [], error: null }
+      if (t.error) throw new Error(`could not read transactions: ${t.error.message}`)
+      return t.data
+    },
+  }
+})
 // The two row components are client components. Nothing here RENDERS them — this test inspects the
 // element tree the server component returns — but importing them still runs their module bodies.
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {} }) }))
@@ -39,6 +59,12 @@ import { TransactionRow } from '@/components/TransactionRow'
 type Params = { q?: string; account?: string; category?: string; month?: string; flow?: string; page?: string }
 const render = (searchParams: Params = {}) =>
   TransactionsPage({ searchParams: Promise.resolve(searchParams) })
+
+// Same shapes as breakdown-page.test.tsx: a household Grocery with no PFC of its own, reached only
+// through a pick or the Safeway rule (#28).
+const FOOD = { id: 'c-food', name: 'Food & Drink', pfc_primary: 'FOOD_AND_DRINK', sort_order: 0 }
+const GROCERY = { id: 'c-grocery', name: 'Grocery', pfc_primary: null, sort_order: 1 }
+const SAFEWAY_RULE = { id: 'r-safeway', household_id: 'hh-1', merchant_key: 'safeway', merchant_label: 'Safeway', category_id: 'c-grocery', origin: 'seeded' }
 
 const txn = (over: Record<string, unknown> = {}) => ({
   id: 't1',
@@ -56,10 +82,8 @@ const txn = (over: Record<string, unknown> = {}) => ({
 })
 
 beforeEach(() => {
-  results.categories = {
-    data: [{ id: 'c1', name: 'Food', pfc_primary: 'FOOD_AND_DRINK', sort_order: 1 }],
-    error: null,
-  }
+  results.categories = { data: [FOOD, GROCERY], error: null }
+  results.category_rules = { data: [SAFEWAY_RULE], error: null }
   results.accounts = {
     data: [{ account_id: 'acc-1', name: '360 Checking' }],
     error: null,
@@ -76,8 +100,10 @@ beforeEach(() => {
         pfc_primary: 'LOAN_PAYMENTS',
         pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT',
       }),
+      // Food & Drink by its primary; Grocery through SAFEWAY_RULE.
+      txn({ id: 't4', merchant_name: 'Safeway' }),
     ],
-    count: 3,
+    count: 4,
     error: null,
   }
 })
@@ -85,7 +111,7 @@ beforeEach(() => {
 // A React element in the returned tree. `type` is 'div' for a host element and the component
 // function itself for TransactionCard / TransactionRow, which is what lets the two be told apart
 // by identity rather than by rendered markup.
-type El = { type?: unknown; props?: Record<string, unknown> }
+type El = { type?: unknown; key?: unknown; props?: Record<string, unknown> }
 
 function isEl(n: unknown): n is El {
   return typeof n === 'object' && n !== null && 'props' in (n as object)
@@ -144,8 +170,8 @@ describe('Transactions page dual layout', () => {
 
   it('renders every fetched transaction on both branches', async () => {
     const { cards, rows } = await branches()
-    expect(cards).toHaveLength(3)
-    expect(rows).toHaveLength(3)
+    expect(cards).toHaveLength(4)
+    expect(rows).toHaveLength(4)
   })
 
   // The containment in tests/unit/transaction-card.test.tsx proves the two COMPONENTS agree given
@@ -158,23 +184,86 @@ describe('Transactions page dual layout', () => {
       // Same object, not merely equal: the page maps one `list` twice, and anything that made it
       // map two different lists would show up here first.
       expect(card.props?.t).toBe(row.props?.t)
-      expect(card.props?.categoryName).toBe(row.props?.categoryName)
+      expect(card.props?.category).toEqual(row.props?.category)
       expect(card.props?.categoryOptions).toEqual(row.props?.categoryOptions)
     }
   })
 
-  it('derives the category the same way for an override and for a PFC mapping', async () => {
+  it('derives the category the same way for an override, a PFC mapping and a rule', async () => {
     const { cards } = await branches()
-    expect(cards.map((c) => c.props?.categoryName)).toEqual(['Food', 'Grocery', 'Uncategorized'])
+    expect(cards.map((c) => (c.props?.category as { name: string }).name)).toEqual(['Food & Drink', 'Grocery', 'Uncategorized', 'Grocery'])
+  })
+
+  // #28 spec §8.1: the learned marker needs the REASON for a name, not just the name, so each row
+  // is handed the whole ResolvedCategory.
+  it('hands each row its resolved category, source included', async () => {
+    const { cards, rows } = await branches()
+    const learned = { name: 'Grocery', source: 'rule', ruleId: 'r-safeway', bankName: 'Food & Drink' }
+    expect(rows.find((r) => r.key === 't4')?.props?.category).toEqual(learned)
+    expect(cards.find((c) => c.key === 't4')?.props?.category).toEqual(learned)
+  })
+
+  // #28 spec §7.2: the drill-down filters through resolveCategory, so a rule files a row the same
+  // way here as in the Breakdown total it was opened from. t2 is there by its pick, t4 by the rule.
+  it('files Safeway under Grocery through its rule', async () => {
+    const { rows } = await branches({ category: 'Grocery', month: '2026-08' })
+    expect(rows.map((r) => r.key)).toEqual(['t2', 't4'])
+  })
+
+  // An unpicked card payment counts in no category total, so the list a Loan Payments row opens
+  // must not hold one either, or the two stop adding up.
+  it('leaves the card payment out of a category drill-down', async () => {
+    results.categories = {
+      data: [FOOD, GROCERY, { id: 'c-loans', name: 'Loan Payments', pfc_primary: 'LOAN_PAYMENTS', sort_order: 2 }],
+      error: null,
+    }
+    const all = walk(await render({ category: 'Loan Payments', month: '2026-08' }))
+    expect(all.some((d) => d.el.type === TransactionRow)).toBe(false)
+    expect(all.some((d) => d.el.type === TransactionCard)).toBe(false)
+  })
+
+  // Money in and Money out list the rows behind the dashboard's figures: an income row only in,
+  // and neither a transfer nor a card payment out.
+  describe('flow', () => {
+    beforeEach(() => {
+      results.categories = {
+        data: [
+          FOOD,
+          GROCERY,
+          { id: 'c-income', name: 'Income', pfc_primary: 'INCOME', sort_order: 2 },
+          { id: 'c-tout', name: 'Transfer Out', pfc_primary: 'TRANSFER_OUT', sort_order: 3 },
+        ],
+        error: null,
+      }
+      const t = results.transactions as { data: unknown[]; count: number }
+      t.data = [
+        ...t.data,
+        txn({ id: 't5', merchant_name: 'Acme Payroll', amount: -3000, pfc_primary: 'INCOME' }),
+        txn({ id: 't6', merchant_name: 'Savings', amount: 500, pfc_primary: 'TRANSFER_OUT' }),
+      ]
+      t.count = 6
+    })
+
+    it('lists only the income row under Money in', async () => {
+      const { cards, rows } = await branches({ flow: 'in' })
+      expect(rows.map((r) => r.key)).toEqual(['t5'])
+      expect(cards.map((c) => c.key)).toEqual(['t5'])
+    })
+
+    it('leaves the transfer, the card payment and the income out of Money out', async () => {
+      const { cards, rows } = await branches({ flow: 'out' })
+      expect(rows.map((r) => r.key)).toEqual(['t1', 't2', 't4'])
+      expect(cards.map((c) => c.key)).toEqual(['t1', 't2', 't4'])
+    })
   })
 
   // The in-memory filters rewrite `list` after the fetch. Both branches map that same `list`, so a
   // filtered view must shorten both or neither.
   it('keeps the two branches in step when a filter shortens the list', async () => {
     const { cards, rows } = await branches({ category: 'Grocery' })
-    expect(cards).toHaveLength(1)
-    expect(rows).toHaveLength(1)
-    expect(cards[0].props?.t).toBe(rows[0].props?.t)
+    expect(cards).toHaveLength(2)
+    expect(rows).toHaveLength(2)
+    for (const [i, card] of cards.entries()) expect(card.props?.t).toBe(rows[i].props?.t)
   })
 
   // Neither branch exists in the empty state, so a test that only ever saw the populated page could
@@ -205,6 +294,7 @@ describe('Transactions page dual layout', () => {
     it("hands each card its transaction's account name, keyed by account_id", async () => {
       const { cards } = await branches()
       expect(cards.map((c) => c.props?.accountName)).toEqual([
+        '360 Checking',
         '360 Checking',
         '360 Checking',
         '360 Checking',

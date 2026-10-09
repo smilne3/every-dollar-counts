@@ -1,4 +1,4 @@
-import { effectiveCategory } from './effective-category'
+import { kindOf, resolveCategory } from './category-rules'
 import { isCreditCardPayment } from './categories'
 import { monthKey } from './budget'
 import { spendableAmount } from './reimbursements'
@@ -10,6 +10,7 @@ export type FlowTxn = {
   id: string
   amount: number
   date: string
+  merchant_name: string | null
   user_category: string | null
   pfc_primary: string | null
   pfc_detailed: string | null
@@ -82,9 +83,9 @@ export function lastNMonths(today: string, n: number): { key: string; label: str
 
 // Money out (spending) and money in (income) per month.
 // Plaid convention: amount > 0 = money OUT, amount < 0 = money IN.
-// - spending excludes `ctx.nonSpending` (income + transfers) so transfers/paychecks
+// - spending excludes income and transfer categories so transfers/paychecks
 //   never count as spending.
-// - income excludes `ctx.transfers` (transfers only) so paychecks still count as
+// - income excludes transfer categories so paychecks still count as
 //   income but moving money between your own accounts does not.
 // - a refund is an inflow (amount < 0) in a SPENDING category (e.g. a Travel refund). It nets
 //   DOWN that category's spending rather than counting as income — otherwise every merchant
@@ -105,11 +106,10 @@ export function monthlyFlows(
     if (!bucket) continue
     // A credit-card payment is an internal transfer — skip both legs (out of checking, into card).
     if (isCreditCardPayment(t)) continue
-    const cat = effectiveCategory(t, ctx.pfcMap)
+    const kind = kindOf(resolveCategory(t, ctx).name, ctx)
     // Transfers are neither spending nor income.
-    if (ctx.transfers.has(cat)) continue
-    // Income categories are in nonSpending but not transfers (transfers are already gone).
-    const isIncomeCategory = ctx.nonSpending.has(cat)
+    if (kind === 'transfer') continue
+    const isIncomeCategory = kind === 'income'
     const amt = spendableAmount(t, ctx.reimbursedByTxn)
     if (amt > 0) {
       // Money out: spending, unless it's an income category (rare; e.g. a clawback).
