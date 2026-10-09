@@ -1,7 +1,7 @@
 // Whether a mutation's reply means it saved (#28 spec §8.2). A signed-out request is redirected to
 // /login and fetch follows it to an HTML page: a 200 that saved nothing. So a save counts only
-// when the reply is OK, not redirected, and JSON with ok: true. Mirrors CategoryPicker's inline
-// handling, which predates this.
+// when the reply is OK, not redirected, and JSON with ok: true. CategoryPicker's inline copy, which
+// predates this, still reads a non-JSON failure as a definite one (#145).
 export const SAVE_FAILED = 'That could not be saved.'
 export const SESSION_ENDED = 'Your session ended. Sign in again.'
 // For a request that failed in flight, or whose reply could not be read: it may have reached the
