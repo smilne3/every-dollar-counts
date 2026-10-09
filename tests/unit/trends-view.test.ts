@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { spendByCategory, lastCompleteMonths, monthKey } from '@/lib/budget'
 import { trendsView, capCategories } from '@/lib/trends'
 import { buildSpendContext, type SpendContext } from '@/lib/spend-context'
-import { categoriesFromMap, testData } from './helpers/category-context'
+import { categoriesFromMap, markedTxns, testData } from './helpers/category-context'
 
 // #67: on the 2nd of the month, Trends showed two categories — the mortgage and one small charge
 // — because both cards were keyed to the month in progress. This suite pins the fix: report the
@@ -26,13 +26,10 @@ const pfcMap: Record<string, string> = {
 const REIMBURSED = 200
 // Transfer In and Transfer Out are added because the old hand-built context's transfer set always
 // held them, whatever the map.
-const ctx: SpendContext = {
-  ...buildSpendContext({
-    data: testData(categoriesFromMap({ ...pfcMap, TRANSFER_IN: 'Transfer In', TRANSFER_OUT: 'Transfer Out' })),
-    txns: [],
-  }),
-  reimbursedByTxn: { 'work-laptop-bag': REIMBURSED },
-}
+const ctx: SpendContext = buildSpendContext({
+  data: testData(categoriesFromMap({ ...pfcMap, TRANSFER_IN: 'Transfer In', TRANSFER_OUT: 'Transfer Out' })),
+  txns: markedTxns({ 'work-laptop-bag': REIMBURSED }),
+})
 
 let seq = 0
 const t = (amount: number, date: string, pfc: string) => ({

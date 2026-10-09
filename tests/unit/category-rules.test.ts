@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest'
 import {
   merchantKey,
   kindOf,
-  bankCategory,
   buildKindContext,
   buildCategoryContext,
   resolveCategory,
@@ -37,8 +36,10 @@ describe('merchantKey', () => {
   })
 })
 
-describe('kindOf and bankCategory', () => {
+describe("kindOf and the bank's category", () => {
   const k = buildKindContext(DEFAULTS)
+  const bank = (pfc_primary: string | null, ctx: CategoryContext = testCtx()) =>
+    resolveCategory(row({ pfc_primary, merchant_name: null }), ctx)
   it('names transfers first, then income, and everything else spending', () => {
     expect(kindOf('Transfer In', k)).toBe('transfer')
     expect(kindOf('Income', k)).toBe('income')
@@ -47,19 +48,24 @@ describe('kindOf and bankCategory', () => {
     expect(kindOf('No such category', k)).toBe('spending')
   })
   it('maps a primary to its category and kind', () => {
-    expect(bankCategory({ pfc_primary: 'FOOD_AND_DRINK' }, k)).toEqual({ name: 'Food & Drink', kind: 'spending' })
-    expect(bankCategory({ pfc_primary: 'TRANSFER_OUT' }, k)).toEqual({ name: 'Transfer Out', kind: 'transfer' })
+    expect(bank('FOOD_AND_DRINK')).toEqual({ name: 'Food & Drink', source: 'bank', ruleId: null, bankName: 'Food & Drink' })
+    expect(kindOf(bank('FOOD_AND_DRINK').bankName, k)).toBe('spending')
+    expect(bank('TRANSFER_OUT').bankName).toBe('Transfer Out')
+    expect(kindOf(bank('TRANSFER_OUT').bankName, k)).toBe('transfer')
   })
+  // An unmapped row shows as Uncategorized, but its kind is Plaid's: a spending rule applies only
+  // where Plaid's tag is itself spending.
   it("takes an unmapped row's kind from Plaid's tag", () => {
-    const noTransferOut = buildKindContext(without('Transfer Out'))
-    expect(bankCategory({ pfc_primary: 'TRANSFER_OUT' }, noTransferOut)).toEqual({ name: 'Uncategorized', kind: 'transfer' })
-    expect(bankCategory({ pfc_primary: 'INCOME' }, buildKindContext(without('Income')))).toEqual({ name: 'Uncategorized', kind: 'income' })
-    expect(bankCategory({ pfc_primary: 'LOAN_DISBURSEMENTS' }, k)).toEqual({ name: 'Uncategorized', kind: 'spending' })
-    expect(bankCategory({ pfc_primary: null }, k)).toEqual({ name: 'Uncategorized', kind: 'spending' })
+    const spendingRule = (pfc_primary: string | null, categories = DEFAULTS) =>
+      resolveCategory(row({ pfc_primary }), testCtx(categories, [safewayToGrocery]))
+    expect(spendingRule('TRANSFER_OUT', without('Transfer Out'))).toMatchObject({ source: 'bank', bankName: 'Uncategorized' })
+    expect(spendingRule('INCOME', without('Income'))).toMatchObject({ source: 'bank', bankName: 'Uncategorized' })
+    expect(spendingRule('LOAN_DISBURSEMENTS')).toMatchObject({ source: 'rule', bankName: 'Uncategorized' })
+    expect(spendingRule(null)).toMatchObject({ source: 'rule', bankName: 'Uncategorized' })
   })
   it('is last-wins when two categories share a primary, like pfcToName', () => {
-    const k2 = buildKindContext([...DEFAULTS, cat('Groceries & Dining', 'FOOD_AND_DRINK', 200)])
-    expect(bankCategory({ pfc_primary: 'FOOD_AND_DRINK' }, k2).name).toBe('Groceries & Dining')
+    const ctx2 = testCtx([...DEFAULTS, cat('Groceries & Dining', 'FOOD_AND_DRINK', 200)])
+    expect(bank('FOOD_AND_DRINK', ctx2).bankName).toBe('Groceries & Dining')
   })
 })
 
@@ -124,7 +130,7 @@ describe('resolveCategory', () => {
     const dangling = testCtx(DEFAULTS, [rule('Safeway', 'c-gone')])
     expect(resolveCategory(row(), dangling)).toMatchObject({ name: 'Food & Drink', source: 'bank' })
   })
-  // Review Focus 1: rules point at an id, so a rename moves every row at once.
+  // Rules point at an id, so a rename moves every row at once.
   it('follows a renamed category', () => {
     const renamed = DEFAULTS.map((c) => (c.id === GROCERY.id ? { ...c, name: 'Groceries' } : c))
     expect(resolveCategory(row(), testCtx(renamed, [safewayToGrocery])).name).toBe('Groceries')

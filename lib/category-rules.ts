@@ -32,19 +32,22 @@ export type CategoryRule = {
 
 export type Kind = 'spending' | 'transfer' | 'income'
 
-export type ResolvedCategory = {
-  name: string
-  source: 'pick' | 'rule' | 'bank'
-  ruleId: string | null
-  bankName: string // what the bank mapping alone would show
-}
+// Keyed on `source`, so only a rule can carry a ruleId. bankName is what the bank mapping alone
+// would show.
+export type ResolvedCategory = Readonly<
+  | { source: 'pick'; name: string; ruleId: null; bankName: string }
+  | { source: 'rule'; name: string; ruleId: string; bankName: string }
+  | { source: 'bank'; name: string; ruleId: null; bankName: string }
+>
 
 // Brands. A page that forgets the rules must not compile: CategoryData comes only from
 // fetchCategoryContext (lib/category-context.ts), and the two contexts only from the builders
 // below. A hand-built `{ categories, rules: [] }` lacks the brand and fails tsc. The state lives
 // under non-exported symbol keys (not a WeakMap or #private) so buildSpendContext can spread a
 // context. Tripwire 4 (scripts/check-invariants.mjs) rejects `as CategoryData` and friends outside
-// this file, lib/category-context.ts and lib/spend-context.ts.
+// this file, lib/category-context.ts and lib/spend-context.ts. The brand stops a page that never
+// touched the rules; spreading CategoryData keeps the brand, so it does not stop a page that
+// deliberately edits the rules list.
 declare const DATA_BRAND: unique symbol
 const KIND_STATE = Symbol('kind-context')
 const RULE_STATE = Symbol('category-context')
@@ -125,7 +128,7 @@ function plaidKind(pfcPrimary: string | null): Kind {
 // The category the bank's tag maps to, and its kind. When the primary maps to no household
 // category (its default was deleted, or Plaid sent one with no default), the row SHOWS as
 // 'Uncategorized' but its kind comes from Plaid's own tag, so the two can differ; see resolveCategory.
-export function bankCategory(t: { pfc_primary: string | null }, k: KindContext): { name: string; kind: Kind } {
+function bankCategory(t: { pfc_primary: string | null }, k: KindContext): { name: string; kind: Kind } {
   const mapped = t.pfc_primary ? k[KIND_STATE].pfcMap[t.pfc_primary] : undefined
   if (mapped) return { name: mapped, kind: kindOf(mapped, k) }
   return { name: 'Uncategorized', kind: plaidKind(t.pfc_primary) }

@@ -8,7 +8,7 @@ import {
   type FlowTxn,
 } from '@/lib/dashboard'
 import { buildSpendContext } from '@/lib/spend-context'
-import { categoriesFromMap, testData } from './helpers/category-context'
+import { categoriesFromMap, markedTxns, testData } from './helpers/category-context'
 
 describe('netWorth', () => {
   it('sums assets minus liabilities across account types', () => {
@@ -96,10 +96,8 @@ describe('monthlyFlows', () => {
     INCOME: 'Income',
     TRANSFER_IN: 'Transfer In',
   }
-  const ctx = (reimbursedByTxn: Record<string, number> = {}) => ({
-    ...buildSpendContext({ data: testData(categoriesFromMap(pfcMap)), txns: [] }),
-    reimbursedByTxn,
-  })
+  const ctx = (reimbursedByTxn: Record<string, number> = {}) =>
+    buildSpendContext({ data: testData(categoriesFromMap(pfcMap)), txns: markedTxns(reimbursedByTxn) })
   const months = [
     { key: '2026-06', label: 'Jun' },
     { key: '2026-07', label: 'Jul' },

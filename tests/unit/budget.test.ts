@@ -9,7 +9,7 @@ import {
   type DateWindow,
 } from '@/lib/budget'
 import { buildSpendContext, type SpendContext } from '@/lib/spend-context'
-import { categoriesFromMap, testData } from './helpers/category-context'
+import { categoriesFromMap, markedTxns, testData } from './helpers/category-context'
 
 const pfcMap: Record<string, string> = {
   FOOD_AND_DRINK: 'Food & Drink',
@@ -24,10 +24,11 @@ const pfcMap: Record<string, string> = {
 const ctx = (
   over: { reimbursedByTxn?: Record<string, number> } = {},
   map: Record<string, string> = pfcMap
-): SpendContext => ({
-  ...buildSpendContext({ data: testData(categoriesFromMap({ TRANSFER_IN: 'Transfer In', ...map })), txns: [] }),
-  reimbursedByTxn: over.reimbursedByTxn ?? {},
-})
+): SpendContext =>
+  buildSpendContext({
+    data: testData(categoriesFromMap({ TRANSFER_IN: 'Transfer In', ...map })),
+    txns: markedTxns(over.reimbursedByTxn ?? {}),
+  })
 
 let seq = 0
 const t = (

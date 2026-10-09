@@ -96,7 +96,7 @@ export function categoryUsage(
     if (isCreditCardPayment(t)) continue
     const resolved = resolveCategory(t, ctx)
     if (Object.hasOwn(categories, resolved.name)) categories[resolved.name].txns++
-    if (resolved.ruleId && changedByRule(resolved)) rules[resolved.ruleId].changed++
+    if (resolved.source === 'rule' && changedByRule(resolved)) rules[resolved.ruleId].changed++
     const key = merchantKey(t.merchant_name)
     const ruleId = key ? ruleIdByKey.get(key) : undefined
     if (ruleId) {

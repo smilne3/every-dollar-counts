@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { buildSpendContext } from '@/lib/spend-context'
-import { bankCategory, kindOf, resolveCategory } from '@/lib/category-rules'
+import { kindOf, resolveCategory } from '@/lib/category-rules'
 import type { Category } from '@/lib/categories'
 import { DEFAULTS, GROCERY, rule, testData } from './helpers/category-context'
 
@@ -10,19 +10,18 @@ const categories: Category[] = [
   { id: '3', name: 'Food & Drink', pfc_primary: 'FOOD_AND_DRINK', sort_order: 2 },
   { id: '4', name: 'Reimbursable-ish custom', pfc_primary: null, sort_order: 3 },
 ]
+const bankRow = (pfc_primary: string) => ({ user_category: null, pfc_primary, pfc_detailed: null, merchant_name: null })
 
 describe('buildSpendContext', () => {
-  // Ported from the pre-refactor suite (arguments updated to { data, txns }; the exclusion-set
-  // assertions now go through the public bankCategory/kindOf, with the same meaning) — buildSpendContext is what every one of the five money surfaces calls, and nothing
-  // else in the suite constructs a SpendContext through it: tests/unit/budget.test.ts and
-  // tests/unit/dashboard.test.ts both hand-build a SpendContext object literal, which exercises the
-  // arithmetic that CONSUMES the context but not the wiring inside buildSpendContext itself.
+  // Ported from the pre-refactor suite (arguments now { data, txns }; the exclusion sets are
+  // checked through kindOf and resolveCategory). buildSpendContext is what all five money surfaces
+  // call.
   it('derives the pfc map, the exclusion sets and the reimbursable totals in one pass', () => {
     const ctx = buildSpendContext({
       data: testData(categories),
       txns: [{ id: 't1', amount: 1000, reimbursable_amount: 500 }],
     })
-    expect(bankCategory({ pfc_primary: 'FOOD_AND_DRINK' }, ctx).name).toBe('Food & Drink')
+    expect(resolveCategory(bankRow('FOOD_AND_DRINK'), ctx).bankName).toBe('Food & Drink')
     expect(kindOf('Income', ctx)).toBe('income')
     expect(kindOf('Transfer In', ctx)).toBe('transfer')
     expect(kindOf('Food & Drink', ctx)).toBe('spending')
@@ -32,7 +31,7 @@ describe('buildSpendContext', () => {
   it('builds a usable context with no reimbursable transactions', () => {
     const ctx = buildSpendContext({ data: testData(categories), txns: [] })
     expect(ctx.reimbursedByTxn).toEqual({})
-    expect(bankCategory({ pfc_primary: 'INCOME' }, ctx).name).toBe('Income')
+    expect(resolveCategory(bankRow('INCOME'), ctx).bankName).toBe('Income')
   })
 
   // A custom category (pfc_primary null) is spending — it is neither income nor a transfer.

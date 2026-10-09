@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { selectClass } from '@/components/ui/styles'
 import { MAY_NOT_HAVE_SAVED, readSaveResponse } from '@/lib/save-response'
-import type { Kind } from '@/lib/category-rules'
+import type { CategoryRule, Kind } from '@/lib/category-rules'
 import type { RuleCounts } from '@/lib/category-views'
 
 export type RuleView = RuleCounts & {
@@ -14,11 +14,14 @@ export type RuleView = RuleCounts & {
   merchantLabel: string
   categoryId: string
   categoryName: string
-  origin: 'seeded' | 'learned'
+  origin: CategoryRule['origin']
 }
 export type RuleCategory = { id: string; name: string; kind: Kind }
 
-const ORIGIN = { seeded: 'set up from your earlier picks', learned: 'learned from a pick' } as const
+const ORIGIN: Record<CategoryRule['origin'], string> = {
+  seeded: 'set up from your earlier picks',
+  learned: 'learned from a pick',
+}
 const txns = (n: number) => `${n} transaction${n === 1 ? '' : 's'}`
 
 // Settings → Category rules (#28 spec §8.3): every rule, with what it does, a Change of category
@@ -141,7 +144,8 @@ function RuleRow({ rule, categories }: { rule: RuleView; categories: RuleCategor
       </div>
       {current ? (
         <div className="flex items-center gap-2">
-          {/* md:min/max: selectClass's md:w-auto outranks a md:w-48, so the width is pinned by its bounds. */}
+          {/* sm:w-48 sets 192px from sm, but from md selectClass's md:w-auto outranks it, so
+              md:min-w-48 and md:max-w-48 pin the select at 192px there. */}
           <select
             value={pending ?? rule.categoryId}
             onChange={change}

@@ -8,6 +8,7 @@ import {
   type CategoryData,
   type CategoryRule,
 } from '@/lib/category-rules'
+import type { ReimbursableTxn } from '@/lib/reimbursements'
 
 export const HH = 'hh-1'
 
@@ -42,6 +43,13 @@ export function testData(categories: Category[], rules: CategoryRule[] = []): Ca
 
 export function testCtx(categories: Category[] = DEFAULTS, rules: CategoryRule[] = []) {
   return buildCategoryContext(testData(categories, rules))
+}
+
+// Rows that make buildSpendContext's reimbursable map equal `map` (transaction id -> amount), so a
+// test sets reimbursables through the builder rather than overriding a built context's field.
+// reimbursableByTxn reads only id and reimbursable_amount; every amount here must be positive.
+export function markedTxns(map: Record<string, number>): ReimbursableTxn[] {
+  return Object.entries(map).map(([id, r]) => ({ id, amount: r, reimbursable_amount: r }))
 }
 
 // For tests written against the old `pfcMap` shape: one category per entry, in order.
