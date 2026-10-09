@@ -133,7 +133,8 @@ describe('deleteImpact', () => {
     expect(deleteImpact(rows, testData(DEFAULTS), 'c-Travel')).toMatchObject({ uncategorized: 1, moved: [] })
   })
 
-  // Review Focus 5.
+  // A delete takes the category's rules with it, so the rows they labelled return to the bank's
+  // category rather than to Uncategorized.
   it('counts rule-labelled rows as moving to their bank category', () => {
     expect(deleteImpact(ROWS, data, GROCERY.id)).toMatchObject({ uncategorized: 0, moved: [{ name: 'Food & Drink', count: 3 }], rulesRemoved: 1, toSpending: 0 })
   })
@@ -148,7 +149,8 @@ describe('deleteImpact', () => {
     const card = { pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' }
     const travel = [r('p', '2026-09', 'Chase', 500, 'LOAN_PAYMENTS', { ...card, user_category: 'Travel' })]
     expect(deleteImpact(travel, testData(DEFAULTS), 'c-Travel')).toMatchObject({ uncategorized: 0, moved: [], movedMore: 0, toSpending: 0 })
-    // Out of Transfer Out into Loan Payments would count as starting to count as spending.
+    // Without the card-payment skip, this row would count as moving from Transfer Out to Loan
+    // Payments, and as starting to count as spending.
     const transfer = [r('q', '2026-09', 'Chase', 500, 'LOAN_PAYMENTS', { ...card, user_category: 'Transfer Out' })]
     expect(deleteImpact(transfer, testData(DEFAULTS), 'c-Transfer Out')).toMatchObject({ uncategorized: 0, moved: [], movedMore: 0, toSpending: 0 })
   })

@@ -25,7 +25,8 @@ type Supabase = Awaited<ReturnType<typeof createClient>>
 const fail = (status: number, error: string) => NextResponse.json({ error }, { status })
 const text = (v: unknown) => (typeof v === 'string' ? v.trim() : '')
 
-// Sign-in, household and environment, in that order (401, 403, then the guard's 409/500).
+// Sign-in, household and environment, in that order: 503 if Supabase Auth is unreachable, 401;
+// 500 if the membership read fails, 403; then the guard's 409/500.
 async function authorize(): Promise<{ supabase: Supabase; householdId: string } | NextResponse> {
   const supabase = await createClient()
   const {

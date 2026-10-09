@@ -152,7 +152,7 @@ export const HandCoinsIcon = ({ className }: IconProps) => (
   </Svg>
 )
 
-// "Filed by a learned rule" (#28): a small spark, read at 14px beside a category.
+// "Filed by a learned rule" (#28): a small spark, read at 12-14px beside a category.
 export const LearnedIcon = ({ className }: IconProps) => (
   <Svg className={className}>
     <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" />

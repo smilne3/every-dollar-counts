@@ -6,8 +6,9 @@
 -- Hand-run in the SQL editor and safe to re-run. It creates NO rows: seeding is
 -- db/seeds/021_category_rules_seed.sql, run once on production immediately before the PR 2 deploy.
 --
--- NEVER drop or empty category_rules while any deployment built from PR 2 or later is live,
--- production or Preview. One database serves local, Preview and production (017_app_env.sql), and
+-- Never drop category_rules while any deployment built from PR 2 or later is live (its pages throw
+-- without it). Emptying it is allowed only through the seed file's pre-deploy reset. Production
+-- and Preview both count: one database serves local, Preview and production (017_app_env.sql), and
 -- five money pages and Settings read this table on every load.
 
 -- 1) FK target: (household_id, id) on categories. id is already the primary key (007), so this
@@ -30,7 +31,7 @@ do $$ begin
     create table public.category_rules (
       id uuid primary key default gen_random_uuid(),
       household_id uuid not null references public.households(id) on delete cascade,
-      merchant_key text not null check (merchant_key <> ''),   -- lower(trim(merchant_name))
+      merchant_key text not null check (merchant_key <> ''),   -- merchantKey(merchant_name): whitespace-trimmed, lowercased
       merchant_label text not null,                            -- display spelling
       category_id uuid not null,
       origin text not null check (origin in ('seeded', 'learned')),

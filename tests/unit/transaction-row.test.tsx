@@ -171,7 +171,7 @@ describe('TransactionRow learned marker (#28)', () => {
     expect(marker()).toBeNull()
   })
 
-  // Review Focus 3.
+  // The marker means "a rule filed this"; a pick the person made is not a rule's doing.
   it('a hand pick shows no marker', () => {
     renderRow({ user_category: 'Grocery' }, { name: 'Grocery', source: 'pick', ruleId: null, bankName: 'Food' })
     expect(marker()).toBeNull()
@@ -183,7 +183,8 @@ describe('TransactionRow learned marker (#28)', () => {
     expect(marker()).toBeNull()
   })
 
-  // Ruling 1: the cell is one horizontal line; only the picker container and the marker sit in it.
+  // The marker stays on the picker's line (#28 spec §8.1): only the picker container and the marker
+  // sit in it.
   it('keeps the cell to one no-wrap line: the picker container, then the marker', () => {
     const { container } = renderRow({}, LEARNED)
     const cell = container.querySelectorAll('td')[2]
@@ -197,7 +198,7 @@ describe('TransactionRow learned marker (#28)', () => {
     expect((line.children[1] as HTMLElement).className).toContain('shrink-0')
   })
 
-  // Review Focus 2.
+  // A save error renders inside the picker container, so it cannot push the marker off the line.
   it('keeps the marker beside the select while an error shows', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, redirected: false, headers: new Headers({ 'content-type': 'application/json' }), json: async () => ({ error: 'This transaction just changed. Refresh and try again.' }) }))
     const { container } = renderRow({}, LEARNED)

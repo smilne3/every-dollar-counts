@@ -62,10 +62,10 @@ export function TransactionRow({
         {cardPayment ? (
           <span className="text-sm text-muted">{t.user_category ?? 'Card payment'}</span>
         ) : (
-          // One horizontal line (#28 spec §8.1, plan Ruling 1): the picker fills what the marker
-          // leaves, and the marker never wraps under it. items-start: a save error shows under the
-          // select and grows this one row (PR 1), and the marker stays beside the select, not
-          // centred on the taller cell.
+          // One horizontal line, so the marker stays beside its category (#28 spec §8.1): the
+          // picker fills what the marker leaves, and the marker never wraps under it. items-start:
+          // a save error shows under the select and grows this one row (PR 1), and the marker stays
+          // beside the select, not centred on the taller cell.
           <span className="flex min-w-0 flex-nowrap items-start gap-1.5">
             <span className="min-w-0 flex-1">
               <CategoryPicker

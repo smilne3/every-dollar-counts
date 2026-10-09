@@ -40,7 +40,7 @@ describe('CategoryRulesCard', () => {
     expect(options.map((o) => o.textContent)).toEqual(['Food & Drink', 'Grocery'])
   })
 
-  // Review Focus 4.
+  // A long merchant name truncates; the count, which is the point of the row, never does.
   it('stacks below sm and never truncates the count', () => {
     render(<CategoryRulesCard rules={[safeway({ merchantLabel: 'A very long merchant name that will not fit on a phone' })]} categories={CATS} />)
     const line = countLine()

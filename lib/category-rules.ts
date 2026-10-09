@@ -1,8 +1,9 @@
 // Category rules (#28): turning a transaction into a category NAME. Pure, no I/O.
 //
-// resolveCategory is the ONLY code that does this. Every page, count and filter goes through it,
-// so precedence (a hand pick, then the merchant's rule, then the bank's category), the card-payment
-// exemption and the kind gate live in one place. A rule's effect exists only here, at read time:
+// resolveCategory is the ONLY code that does this (card payments display their pick or 'Card
+// payment' directly). Every page, count and filter goes through it, so precedence (a hand pick,
+// then the merchant's rule, then the bank's category), the card-payment exemption and the kind
+// gate live in one place. A rule's effect exists only here, at read time:
 // nothing is written to transactions, so changing or removing a rule moves every row with it.
 import {
   isCardPaymentRow,
@@ -72,7 +73,9 @@ export type KindContext = { readonly [KIND_STATE]: KindState }
 export type CategoryContext = KindContext & { readonly [RULE_STATE]: RuleState }
 
 // null for null, '' or whitespace; otherwise trimmed and lowercased. Matches the seed's
-// lower(trim()) on ASCII, which the launch checks prove every live merchant name is.
+// `lower(regexp_replace(merchant_name, '^\s+|\s+$', '', 'g'))` — not `lower(trim())`: on ASCII, JS
+// trim() and Postgres `\s` strip the same six whitespace characters. Launch check 3a confirms every
+// merchant name is ASCII when the seed runs.
 export function merchantKey(s: string | null): string | null {
   const k = (s ?? '').trim().toLowerCase()
   return k || null
@@ -94,8 +97,8 @@ export function buildCategoryContext(
   data: CategoryData,
   opts: { withoutCategoryId?: string } = {}
 ): CategoryContext {
-  // The read side assumes one household per user (lib/spend-context.ts). Make that fail loudly for
-  // rules rather than silently applying another household's.
+  // The app assumes one household per user (memberships are read with `.limit(1)`). Make that fail
+  // loudly for rules rather than silently applying another household's.
   if (new Set(data.rules.map((r) => r.household_id)).size > 1) {
     throw new Error('category rules span more than one household')
   }
@@ -111,7 +114,9 @@ export function buildCategoryContext(
 }
 
 // How the totals count a category name. Transfers first, because the non-spending set contains
-// them. 'Uncategorized', and any name no category holds, is in neither, so it counts as spending.
+// them. Any name no category holds is in neither, so it counts as spending. So does
+// 'Uncategorized', unless a household category of that name maps to an income or transfer primary
+// (a renamed default).
 export function kindOf(name: string, k: KindContext): Kind {
   const s = k[KIND_STATE]
   if (s.transfers.has(name)) return 'transfer'

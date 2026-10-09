@@ -79,9 +79,9 @@ export async function DELETE(req: Request) {
     data: { user },
   } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
-  // Deleting a category now deletes its rules too (category_rules' FK, #28), and already clears
-  // picks and deletes budgets, all in the database local, Preview and production share. So it is
-  // guarded before its first read. POST and PATCH touch no rule and stay unguarded.
+  // Guarded because deleting a category now deletes its rules too (category_rules' FK, #28 spec
+  // §6.3). PATCH also rewrites picks and budgets in the shared database but touches no rule; whether
+  // to guard it is #148.
   try {
     await assertEnvMatchesDatabase()
   } catch (e) {

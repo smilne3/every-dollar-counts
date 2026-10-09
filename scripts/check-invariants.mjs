@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Tripwires for the four defect classes this repo has actually shipped.
+// Tripwires for the defect classes this repo has shipped, and one (4) it measured before it could.
 //
 // These are greps, not proofs. They cannot understand the code — they can only notice a shape that
 // has been wrong before. That is deliberate: each one exists because a real bug reached production
@@ -238,19 +238,19 @@ export function checkTxnReads(files) {
 // fetchCategoryContext (lib/category-context.ts) can produce. A page that read categories itself
 // and built its own map would compile, ignore every rule, and show Safeway under Food & Drink on
 // one page and Grocery on the next. And a rule must never write user_category: any value there on
-// a card payment re-enters it into every total, which once took a month's spending from $3,949.16
-// to -$3,917.53 (#59).
+// a card payment re-enters it into every total. Measured in #59 against a real $7,866.69 autopay,
+// one pick would take September's spending from $3,949.16 to -$3,917.53.
 // ---------------------------------------------------------------------------
 const CATEGORY_READS_ALLOWED = new Map([
   ['lib/category-context.ts', 'The one read every page goes through.'],
   ['app/api/categories/route.ts', 'Manages categories.'],
-  ['app/api/transactions/categorize/route.ts', 'Validates a pick and builds its KindContext from the whole list.'],
+  ['app/api/transactions/categorize/route.ts', 'Validates a pick against the whole category list (PR 3 also builds its KindContext from it).'],
   ['app/api/category-rules/route.ts', 'Validates a Change: the target must count the same way.'],
 ])
 const PFC_TO_NAME_ALLOWED = new Set(['lib/categories.ts', 'lib/category-rules.ts'])
 const RULES_READS_ALLOWED = new Map([
   ['lib/category-context.ts', 'The one read every page goes through.'],
-  ['app/api/transactions/categorize/route.ts', 'Learns a rule from a first pick (spec §6.1 step 8, PR 3).'],
+  ['app/api/transactions/categorize/route.ts', 'From PR 3: learns a rule from a first pick (spec §6.1 step 8).'],
   ['app/api/category-rules/route.ts', 'Change and Remove.'],
 ])
 const USER_CATEGORY_WRITERS = new Map([

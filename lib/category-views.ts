@@ -71,7 +71,8 @@ export function activityItem(
 export type RuleCounts = {
   changed: number // rows this rule relabels (changedByRule)
   pickedByHand: number // the merchant's rows that carry a hand pick
-  matching: number // every row with the rule's merchant key; 0 shows "No current transactions"
+  // every non-card-payment row with the rule's merchant key; 0 shows "No current transactions"
+  matching: number
 }
 
 // Settings' counts. Per category: how many rows show it, matching its drill-down exactly (so card

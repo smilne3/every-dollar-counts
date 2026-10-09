@@ -686,7 +686,7 @@ describe('TransactionCard learned marker (#28)', () => {
     expect(screen.queryByText(/Learned from/)).toBeNull()
   })
 
-  // Review Focus 3.
+  // The marker means "a rule filed this"; a pick the person made is not a rule's doing.
   it('a hand pick shows no marker', () => {
     render(<TransactionCard t={{ ...txn, user_category: 'Grocery' }} category={{ ...learned, source: 'pick', ruleId: null }} categoryOptions={['Food', 'Grocery']} />)
     expect(screen.queryByRole('button', { name: /learned from/ })).toBeNull()

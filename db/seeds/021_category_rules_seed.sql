@@ -16,7 +16,8 @@
 --      verification, and review 3f's per-merchant list with the owner.
 --
 -- Reset, and only before PR 2 deploys (the "never ... delete" below is about after):
--- delete from public.category_rules where origin = 'seeded'; then run this again. After PR 2
+-- delete from public.category_rules where origin = 'seeded'; then run this again. This is the only
+-- sanctioned way to empty category_rules (db/migrations/021_category_rules.sql). After PR 2
 -- deploys there is no reset; changes go through Settings.
 --
 -- NOT PART OF SETUP. Run once on production, immediately before the category-rules deploy (PR 2).

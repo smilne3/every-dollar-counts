@@ -46,7 +46,7 @@ function withCode(error: { message: string; code?: string }): string {
 export type CountTxn = CategorizableTxn & { id: string; date: string }
 
 // Every non-removed transaction, with exactly the columns resolveCategory needs, for Settings'
-// counts and the delete-category dialog. Paged (#69): about 1,400 rows today, three requests.
+// counts and the delete-category dialog. Paged (#69): about 1,400 rows on 2026-10-08, three requests.
 export async function readTransactionsForCounts(): Promise<CountTxn[]> {
   const supabase = await createClient()
   const { data, error } = await readAllRows(() =>
