@@ -109,6 +109,12 @@ describe('categoryUsage', () => {
     expect(rules['r-safeway']).toEqual({ changed: 3, pickedByHand: 1, matching: 4 })
   })
 
+  // A rule that names the bank's own category matches its rows but changes none of them.
+  it('counts a rule that agrees with the bank as matching, not changing', () => {
+    const d = testData(DEFAULTS, [rule('Starbucks', 'c-Food & Drink')])
+    expect(categoryUsage(ROWS, d, new Set()).rules['r-starbucks']).toEqual({ changed: 0, pickedByHand: 0, matching: 1 })
+  })
+
   it('reports a rule with no current rows as matching nothing', () => {
     const d = testData(DEFAULTS, [rule('Gone Market', GROCERY.id)])
     expect(categoryUsage(ROWS, d, new Set()).rules['r-gone market']).toEqual({ changed: 0, pickedByHand: 0, matching: 0 })
@@ -148,13 +154,15 @@ describe('deleteImpact', () => {
   })
 
   it('lists the top three destinations and counts the rest as rows', () => {
-    const cats = [...DEFAULTS, cat('A'), cat('B'), cat('C'), cat('D')]
-    const rows = ['A', 'A', 'A', 'B', 'B', 'C', 'D', 'D', 'D', 'D'].map((n, i) =>
+    // Five destinations, the fourth and fifth with 2 and 1 rows: the rest is 3 rows, not 2 destinations.
+    const cats = [...DEFAULTS, cat('A'), cat('B'), cat('C'), cat('D'), cat('E')]
+    const rows = ['A', 'A', 'A', 'B', 'B', 'C', 'C', 'D', 'D', 'D', 'D', 'E'].map((n, i) =>
       r(`x${i}`, '2026-09', `M${n}`, 1, 'GENERAL_MERCHANDISE', { user_category: 'Shopping' })
     )
-    const d = testData(cats, ['A', 'B', 'C', 'D'].map((n) => rule(`M${n}`, `c-${n}`)))
+    const d = testData(cats, ['A', 'B', 'C', 'D', 'E'].map((n) => rule(`M${n}`, `c-${n}`)))
     const impact = deleteImpact(rows, d, 'c-Shopping')
+    // B and C tie on 2; the name breaks the tie.
     expect(impact.moved).toEqual([{ name: 'D', count: 4 }, { name: 'A', count: 3 }, { name: 'B', count: 2 }])
-    expect(impact.movedMore).toBe(1)
+    expect(impact.movedMore).toBe(3)
   })
 })

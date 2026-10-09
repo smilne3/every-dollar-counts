@@ -125,4 +125,12 @@ describe('CategoryManager delete dialog', () => {
     openDelete('Grocery')
     expect(screen.getByText('No transactions currently use this category.')).toBeTruthy()
   })
+
+  // Rows that only move (none become Uncategorized) are still rows using the category.
+  it('does not say nothing moves when rows move but none become Uncategorized', () => {
+    renderManager(usageFor({ uncategorized: 0, moved: [{ name: 'Food & Drink', count: 145 }] }))
+    openDelete('Grocery')
+    expect(screen.getByText(/145 transactions/).closest('p')?.textContent).toBe('145 transactions will move to Food & Drink.')
+    expect(screen.queryByText('No transactions currently use this category.')).toBeNull()
+  })
 })

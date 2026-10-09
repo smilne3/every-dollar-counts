@@ -209,3 +209,30 @@ describe('TransactionRow learned marker (#28)', () => {
     vi.unstubAllGlobals()
   })
 })
+
+// CategoryPicker keys its stale-alert reset on source as well as name, so the row must hand it the
+// source: a rule equal to the bank's category being removed changes the reason, not the name.
+describe('TransactionRow category source', () => {
+  it("passes the category's source to the picker, so a change of reason clears its alert", async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      redirected: false,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ error: 'This transaction just changed. Refresh and try again.' }),
+    }))
+    const agreeing: ResolvedCategory = { name: 'Food', source: 'rule', ruleId: 'r1', bankName: 'Food' }
+    const row = (category: ResolvedCategory) => (
+      <table>
+        <tbody>
+          <TransactionRow t={txn} category={category} categoryOptions={['Food', 'Grocery']} />
+        </tbody>
+      </table>
+    )
+    const { rerender } = render(row(agreeing))
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Grocery' } })
+    expect(await screen.findByRole('alert')).toBeTruthy()
+    rerender(row(FOOD))
+    expect(screen.queryByRole('alert')).toBeNull()
+    vi.unstubAllGlobals()
+  })
+})

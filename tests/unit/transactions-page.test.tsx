@@ -222,6 +222,41 @@ describe('Transactions page dual layout', () => {
     expect(all.some((d) => d.el.type === TransactionCard)).toBe(false)
   })
 
+  // Money in and Money out list the rows behind the dashboard's figures: an income row only in,
+  // and neither a transfer nor a card payment out.
+  describe('flow', () => {
+    beforeEach(() => {
+      results.categories = {
+        data: [
+          FOOD,
+          GROCERY,
+          { id: 'c-income', name: 'Income', pfc_primary: 'INCOME', sort_order: 2 },
+          { id: 'c-tout', name: 'Transfer Out', pfc_primary: 'TRANSFER_OUT', sort_order: 3 },
+        ],
+        error: null,
+      }
+      const t = results.transactions as { data: unknown[]; count: number }
+      t.data = [
+        ...t.data,
+        txn({ id: 't5', merchant_name: 'Acme Payroll', amount: -3000, pfc_primary: 'INCOME' }),
+        txn({ id: 't6', merchant_name: 'Savings', amount: 500, pfc_primary: 'TRANSFER_OUT' }),
+      ]
+      t.count = 6
+    })
+
+    it('lists only the income row under Money in', async () => {
+      const { cards, rows } = await branches({ flow: 'in' })
+      expect(rows.map((r) => r.key)).toEqual(['t5'])
+      expect(cards.map((c) => c.key)).toEqual(['t5'])
+    })
+
+    it('leaves the transfer, the card payment and the income out of Money out', async () => {
+      const { cards, rows } = await branches({ flow: 'out' })
+      expect(rows.map((r) => r.key)).toEqual(['t1', 't2', 't4'])
+      expect(cards.map((c) => c.key)).toEqual(['t1', 't2', 't4'])
+    })
+  })
+
   // The in-memory filters rewrite `list` after the fetch. Both branches map that same `list`, so a
   // filtered view must shorten both or neither.
   it('keeps the two branches in step when a filter shortens the list', async () => {

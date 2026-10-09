@@ -651,6 +651,24 @@ describe('TransactionCard learned marker (#28)', () => {
     await waitFor(() => expect(screen.getByRole('link', { name: 'Manage in Settings', hidden: true })).toBeTruthy())
   })
 
+  // CategoryPicker keys its stale-alert reset on source as well as name, so the sheet must hand it
+  // the source: a rule equal to the bank's category being removed changes the reason, not the name.
+  it("passes the category's source to the picker, so a change of reason clears its alert", async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      redirected: false,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => ({ error: 'This transaction just changed. Refresh and try again.' }),
+    }))
+    const agreeing = { name: 'Food', source: 'rule' as const, ruleId: 'r1', bankName: 'Food' }
+    const { rerender } = render(<TransactionCard t={txn} category={agreeing} categoryOptions={['Food', 'Grocery']} />)
+    fireEvent.click(screen.getByRole('button', { name: /edit/ }))
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Grocery' } })
+    expect(await screen.findByRole('alert')).toBeTruthy()
+    rerender(<TransactionCard t={txn} category={bank('Food')} categoryOptions={['Food', 'Grocery']} />)
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
   // changedByRule, not source === 'rule': a rule that agrees with the bank changed nothing.
   it('a rule that names the bank\'s own category shows no marker', () => {
     render(<TransactionCard t={txn} category={{ ...learned, name: 'Food' }} categoryOptions={['Food', 'Grocery']} />)

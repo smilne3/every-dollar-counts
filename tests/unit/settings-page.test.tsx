@@ -166,7 +166,9 @@ describe('Settings categories and rules', () => {
   // hand-picked rows it leaves alone.
   it('shows each rule with its counts', async () => {
     const TRAVEL = { id: 'c-travel', name: 'Travel', pfc_primary: 'TRAVEL', sort_order: 2 }
-    results.categories = { data: [FOOD, GROCERY, TRAVEL], error: null }
+    const INCOME = { id: 'c-income', name: 'Income', pfc_primary: 'INCOME', sort_order: 3 }
+    const TRANSFER_IN = { id: 'c-tin', name: 'Transfer In', pfc_primary: 'TRANSFER_IN', sort_order: 4 }
+    results.categories = { data: [FOOD, GROCERY, TRAVEL, INCOME, TRANSFER_IN], error: null }
     results.category_rules = { data: [SAFEWAY_RULE], error: null }
     results.transactions = {
       data: [
@@ -175,9 +177,17 @@ describe('Settings categories and rules', () => {
       ],
       error: null,
     }
-    const props = findProps(await SettingsPage(), CategoryRulesCard) as { rules: unknown }
+    const props = findProps(await SettingsPage(), CategoryRulesCard) as { rules: unknown; categories: unknown }
     expect(props.rules).toEqual([
       expect.objectContaining({ id: 'r-safeway', merchantLabel: 'Safeway', categoryName: 'Grocery', changed: 1, pickedByHand: 1, matching: 2 }),
+    ])
+    // Each category's kind decides which a rule may move to, so it must be the totals' kind.
+    expect(props.categories).toEqual([
+      { id: 'c-food', name: 'Food & Drink', kind: 'spending' },
+      { id: 'c-grocery', name: 'Grocery', kind: 'spending' },
+      { id: 'c-travel', name: 'Travel', kind: 'spending' },
+      { id: 'c-income', name: 'Income', kind: 'income' },
+      { id: 'c-tin', name: 'Transfer In', kind: 'transfer' },
     ])
   })
 
