@@ -33,7 +33,9 @@ async function readBudgetNames(supabase: Supabase): Promise<Set<string>> {
     const code = budgetsError.code ? `${budgetsError.code} ` : ''
     throw new Error(`could not read budgets: ${code}${budgetsError.message}`)
   }
-  return new Set((budgetRows ?? []).map((b) => b.category as string))
+  // No data and no error is not "no budgets" (#46).
+  if (!budgetRows) throw new Error('could not read budgets: read returned no data and no error')
+  return new Set(budgetRows.map((b) => b.category as string))
 }
 
 // Everything the Categories and Category rules cards need. Throws if any read fails; the page

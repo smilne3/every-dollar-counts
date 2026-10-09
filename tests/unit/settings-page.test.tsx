@@ -220,4 +220,17 @@ describe('Settings categories and rules', () => {
     expect((log.mock.calls[0][1] as Error).message).toBe(message)
     log.mockRestore()
   })
+
+  // No data and no error is not "no budgets" (#46): read so, the delete dialog would show every
+  // budget as absent.
+  it('shows the alert when the budgets read returns no data and no error', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    results.budgets = { data: null, error: null }
+    const tree = await SettingsPage()
+    expect(findProps(tree, BankList)).not.toBeNull()
+    expect(findProps(tree, CategoryManager)).toBeNull()
+    expect(alertText(tree)).toContain("Couldn't load categories and rules.")
+    expect((log.mock.calls[0][1] as Error).message).toBe('could not read budgets: read returned no data and no error')
+    log.mockRestore()
+  })
 })
