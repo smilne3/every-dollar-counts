@@ -182,10 +182,16 @@ export function TransactionCard({
                     <p className="flex items-center gap-1.5 text-xs text-muted" title={learnedText(category.name, t.merchant_name)}>
                       <LearnedIcon className="h-3.5 w-3.5 shrink-0" />
                       <span>
-                        Learned from {merchant}.{' '}
-                        <Link href="/settings#category-rules" className="font-medium text-emerald hover:text-emerald-600">
-                          Manage in Settings
-                        </Link>
+                        Learned from {merchant}.
+                        {/* Not while a save is in flight: like Done, it would close over its failure. */}
+                        {!busy && (
+                          <>
+                            {' '}
+                            <Link href="/settings#category-rules" className="font-medium text-emerald hover:text-emerald-600">
+                              Manage in Settings
+                            </Link>
+                          </>
+                        )}
                       </span>
                     </p>
                   )}

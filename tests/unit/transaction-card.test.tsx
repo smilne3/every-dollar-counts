@@ -637,6 +637,20 @@ describe('TransactionCard learned marker (#28)', () => {
     expect(screen.getByRole('link', { name: 'Manage in Settings', hidden: true }).getAttribute('href')).toBe('/settings#category-rules')
   })
 
+  // Done is withheld while a save is in flight so its failure is seen; the link must not be a
+  // second way out of the sheet in that window.
+  it('hides Manage in Settings while a category save is in flight, and brings it back after', async () => {
+    let settle!: (res: unknown) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { settle = resolve })))
+    render(<TransactionCard t={txn} category={learned} categoryOptions={['Food', 'Grocery']} />)
+    fireEvent.click(screen.getByRole('button', { name: /edit/ }))
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Food' } })
+    expect(screen.queryByRole('link', { name: 'Manage in Settings', hidden: true })).toBeNull()
+    expect(screen.getByText(/Learned from Joe S Den\./)).toBeTruthy()
+    settle({ ok: false, headers: new Headers({ 'content-type': 'application/json' }), json: async () => ({ error: 'nope' }) })
+    await waitFor(() => expect(screen.getByRole('link', { name: 'Manage in Settings', hidden: true })).toBeTruthy())
+  })
+
   // changedByRule, not source === 'rule': a rule that agrees with the bank changed nothing.
   it('a rule that names the bank\'s own category shows no marker', () => {
     render(<TransactionCard t={txn} category={{ ...learned, name: 'Food' }} categoryOptions={['Food', 'Grocery']} />)
