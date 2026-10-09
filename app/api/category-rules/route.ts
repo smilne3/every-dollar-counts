@@ -34,13 +34,13 @@ async function authorize(): Promise<{ supabase: Supabase; householdId: string } 
   } = await supabase.auth.getUser()
   // Only an unreachable Supabase Auth leaves the session's state unknown; see the categorize route.
   if (isAuthRetryableFetchError(authError)) {
-    console.error('[category-rules] auth check failed', authError.message)
+    console.error('[category-rules] auth check failed', { code: authError.code, message: authError.message })
     return fail(503, TRY_AGAIN)
   }
   if (!user) return fail(401, 'Your session ended. Sign in again.')
   const { data: m, error: mError } = await supabase.from('memberships').select('household_id').limit(1).maybeSingle()
   if (mError) {
-    console.error('[category-rules] membership read failed', mError.message)
+    console.error('[category-rules] membership read failed', { code: mError.code, message: mError.message })
     return fail(500, TRY_AGAIN)
   }
   if (!m) return fail(403, "Your account isn't part of a household.")
@@ -72,7 +72,7 @@ export async function PATCH(req: Request) {
     .eq('household_id', householdId)
     .maybeSingle()
   if (ruleError) {
-    console.error('[category-rules] rule read failed', ruleError.message)
+    console.error('[category-rules] rule read failed', { id, code: ruleError.code, message: ruleError.message })
     return fail(500, TRY_AGAIN)
   }
   if (!rule) return fail(404, 'That rule no longer exists. Refresh and try again.')
@@ -84,10 +84,15 @@ export async function PATCH(req: Request) {
     .eq('household_id', householdId)
     .order('sort_order')
   if (catsError) {
-    console.error('[category-rules] categories read failed', catsError.message)
+    console.error('[category-rules] categories read failed', { id, code: catsError.code, message: catsError.message })
     return fail(500, TRY_AGAIN)
   }
-  const categories = cats ?? []
+  // Neither data nor error is a failed read: as "no categories" it would refuse the Change as stale.
+  if (!cats) {
+    console.error('[category-rules] categories read returned no data', { id })
+    return fail(500, TRY_AGAIN)
+  }
+  const categories = cats
   const current = categories.find((c) => c.id === expectedCategoryId)
   if (!current) return fail(409, RULE_CHANGED) // deleted between the two reads
   const target = categories.find((c) => c.id === categoryId)
@@ -107,11 +112,11 @@ export async function PATCH(req: Request) {
     .eq('category_id', expectedCategoryId)
   if (error?.code === '23503') {
     // The target category was deleted between our read and this write.
-    console.error('[category-rules] change hit a deleted category', error.message)
+    console.error('[category-rules] change hit a deleted category', { id, code: error.code, message: error.message })
     return fail(409, RULE_CHANGED)
   }
   if (error) {
-    console.error('[category-rules] change failed', error.message)
+    console.error('[category-rules] change failed', { id, code: error.code, message: error.message })
     return fail(500, TRY_AGAIN)
   }
   if (!count) return fail(409, RULE_CHANGED)
@@ -137,7 +142,7 @@ export async function DELETE(req: Request) {
     .eq('id', id)
     .eq('category_id', expectedCategoryId)
   if (error) {
-    console.error('[category-rules] remove failed', error.message)
+    console.error('[category-rules] remove failed', { id, code: error.code, message: error.message })
     return fail(500, TRY_AGAIN)
   }
   if (!count) return fail(409, RULE_CHANGED)

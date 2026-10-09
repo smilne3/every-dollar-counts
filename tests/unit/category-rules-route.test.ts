@@ -147,6 +147,32 @@ describe('PATCH /api/category-rules (Change)', () => {
     expect((await change()).status).toBe(500)
   })
 
+  // Neither data nor error is a failed read, not "no categories" (which would refuse as stale).
+  it('answers 500 when the categories read returns neither data nor error', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    db.categories = { data: null, error: null }
+    const res = await change()
+    expect(res.status).toBe(500)
+    expect(await error(res)).toBe('That could not be saved. Please try again.')
+    expect(writes()).toHaveLength(0)
+    expect(log).toHaveBeenCalledWith('[category-rules] categories read returned no data', { id: 'r1' })
+    log.mockRestore()
+  })
+
+  // The log carries the rule and the database's code, so a failure can be traced to its cause.
+  it.each([
+    ['rule read', '42501', () => (db.rule = { data: null, error: { code: '42501', message: 'denied' } }), '[category-rules] rule read failed'],
+    ['categories read', '42501', () => (db.categories = { data: null, error: { code: '42501', message: 'denied' } }), '[category-rules] categories read failed'],
+    ['write (23503)', '23503', () => (db.write = { error: { code: '23503', message: 'denied' }, count: null }), '[category-rules] change hit a deleted category'],
+    ['write', '42501', () => (db.write = { error: { code: '42501', message: 'denied' }, count: null }), '[category-rules] change failed'],
+  ])('logs the rule id, code and message when the %s fails', async (_name, code, fail, tag) => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    fail()
+    await change()
+    expect(log).toHaveBeenCalledWith(tag, { id: 'r1', code, message: 'denied' })
+    log.mockRestore()
+  })
+
   it('answers 400 on a malformed body without touching the database', async () => {
     expect((await PATCH(req('PATCH', '{not json'))).status).toBe(400)
     expect((await change({ categoryId: '' })).status).toBe(400)
@@ -169,6 +195,14 @@ describe('DELETE /api/category-rules (Remove)', () => {
     expect((await remove()).status).toBe(409)
     db.write = { error: { message: 'boom' }, count: null }
     expect((await remove()).status).toBe(500)
+  })
+
+  it('logs the rule id, code and message when the delete fails', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    db.write = { error: { code: '42501', message: 'denied' }, count: null }
+    await remove()
+    expect(log).toHaveBeenCalledWith('[category-rules] remove failed', { id: 'r1', code: '42501', message: 'denied' })
+    log.mockRestore()
   })
 
   // Remove has no category to choose, so PATCH's 400 message would mislead here.
@@ -196,6 +230,24 @@ describe.each([
     const res = await call()
     expect(res.status).toBe(403)
     expect(await error(res)).toBe("Your account isn't part of a household.")
+  })
+
+  it('logs the code and message when auth is unreachable', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { AuthRetryableFetchError } = await import('@supabase/supabase-js')
+    const authError = new AuthRetryableFetchError('down', 0)
+    getUser.mockResolvedValueOnce({ data: { user: null }, error: authError })
+    expect((await call()).status).toBe(503)
+    expect(log).toHaveBeenCalledWith('[category-rules] auth check failed', { code: authError.code, message: 'down' })
+    log.mockRestore()
+  })
+
+  it('logs the code and message when the membership read fails', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    db.membership = { data: null, error: { code: '42501', message: 'denied' } }
+    expect((await call()).status).toBe(500)
+    expect(log).toHaveBeenCalledWith('[category-rules] membership read failed', { code: '42501', message: 'denied' })
+    log.mockRestore()
   })
 
   it("answers the environment guard's 409 and 500, and writes nothing", async () => {
