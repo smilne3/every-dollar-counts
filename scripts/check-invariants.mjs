@@ -9,7 +9,7 @@
 // Every known violation is ALLOWED BY NAME below, with a reason and an issue number. The allowlist
 // is the outstanding debt, written down. Adding to it should feel like a decision; removing from it
 // is how the debt gets paid.
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -369,14 +369,13 @@ function main() {
   const ROOT = process.cwd()
   const read = (f) => ({ path: relative(ROOT, f), text: readFileSync(f, 'utf8') })
   const files = ['app', 'lib', 'components'].flatMap((d) => walk(join(ROOT, d))).map(read)
-  let scripts = []
-  try {
-    scripts = walk(join(ROOT, 'scripts'), [], /\.mjs$/)
-      .map(read)
-      .filter((f) => f.path !== 'scripts/check-invariants.mjs')
-  } catch {
-    // No scripts/ directory (the scratch trees in tests/unit/check-invariants-txn-reads.test.ts).
-  }
+  // No scripts/ directory in the scratch trees of tests/unit/check-invariants-txn-reads.test.ts.
+  // Any other failure to read it throws: passing with scripts/ unscanned would be a false "ok".
+  const scripts = existsSync(join(ROOT, 'scripts'))
+    ? walk(join(ROOT, 'scripts'), [], /\.mjs$/)
+        .map(read)
+        .filter((f) => f.path !== 'scripts/check-invariants.mjs')
+    : []
   const failures = [
     ...checkUncheckedReads(files),
     ...checkRuntimeClock(files),
