@@ -63,6 +63,17 @@ describe('CategoryRulesCard', () => {
     expect(screen.getByRole('combobox').className).toContain('md:max-w-48')
   })
 
+  // Until PR 3 adds learning, the card must not promise it.
+  it('explains rules without promising learning', () => {
+    render(<CategoryRulesCard rules={[safeway()]} categories={CATS} />)
+    expect(
+      screen.getByText(
+        "Each rule files one merchant's transactions under a category of your choosing, past and future. A rule never moves money between spending, transfers and income, and never touches card payments."
+      )
+    ).toBeTruthy()
+    expect(screen.queryByText(/learn|teach|remember/i)).toBeNull()
+  })
+
   it('omits the hand-pick count when it is zero', () => {
     render(<CategoryRulesCard rules={[safeway({ pickedByHand: 0 })]} categories={CATS} />)
     expect(countLine().textContent).toBe('145 transactions')
@@ -78,7 +89,7 @@ describe('CategoryRulesCard', () => {
 
   it('shows the empty state', () => {
     render(<CategoryRulesCard rules={[]} categories={CATS} />)
-    expect(screen.getByText('Nothing learned yet. Pick a category on a transaction and the app will remember it for that merchant.')).toBeTruthy()
+    expect(screen.getByText('No category rules yet.')).toBeTruthy()
   })
 
   it('Changes with the category it was showing, and refreshes', async () => {
@@ -171,14 +182,15 @@ describe('CategoryRulesCard', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
-  it("Remove's dialog omits zero counts and says the next pick teaches", () => {
+  // Learning from a pick arrives in PR 3, which restores the "will teach the app again" line.
+  it("Remove's dialog omits zero counts and promises no learning", () => {
     render(<CategoryRulesCard rules={[safeway({ pickedByHand: 0 })]} categories={CATS} />)
     fireEvent.click(screen.getByRole('button', { name: 'Remove the Safeway rule' }))
     const dialog = screen.getByRole('dialog', { hidden: true })
     expect(within(dialog).getByText('Remove the Safeway rule?')).toBeTruthy()
     expect(within(dialog).getByText('145 Safeway transactions go back to their bank’s category.')).toBeTruthy()
     expect(within(dialog).queryByText(/picked by hand|keep theirs/)).toBeNull()
-    expect(within(dialog).getByText('The next category you pick for Safeway will teach the app again.')).toBeTruthy()
+    expect(within(dialog).queryByText(/teach|learn/)).toBeNull()
   })
 
   it("Remove's dialog speaks of one transaction, and one hand pick, in the singular", () => {

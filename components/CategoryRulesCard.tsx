@@ -28,15 +28,13 @@ export function CategoryRulesCard({ rules, categories }: { rules: RuleView[]; ca
   const sorted = [...rules].sort((a, b) => a.merchantLabel.localeCompare(b.merchantLabel, undefined, { sensitivity: 'base' }))
   return (
     <div className="space-y-3">
+      {/* PR 3 (#28 spec §6.1 step 8) restores the spec's wording about learning from a pick. */}
       <p className="text-sm text-muted">
-        When you pick a category for a merchant the app hasn&apos;t learned yet, it files that merchant&apos;s other
-        transactions the same way, past and future. It never moves money between spending, transfers and income, and
-        never touches card payments.
+        Each rule files one merchant&apos;s transactions under a category of your choosing, past and future. A rule
+        never moves money between spending, transfers and income, and never touches card payments.
       </p>
       {sorted.length === 0 ? (
-        <p className="text-sm text-muted">
-          Nothing learned yet. Pick a category on a transaction and the app will remember it for that merchant.
-        </p>
+        <p className="text-sm text-muted">No category rules yet.</p>
       ) : (
         <ul className="divide-y divide-line">
           {sorted.map((r) => (
@@ -200,7 +198,6 @@ function RuleRow({ rule, categories }: { rule: RuleView; categories: RuleCategor
         {rule.matching === 0 && (
           <p>No {label} transactions are showing right now — for example, if a bank is disconnected.</p>
         )}
-        <p>The next category you pick for {label} will teach the app again.</p>
       </ConfirmDialog>
     </li>
   )
