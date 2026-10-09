@@ -88,6 +88,23 @@ describe('resolveCategory', () => {
   it('does not apply a spending rule to a transfer row', () => {
     expect(resolveCategory(row({ pfc_primary: 'TRANSFER_OUT' }), ctx)).toMatchObject({ name: 'Transfer Out', source: 'bank' })
   })
+  // Rules work within every kind, not only spending.
+  it('applies a transfer rule to a transfer row', () => {
+    const transfer = testCtx(DEFAULTS, [rule('Savings', 'c-Transfer In')])
+    const t = row({ merchant_name: 'Savings', pfc_primary: 'TRANSFER_OUT' })
+    expect(resolveCategory(t, transfer)).toMatchObject({ name: 'Transfer In', source: 'rule', bankName: 'Transfer Out' })
+  })
+  // Salary comes first so that pfcToName, which is last-wins, still maps INCOME to Income.
+  const withSalary = [cat('Salary', 'INCOME', -1), ...DEFAULTS]
+  it('applies an income rule to an income row', () => {
+    const income = testCtx(withSalary, [rule('Acme Payroll', 'c-Salary')])
+    const t = row({ merchant_name: 'Acme Payroll', pfc_primary: 'INCOME' })
+    expect(resolveCategory(t, income)).toMatchObject({ name: 'Salary', source: 'rule', bankName: 'Income' })
+  })
+  it('does not apply an income rule to a spending row', () => {
+    const income = testCtx(withSalary, [rule('Safeway', 'c-Salary')])
+    expect(resolveCategory(row(), income)).toMatchObject({ name: 'Food & Drink', source: 'bank' })
+  })
   it('applies a spending rule to an Uncategorized row with a spending primary', () => {
     expect(resolveCategory(row({ pfc_primary: 'LOAN_DISBURSEMENTS' }), ctx)).toMatchObject({ name: 'Grocery', source: 'rule', bankName: 'Uncategorized' })
   })
