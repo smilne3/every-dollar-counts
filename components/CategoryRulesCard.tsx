@@ -53,16 +53,21 @@ function RuleRow({ rule, categories }: { rule: RuleView; categories: RuleCategor
   const router = useRouter()
   // As CategoryPicker: the choice being saved shows until the save settles; on failure it is
   // dropped and the select falls back to the server's current value. A refresh that brings a new
-  // category clears both the choice and any alert.
+  // category clears both the choice and any alert (except as refusedStale below).
   const [pending, setPending] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirming, setConfirming] = useState(false)
+  // Set when a 404/409 refusal triggers the refresh, consumed by the next re-sync: that refresh is
+  // the one that moves the select to another device's category, so the person is told why rather
+  // than seeing the refusal's alert vanish as the select jumps.
+  const [refusedStale, setRefusedStale] = useState(false)
   const [seen, setSeen] = useState(rule.categoryId)
   if (seen !== rule.categoryId) {
     setSeen(rule.categoryId)
     setPending(null)
-    setError(null)
+    setError(refusedStale ? 'This rule was just changed elsewhere. Showing the latest.' : null)
+    setRefusedStale(false)
   }
 
   const current = categories.find((c) => c.id === rule.categoryId)
@@ -73,6 +78,7 @@ function RuleRow({ rule, categories }: { rule: RuleView; categories: RuleCategor
   async function send(method: 'PATCH' | 'DELETE', body: Record<string, string>): Promise<boolean> {
     setBusy(true)
     setError(null)
+    setRefusedStale(false)
     let reload = false
     let saved = false
     try {
@@ -89,6 +95,7 @@ function RuleRow({ rule, categories }: { rule: RuleView; categories: RuleCategor
         setError(result.error)
         // 404 and 409: the server says this card is stale, so show the latest under the message.
         reload = result.status === 404 || result.status === 409
+        setRefusedStale(reload)
       }
     } catch (err) {
       console.error('[CategoryRulesCard] save failed', err)

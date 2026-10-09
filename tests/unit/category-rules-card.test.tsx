@@ -172,13 +172,25 @@ describe('CategoryRulesCard', () => {
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'c-food' } })
     await waitFor(() => expect(refresh).toHaveBeenCalled())
     rerender(<CategoryRulesCard rules={[safeway({ categoryId: 'c-food', categoryName: 'Food & Drink' })]} categories={CATS} />)
+    expect(screen.queryByRole('alert')).toBeNull()
     rerender(<CategoryRulesCard rules={[safeway()]} categories={CATS} />)
     expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('c-grocery')
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
 
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply(false, { error: 'This rule just changed. Refresh and try again.' })))
+  // A 404/409 refusal refreshes the card; when that refresh lands with another device's category,
+  // the select moves, so the alert says why instead of vanishing.
+  it.each([404, 409])('keeps a reason when the refresh after a %i refusal brings another category', async (status) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply(false, { error: 'This rule just changed. Refresh and try again.' }, status)))
+    const { rerender } = render(<CategoryRulesCard rules={[safeway()]} categories={CATS} />)
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'c-food' } })
     await screen.findByRole('alert')
+    expect(refresh).toHaveBeenCalledTimes(1)
     rerender(<CategoryRulesCard rules={[safeway({ categoryId: 'c-food', categoryName: 'Food & Drink' })]} categories={CATS} />)
+    expect(screen.getByRole('alert').textContent).toBe('This rule was just changed elsewhere. Showing the latest.')
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('c-food')
+    // Consumed: a later change from elsewhere, with no refusal behind it, clears the alert as usual.
+    rerender(<CategoryRulesCard rules={[safeway()]} categories={CATS} />)
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
