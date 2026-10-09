@@ -31,7 +31,7 @@ const safeway = (over: Partial<RuleView> = {}): RuleView => ({
 })
 // The count line, found by its title: its text is split across unbreakable pieces (see below).
 const countLine = () => screen.getByTitle(/^Transactions this rule files under /)
-const reply = (ok: boolean, body: unknown) => ({ ok, redirected: false, headers: new Headers({ 'content-type': 'application/json' }), json: async () => body })
+const reply = (ok: boolean, body: unknown, status = ok ? 200 : 409) => ({ ok, status, redirected: false, headers: new Headers({ 'content-type': 'application/json' }), json: async () => body })
 
 describe('CategoryRulesCard', () => {
   it('offers only categories of the same kind', () => {
@@ -92,12 +92,56 @@ describe('CategoryRulesCard', () => {
   })
 
   it('rolls back with the route message on a refused Change, without refreshing', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply(false, { error: 'This rule just changed. Refresh and try again.' })))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply(false, { error: 'That category is not one of yours.' }, 400)))
+    render(<CategoryRulesCard rules={[safeway()]} categories={CATS} />)
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'c-food' } })
+    expect((await screen.findByRole('alert')).textContent).toBe('That category is not one of yours.')
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('c-grocery')
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  // 404 and 409 are the server saying this card is stale: keep its message and show the latest.
+  it.each([404, 409])('shows the route message and refreshes on a %i refusal', async (status) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply(false, { error: 'This rule just changed. Refresh and try again.' }, status)))
     render(<CategoryRulesCard rules={[safeway()]} categories={CATS} />)
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'c-food' } })
     expect((await screen.findByRole('alert')).textContent).toBe('This rule just changed. Refresh and try again.')
     expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('c-grocery')
-    expect(refresh).not.toHaveBeenCalled()
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it('says it may not have saved, rolls back and refreshes when the request fails in flight', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
+    render(<CategoryRulesCard rules={[safeway()]} categories={CATS} />)
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'c-food' } })
+    expect((await screen.findByRole('alert')).textContent).toBe('It may not have saved. Showing the latest.')
+    expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('c-grocery')
+    expect(refresh).toHaveBeenCalledTimes(1)
+    vi.mocked(console.error).mockRestore()
+  })
+
+  it('disables the select and Remove while a Change is in flight', async () => {
+    let settle: (v: unknown) => void = () => {}
+    vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise((r) => (settle = r))))
+    render(<CategoryRulesCard rules={[safeway()]} categories={CATS} />)
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'c-food' } })
+    expect((screen.getByRole('combobox') as HTMLSelectElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Remove the Safeway rule' }) as HTMLButtonElement).disabled).toBe(true)
+    settle(reply(true, { ok: true }))
+    await waitFor(() => expect((screen.getByRole('combobox') as HTMLSelectElement).disabled).toBe(false))
+    expect((screen.getByRole('button', { name: 'Remove the Safeway rule' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  // The FK deletes a rule with its category, so a rule whose category is gone raced a delete.
+  it('asks for a reload instead of offering Change and Remove when the category was just deleted', () => {
+    render(<CategoryRulesCard rules={[safeway({ categoryId: 'c-gone', categoryName: 'a deleted category' })]} categories={CATS} />)
+    expect(screen.queryByRole('combobox')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Remove the Safeway rule' })).toBeNull()
+    const note = screen.getByText(/^This category was just deleted\./)
+    expect(note.textContent).toBe('This category was just deleted. Reload the page.')
+    expect(note.className).toBe('text-xs text-muted')
+    expect(screen.getByRole('link', { name: 'Reload the page.' }).getAttribute('href')).toBe('/settings')
   })
 
   it('rolls back on a redirected Change and says the session ended', async () => {

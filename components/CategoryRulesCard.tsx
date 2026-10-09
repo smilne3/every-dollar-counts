@@ -86,6 +86,8 @@ function RuleRow({ rule, categories }: { rule: RuleView; categories: RuleCategor
         reload = true
       } else {
         setError(result.error)
+        // 404 and 409: the server says this card is stale, so show the latest under the message.
+        reload = result.status === 404 || result.status === 409
       }
     } catch (err) {
       console.error('[CategoryRulesCard] save failed', err)
@@ -139,31 +141,42 @@ function RuleRow({ rule, categories }: { rule: RuleView; categories: RuleCategor
           ))}
         </p>
       </div>
-      <div className="flex items-center gap-2">
-        {/* md:min/max: selectClass's md:w-auto outranks a md:w-48, so the width is pinned by its bounds. */}
-        <select
-          value={pending ?? rule.categoryId}
-          onChange={change}
-          disabled={busy}
-          aria-label={`Category for ${label}`}
-          className={`${selectClass} min-w-0 flex-1 sm:w-48 sm:flex-none md:min-w-48 md:max-w-48`}
-        >
-          {options.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-        <Button
-          variant="danger"
-          size="sm"
-          disabled={busy}
-          onClick={() => setConfirming(true)}
-          aria-label={`Remove the ${label} rule`}
-        >
-          Remove
-        </Button>
-      </div>
+      {current ? (
+        <div className="flex items-center gap-2">
+          {/* md:min/max: selectClass's md:w-auto outranks a md:w-48, so the width is pinned by its bounds. */}
+          <select
+            value={pending ?? rule.categoryId}
+            onChange={change}
+            disabled={busy}
+            aria-label={`Category for ${label}`}
+            className={`${selectClass} min-w-0 flex-1 sm:w-48 sm:flex-none md:min-w-48 md:max-w-48`}
+          >
+            {options.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          <Button
+            variant="danger"
+            size="sm"
+            disabled={busy}
+            onClick={() => setConfirming(true)}
+            aria-label={`Remove the ${label} rule`}
+          >
+            Remove
+          </Button>
+        </div>
+      ) : (
+        // The FK deletes a rule with its category, so this rule raced a delete: nothing to change.
+        // No #category-rules on the link: from /settings a hash-only change scrolls, it does not reload.
+        <p className="text-xs text-muted">
+          This category was just deleted.{' '}
+          <a href="/settings" className="font-medium underline">
+            Reload the page.
+          </a>
+        </p>
+      )}
       {error && (
         <p role="alert" className="text-xs text-coral sm:basis-full">
           {error}
