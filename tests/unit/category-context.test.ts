@@ -14,11 +14,19 @@ import { readAllRows } from '@/lib/read-all'
 import { idPagedTable, pagedTable, ruleRows, txnRows } from '../stubs/postgrest-pages'
 import type { CategorizableTxn } from '@/lib/category-rules'
 
-const categoriesRead = (result: { data: unknown; error: { message: string } | null }) => () => {
+// Records what each categories read asked for, so a test can pin the columns and the order.
+const catReads: { select: string | null; order: string | null }[] = []
+const categoriesRead =
+  (result: { data: unknown; error: { message: string; code?: string } | null }) => () => {
+  const read: { select: string | null; order: string | null } = { select: null, order: null }
+  catReads.push(read)
   const chain: Record<string, unknown> = {}
-  chain.select = () => chain
+  chain.select = (cols: string) => {
+    read.select = cols
+    return chain
+  }
   chain.order = (col: string) => {
-    if (col !== 'sort_order') throw new Error(`unexpected order ${col}`)
+    read.order = col
     return chain
   }
   chain.then = (resolve: (r: unknown) => unknown) => Promise.resolve(result).then(resolve)
@@ -27,6 +35,7 @@ const categoriesRead = (result: { data: unknown; error: { message: string } | nu
 const CATS = [{ id: 'c1', name: 'Grocery', pfc_primary: null, sort_order: 0 }]
 
 beforeEach(() => {
+  catReads.length = 0
   tables.categories = categoriesRead({ data: CATS, error: null })
   tables.category_rules = idPagedTable([]).query
   tables.transactions = pagedTable([]).query
@@ -44,7 +53,31 @@ describe('fetchCategoryContext', () => {
 
   it('throws when the categories read fails', async () => {
     tables.categories = categoriesRead({ data: null, error: { message: 'permission denied' } })
-    await expect(fetchCategoryContext()).rejects.toThrow('could not read categories: permission denied')
+    await expect(fetchCategoryContext()).rejects.toThrow(/^could not read categories: permission denied$/)
+  })
+
+  it('names the error code when the categories read fails with one', async () => {
+    tables.categories = categoriesRead({ data: null, error: { message: 'permission denied', code: '42501' } })
+    await expect(fetchCategoryContext()).rejects.toThrow(/^could not read categories: 42501 permission denied$/)
+  })
+
+  // A response with neither data nor error (an empty body) is not "no categories": that would drop
+  // every name, show every row as Uncategorized and count income as spending.
+  it('throws when the categories read returns neither data nor error', async () => {
+    tables.categories = categoriesRead({ data: null, error: null })
+    await expect(fetchCategoryContext()).rejects.toThrow(
+      /^could not read categories: read returned no data and no error$/
+    )
+  })
+
+  // The casts in fetchCategoryContext mean a dropped column passes tsc; this pins the lists.
+  it('reads exactly the columns the resolver and Settings need, categories in sort order', async () => {
+    const rules = idPagedTable(ruleRows(3))
+    tables.category_rules = rules.query
+    await fetchCategoryContext()
+    expect(catReads).toEqual([{ select: 'id, name, pfc_primary, sort_order', order: 'sort_order' }])
+    // Every page asks for the same columns.
+    expect([...new Set(rules.selects)]).toEqual(['id, household_id, merchant_key, merchant_label, category_id, origin'])
   })
 
   it('throws, naming the migration, when the rules read fails on any page', async () => {
@@ -70,7 +103,12 @@ describe('readTransactionsForCounts', () => {
 
   it('throws when the second page fails', async () => {
     tables.transactions = pagedTable(txnRows(1238), { failOnRequest: 2 }).query
-    await expect(readTransactionsForCounts()).rejects.toThrow('could not read transactions: boom')
+    await expect(readTransactionsForCounts()).rejects.toThrow(/^could not read transactions: boom$/)
+  })
+
+  it('names the error code when the read fails with one', async () => {
+    tables.transactions = pagedTable(txnRows(1238), { failOnRequest: 2, failCode: '57014' }).query
+    await expect(readTransactionsForCounts()).rejects.toThrow(/^could not read transactions: 57014 boom$/)
   })
 })
 

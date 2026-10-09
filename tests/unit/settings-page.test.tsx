@@ -197,4 +197,17 @@ describe('Settings categories and rules', () => {
     expect(findProps(tree, CategoryRulesCard)).toBeNull()
     expect(alertText(tree)).toContain("Couldn't load categories and rules.")
   })
+
+  // The logged message carries the error code, as the categories and rules reads' do.
+  it.each([
+    ['with a code', { message: 'boom', code: '42P01' }, 'could not read budgets: 42P01 boom'],
+    ['without a code', { message: 'boom' }, 'could not read budgets: boom'],
+  ])('logs a failed budgets read %s', async (_name, error, message) => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    results.budgets = { data: null, error }
+    await SettingsPage()
+    expect(log).toHaveBeenCalledWith('[settings] could not load categories and rules', new Error(message))
+    expect((log.mock.calls[0][1] as Error).message).toBe(message)
+    log.mockRestore()
+  })
 })

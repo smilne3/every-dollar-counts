@@ -24,16 +24,24 @@ export const fetchCategoryContext = cache(async (): Promise<CategoryData> => {
         .select('id, household_id, merchant_key, merchant_label, category_id, origin')
     ),
   ])
-  if (cats.error) throw new Error(`could not read categories: ${cats.error.message}`)
+  if (cats.error) throw new Error(`could not read categories: ${withCode(cats.error)}`)
+  // Neither data nor error (an empty body) is a failed read, not "no categories" (readAllById
+  // treats it the same way).
+  if (!cats.data) throw new Error('could not read categories: read returned no data and no error')
   if (rules.error) {
     throw new Error(
-      `could not read category rules: ${rules.error.code ?? ''} ${rules.error.message} ` +
+      `could not read category rules: ${withCode(rules.error)} ` +
         '(has db/migrations/021, including its grants, been applied?)'
     )
   }
   // The one place outside lib/category-rules.ts that brands CategoryData.
-  return { categories: (cats.data ?? []) as Category[], rules: rules.data as CategoryRule[] } as CategoryData
+  return { categories: cats.data as Category[], rules: rules.data as CategoryRule[] } as CategoryData
 })
+
+// "42501 permission denied", or just the message when there is no code.
+function withCode(error: { message: string; code?: string }): string {
+  return `${error.code ? error.code + ' ' : ''}${error.message}`
+}
 
 export type CountTxn = CategorizableTxn & { id: string; date: string }
 
@@ -47,6 +55,6 @@ export async function readTransactionsForCounts(): Promise<CountTxn[]> {
       .select('id, date, merchant_name, user_category, pfc_primary, pfc_detailed')
       .eq('removed', false)
   )
-  if (error) throw new Error(`could not read transactions: ${error.message}`)
+  if (error) throw new Error(`could not read transactions: ${withCode(error)}`)
   return data
 }

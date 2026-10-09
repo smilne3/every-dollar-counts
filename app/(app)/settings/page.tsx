@@ -29,7 +29,10 @@ type Supabase = Awaited<ReturnType<typeof createClient>>
 async function readBudgetNames(supabase: Supabase): Promise<Set<string>> {
   const { data: budgetRows, error: budgetsError } = await supabase.from('budgets').select('category')
   // Checked (#91): unchecked, a failed read showed every budget as absent in the delete dialog.
-  if (budgetsError) throw new Error(`could not read budgets: ${budgetsError.message}`)
+  if (budgetsError) {
+    const code = budgetsError.code ? `${budgetsError.code} ` : ''
+    throw new Error(`could not read budgets: ${code}${budgetsError.message}`)
+  }
   return new Set((budgetRows ?? []).map((b) => b.category as string))
 }
 
