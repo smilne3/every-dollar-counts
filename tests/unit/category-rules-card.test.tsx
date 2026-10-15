@@ -44,11 +44,11 @@ describe('CategoryRulesCard', () => {
   it('stacks below sm and never truncates the count', () => {
     render(<CategoryRulesCard rules={[safeway({ merchantLabel: 'A very long merchant name that will not fit on a phone' })]} categories={CATS} />)
     const line = countLine()
-    expect(line.textContent).toBe('145 transactions · 14 picked by hand')
+    expect(line.textContent).toBe('145 changed by this rule · 14 set by you')
     expect(line.closest('.truncate')).toBeNull()
     // Each piece is unbreakable and tabular; the line may break only between them, at " · ".
     const pieces = [...line.querySelectorAll('.whitespace-nowrap.tabular-nums')]
-    expect(pieces.map((el) => el.textContent)).toEqual(['145 transactions ·', '14 picked by hand'])
+    expect(pieces.map((el) => el.textContent)).toEqual(['145 changed by this rule ·', '14 set by you'])
     // Exact: the closed Remove dialog also names the merchant, inside longer sentences.
     const label = screen.getByText('A very long merchant name that will not fit on a phone')
     expect(label.className).toContain('truncate')
@@ -74,7 +74,7 @@ describe('CategoryRulesCard', () => {
 
   it('omits the hand-pick count when it is zero', () => {
     render(<CategoryRulesCard rules={[safeway({ pickedByHand: 0 })]} categories={CATS} />)
-    expect(countLine().textContent).toBe('145 transactions')
+    expect(countLine().textContent).toBe('145 changed by this rule')
   })
 
   it('shows a rule with no current transactions as such', () => {

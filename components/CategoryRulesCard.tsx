@@ -22,7 +22,6 @@ const ORIGIN: Record<CategoryRule['origin'], string> = {
   seeded: 'set up from your earlier picks',
   learned: 'learned from a pick',
 }
-const txns = (n: number) => `${n} transaction${n === 1 ? '' : 's'}`
 
 // Settings → Category rules (#28 spec §8.3): every rule, with what it does, a Change of category
 // within its kind, and Remove. Rules are created by a first pick on a transaction (spec §6.1 step 8)
@@ -121,7 +120,7 @@ function RuleRow({ rule, categories }: { rule: RuleView; categories: RuleCategor
   const countParts =
     rule.matching === 0
       ? ['No current transactions', ORIGIN[rule.origin]]
-      : [txns(rule.changed), ...(rule.pickedByHand > 0 ? [`${rule.pickedByHand} picked by hand`] : [])]
+      : [`${rule.changed} changed by this rule`, ...(rule.pickedByHand > 0 ? [`${rule.pickedByHand} set by you`] : [])]
 
   return (
     // sm:flex-wrap and the text's 19rem basis: where the row is too narrow for the longest count

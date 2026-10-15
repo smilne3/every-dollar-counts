@@ -498,7 +498,7 @@ A new client component, `components/CategoryRulesCard.tsx`, rendered in `<Card i
 - **Help text:** "When you pick a category for a merchant the app hasn't learned yet, it files that merchant's other transactions the same way, past and future. It never moves money between spending, transfers and income, and never touches card payments."
 - **Each rule, sorted by merchant:**
   - **Label.** Truncates, with the full name in `title`.
-  - **Count.** "145 transactions · 14 picked by hand". The first number counts non-removed rows where `changedByRule` points at this rule. The second counts the merchant's non-removed rows that carry a hand pick, and is shown only when above zero. Styled `whitespace-nowrap tabular-nums` and never inside a truncating element. Title: "Transactions this rule files under Grocery instead of the bank's category".
+  - **Count.** "145 changed by this rule · 14 set by you" (reworded 2026-10-14: "145 transactions · 14 picked by hand" read as if the two might add up). The first number counts non-removed rows where `changedByRule` points at this rule. The second counts the merchant's non-removed rows that carry a hand pick, and is shown only when above zero. Styled `whitespace-nowrap tabular-nums` and never inside a truncating element. Title: "Transactions this rule files under Grocery instead of the bank's category".
   - **A `<select>` of same-kind categories only.**
   - **A Remove button.**
   - Below `sm` the row takes two lines, so nothing is wider than a phone.
