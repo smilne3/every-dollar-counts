@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest'
-import { readSaveResponse, SESSION_ENDED, SAVE_FAILED } from '@/lib/save-response'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { readSaveResponse, sendSave, SAVE_TIMEOUT_MS, SESSION_ENDED, SAVE_FAILED } from '@/lib/save-response'
+import { answering, badGateway, neverSettles, offline, redirectedToLogin, refused, saved, useFakeSaveClock } from './helpers/save-replies'
 
 // #28 spec §8.2's rule, shared by the rules card: a save counts only when the reply is OK, not
 // redirected, and JSON with ok: true.
@@ -39,5 +40,67 @@ describe('readSaveResponse', () => {
   })
   it("throws when the route's own OK reply cannot be read, because it may have saved", async () => {
     await expect(readSaveResponse(res({ bad: true }))).rejects.toThrow('bad json')
+  })
+})
+
+// The one way the browser sends a save (#103): readSaveResponse's rule, a timeout, and no throw. A
+// request that fails in flight, times out, or gets a reply that cannot be read is 'unknown': it may
+// have written, so the caller says so and reloads.
+describe('sendSave', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it('sends the request as given and reports a saved reply', async () => {
+    const fetchMock = answering(saved)
+    vi.stubGlobal('fetch', fetchMock)
+    const init = { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: '{"id":"r1"}' }
+    expect(await sendSave('/api/category-rules', init)).toEqual({ outcome: 'saved' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/category-rules')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject(init)
+  })
+
+  it("reports a refusal with the route's message and status", async () => {
+    vi.stubGlobal('fetch', answering(() => refused(409, 'This rule just changed. Refresh and try again.')))
+    expect(await sendSave('/api/category-rules', { method: 'PATCH' })).toEqual({
+      outcome: 'refused',
+      error: 'This rule just changed. Refresh and try again.',
+      status: 409,
+    })
+  })
+
+  it('reports a redirect to the login page as an ended session, not a save', async () => {
+    vi.stubGlobal('fetch', answering(redirectedToLogin))
+    expect(await sendSave('/api/budgets', { method: 'POST' })).toEqual({ outcome: 'refused', error: SESSION_ENDED, status: 200 })
+  })
+
+  it.each([
+    ['a gateway error page', badGateway],
+    ['an OK reply whose JSON is cut off', () => new Response('{"ok":tr', { headers: { 'content-type': 'application/json' } })],
+  ])('reports %s as unknown, because the write may have landed', async (_, reply) => {
+    vi.stubGlobal('fetch', answering(reply))
+    const result = await sendSave('/api/budgets', { method: 'POST' })
+    expect(result.outcome).toBe('unknown')
+  })
+
+  it('reports a request that fails in flight as unknown, with its cause', async () => {
+    vi.stubGlobal('fetch', offline())
+    expect(await sendSave('/api/budgets', { method: 'POST' })).toEqual({ outcome: 'unknown', cause: new TypeError('Failed to fetch') })
+  })
+
+  // Without a bound, a request on a dead connection holds its editor busy, and the phone sheet shut,
+  // until the browser's own network timeout: minutes.
+  it('gives up on a request that never settles once SAVE_TIMEOUT_MS has passed, as unknown', async () => {
+    useFakeSaveClock()
+    vi.stubGlobal('fetch', neverSettles())
+    let result: unknown
+    void sendSave('/api/budgets', { method: 'POST' }).then((r) => (result = r))
+    await vi.advanceTimersByTimeAsync(SAVE_TIMEOUT_MS - 1)
+    expect(result).toBeUndefined()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(result).toEqual({ outcome: 'unknown', cause: expect.objectContaining({ name: 'TimeoutError' }) })
   })
 })
