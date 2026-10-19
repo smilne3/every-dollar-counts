@@ -13,12 +13,15 @@ import { Card } from '@/components/ui/Card'
 // in the first place. It only shrinks the blast radius: the sidebar and nav (rendered by
 // app/(app)/layout.tsx, which sits above this boundary and is unaffected) stay usable, and the failed
 // section shows a plain "couldn't load" message with a retry instead of a blank/crashed page.
+// `retry`, not `unstable_retry`: Next 16.3 made the prop stable under its new name, and the old one is
+// never passed, so a button calling it does nothing. tests/unit/app-error-boundary.test.tsx holds these
+// props to the ones Next's error boundary passes (its ErrorInfo type).
 export default function AppSegmentError({
   error,
-  unstable_retry,
+  retry,
 }: {
   error: Error & { digest?: string }
-  unstable_retry: () => void
+  retry: () => void
 }) {
   useEffect(() => {
     // Deliberate: this is the fail-loud path, not a place to go quiet. Swap for a real
@@ -41,7 +44,7 @@ export default function AppSegmentError({
         )}
         <button
           type="button"
-          onClick={() => unstable_retry()}
+          onClick={() => retry()}
           className="mt-4 inline-block text-sm font-medium text-emerald hover:text-emerald-600"
         >
           Try again
