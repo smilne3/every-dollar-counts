@@ -55,12 +55,11 @@ vi.mock('@/lib/category-context', async () => {
 })
 // Settings also reads plaid_items/plaid_slot_ledger/manual_assets, all via the service-role
 // client (lib/supabase/admin) rather than the request-scoped one stubbed above. That client
-// answers from `results` too, so lib/manual-assets.ts runs for real and its failed read reaches the
-// page as it would in production (#91). The other two are stubbed out, as
-// tests/unit/dashboard-page.test.tsx does for plaid-items, so the page never makes a real network
-// call.
+// answers from `results` too, so lib/plaid-items.ts and lib/manual-assets.ts run for real and a
+// failed read reaches the page as it would in production (#91). The slot count is stubbed out, so
+// the page never makes a real network call; lib/plaid-items.ts needs only plaidEnv from lib/plaid.
 vi.mock('@/lib/supabase/admin', () => ({ supabaseAdmin: { from: (table: string) => chainFor(table) } }))
-vi.mock('@/lib/plaid-items', () => ({ listItemsForHousehold: async () => [] }))
+vi.mock('@/lib/plaid', () => ({ plaidEnv: 'sandbox' }))
 vi.mock('@/lib/plaid-slots', () => ({ countSlotsUsed: async () => null, LIFETIME_SLOTS: 10 }))
 
 import SettingsPage from '@/app/(app)/settings/page'
@@ -69,6 +68,7 @@ import { CategoryManager } from '@/components/CategoryManager'
 import { CategoryRulesCard } from '@/components/CategoryRulesCard'
 import { BankList } from '@/components/BankList'
 import { HomeValueCard } from '@/components/HomeValueCard'
+import { LinkButton } from '@/components/LinkButton'
 import { Card } from '@/components/ui/Card'
 import { txnRows } from '../stubs/postgrest-pages'
 import { catalogFingerprint } from '@/lib/category-rules'
@@ -153,6 +153,7 @@ beforeEach(() => {
   results.transactions = { data: [], error: null }
   results.budgets = { data: [], error: null }
   results.manual_assets = { data: [], error: null }
+  results.plaid_items = { data: [], error: null }
   switchState.suggestionsOn = true
 })
 
@@ -177,7 +178,6 @@ describe('Settings: a failed read says so in its own card (#91)', () => {
     expect(findProps(tree, BankList)).not.toBeNull()
     expect(findProps(tree, CategoryManager)).not.toBeNull()
     expect(log).toHaveBeenCalledWith('[settings] could not load the home value', new Error('could not read manual assets: boom'))
-    log.mockRestore()
   })
 
   it('hands the Home value card the stored value when the read succeeds', async () => {
@@ -188,6 +188,31 @@ describe('Settings: a failed read says so in its own card (#91)', () => {
     const tree = await SettingsPage()
     expect(findProps(tree, HomeValueCard)).toEqual({ initialValue: 750000, updatedAt: '2026-10-01T12:00:00Z' })
     expect(alertText(card(tree, 'Home value'))).toBeNull()
+  })
+
+  // Rendered as no banks, a failed read said "No banks connected yet." beside Connect a bank: an
+  // invitation to relink a bank that is still connected, which spends one of ten lifetime
+  // connections (#51). Connect a bank goes too, since its own warning points at "the list above".
+  it('says the banks could not be loaded, offers no new connection, and still renders the rest of the page', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    results.plaid_items = { data: null, error: { message: 'boom' } }
+    const tree = await SettingsPage()
+    const banks = card(tree, 'Banks')
+    expect(alertText(banks)).toBe("Couldn't load your banks. Try again.")
+    expect(findProps(tree, BankList)).toBeNull()
+    expect(findProps(banks, LinkButton)).toBeNull()
+    expect(findProps(tree, HomeValueCard)).not.toBeNull()
+    expect(findProps(tree, CategoryManager)).not.toBeNull()
+    expect(log).toHaveBeenCalledWith('[settings] could not load the banks', new Error('could not read linked banks: boom'))
+  })
+
+  it('lists the banks, and offers Connect a bank, when the read succeeds', async () => {
+    const item = { id: 'item-1', institution_name: 'Capital One', status: 'ok', status_detail: null, products: ['transactions'], created_at: '2026-07-14T18:05:30Z' }
+    results.plaid_items = { data: [item], error: null }
+    const banks = card(await SettingsPage(), 'Banks')
+    expect(findProps(banks, BankList)).toMatchObject({ items: [item] })
+    expect(findProps(banks, LinkButton)).not.toBeNull()
+    expect(alertText(banks)).toBeNull()
   })
 })
 

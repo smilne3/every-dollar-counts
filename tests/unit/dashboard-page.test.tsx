@@ -48,9 +48,11 @@ vi.mock('@/lib/supabase/server', () => ({
       table === 'transactions' && paged.transactions ? paged.transactions.query() : chainFor(table),
   }),
 }))
-// The service-role client answers from `results` too, so lib/manual-assets.ts runs for real and
-// its failed read reaches the page as it would in production (#91).
+// The service-role client answers from `results` too, so lib/manual-assets.ts and
+// lib/plaid-items.ts run for real and a failed read reaches the page as it would in production
+// (#91). lib/plaid-items.ts needs only plaidEnv from lib/plaid.
 vi.mock('@/lib/supabase/admin', () => ({ supabaseAdmin: { from: (table: string) => chainFor(table) } }))
+vi.mock('@/lib/plaid', () => ({ plaidEnv: 'sandbox' }))
 // Categories and rules come through lib/category-context.ts (#28), whose own test covers paging.
 // Built from `results.categories` / `results.category_rules`, so a failed categories read still
 // rejects with the page's message.
@@ -93,7 +95,6 @@ vi.mock('@/lib/transaction-presentation', async (importOriginal) => {
     },
   }
 })
-vi.mock('@/lib/plaid-items', () => ({ listItemsForHousehold: async () => [] }))
 vi.mock('@/lib/receivable', () => ({ fetchReceivable: async () => 0 }))
 vi.mock('@/lib/history-start', () => ({ historyStart: async () => history.value }))
 
@@ -202,6 +203,7 @@ beforeEach(() => {
   results.transactions = { data: [], error: null }
   results.budgets = { data: [], error: null }
   results.manual_assets = { data: [], error: null }
+  results.plaid_items = { data: [], error: null }
   paged.transactions = null
   history.value = { kind: 'none' }
   for (const k of Object.keys(selects)) delete selects[k]
@@ -484,6 +486,13 @@ describe('Dashboard reads', () => {
   it('fails loudly when the manual assets read fails, rather than dropping the house from net worth', async () => {
     results.manual_assets = { data: null, error: { message: 'statement timeout' } }
     await expect(render()).rejects.toThrow(/could not read manual assets: statement timeout/)
+  })
+
+  // #91: rendered as no banks, every bank looked fine, so the "isn't syncing" banner, which must
+  // always be visible on this screen, disappeared with the stale figures still showing.
+  it("fails loudly when the banks read fails, rather than hiding the isn't-syncing banner", async () => {
+    results.plaid_items = { data: null, error: { message: 'statement timeout' } }
+    await expect(render()).rejects.toThrow(/could not read linked banks: statement timeout/)
   })
 
   it('fails loudly when the budgets read fails, rather than reporting no budgets set', async () => {

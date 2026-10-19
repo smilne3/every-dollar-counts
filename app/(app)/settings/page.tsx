@@ -107,7 +107,7 @@ export default async function SettingsPage() {
   if (householdsError) throw new Error(`could not read your household: ${householdsError.message}`)
   const household = households?.[0]
   const { count } = await supabase.from('accounts').select('id', { count: 'exact', head: true })
-  const items = household ? await listItemsForHousehold(household.id) : []
+  const items = household ? await readOrNull('the banks', () => listItemsForHousehold(household.id)) : []
   // Null when it cannot be established — BankList falls back to the old wording rather than
   // printing a number nobody stands behind.
   const slotsUsed = household ? await countSlotsUsed(household.id) : null
@@ -142,8 +142,17 @@ export default async function SettingsPage() {
         <p className="text-sm text-muted">
           {count ? `${count} account(s) connected.` : 'No banks connected yet.'}
         </p>
-        <BankList items={items} slotsUsed={slotsUsed} lifetimeSlots={LIFETIME_SLOTS} />
-        <LinkButton />
+        {/* With the list unreadable, Connect a bank would invite a relink of a bank that is still
+            connected, which spends one of ten lifetime connections (#51), and its own warning
+            points at "the list above". So it waits for the list. */}
+        {items ? (
+          <>
+            <BankList items={items} slotsUsed={slotsUsed} lifetimeSlots={LIFETIME_SLOTS} />
+            <LinkButton />
+          </>
+        ) : (
+          unavailable("Couldn't load your banks.")
+        )}
       </Card>
 
       <Card className="p-5 space-y-3">

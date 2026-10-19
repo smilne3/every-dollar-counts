@@ -14,8 +14,12 @@ export type ItemSummary = {
   created_at: string
 }
 
+// Throws on a failed read (#91). An empty list is a claim that no bank is linked: on the dashboard
+// it hides the "isn't syncing" banner, and on Settings it says "No banks connected yet." beside
+// the button that spends one of ten lifetime connections (#51). The dashboard lets this reach
+// app/(app)/error.tsx; Settings catches it so its other cards still render.
 export async function listItemsForHousehold(householdId: string): Promise<ItemSummary[]> {
-  const { data } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from('plaid_items')
     .select('id, institution_name, status, status_detail, products, created_at')
     .eq('household_id', householdId)
@@ -23,5 +27,11 @@ export async function listItemsForHousehold(householdId: string): Promise<ItemSu
     // against this environment's API, and showing them would invite a pointless reconnect.
     .eq('plaid_env', plaidEnv)
     .order('created_at')
-  return (data ?? []) as ItemSummary[]
+  if (error) {
+    const code = error.code ? `${error.code} ` : ''
+    throw new Error(`could not read linked banks: ${code}${error.message}`)
+  }
+  // No data and no error is not "no banks" either (#46).
+  if (!data) throw new Error('could not read linked banks: read returned no data and no error')
+  return data as ItemSummary[]
 }
