@@ -1,10 +1,14 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-library/react'
 import { CategoryPicker } from '@/components/CategoryPicker'
+import { SAVE_TIMEOUT_MS } from '@/lib/save-response'
+import { answering, badGateway, neverSettles, useFakeSaveClock } from './helpers/save-replies'
 
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  vi.useRealTimers()
+  vi.restoreAllMocks()
   refresh.mockClear()
 })
 // A real spy, not a bare closure. With `refresh: () => {}` no test can tell whether the list is ever
@@ -371,44 +375,57 @@ describe('CategoryPicker', () => {
     expect(select().value).toBe('Travel')
   })
 
-  // An HTML error page from a failing server is a failed save, not an ended session.
-  it('treats a non-OK response that is not JSON as a failed save, not an ended session', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: false,
-        redirected: false,
-        headers: new Headers({ 'content-type': 'text/html' }),
-        json: async () => {
-          throw new SyntaxError('html')
-        },
-      })
-    )
+  // The route answers every refusal in its own JSON. A failure that is not (a gateway's 502 page,
+  // an HTML 500) came from in front of the route, and can arrive after the write committed: a
+  // function that times out after its update, say. "That could not be saved." would be a guess, so
+  // the picker says it does not know and reloads, as Settings → Category rules does (#145). Not an
+  // ended session either.
+  it('says it may not have saved, and reloads, on a failure that is not the route\'s JSON', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.stubGlobal('fetch', answering(badGateway))
     render(<CategoryPicker {...props} />)
     fireEvent.change(select(), { target: { value: 'Shopping' } })
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('That could not be saved.'))
+    await waitFor(() =>
+      expect(screen.getByRole('alert').textContent).toBe('It may not have saved. Showing the latest.')
+    )
     expect(select().value).toBe('Food & Drink')
-    expect(refresh).not.toHaveBeenCalled()
+    expect(refresh).toHaveBeenCalledTimes(1)
   })
 
-  // Only a 200 is uncertain. A refusal whose JSON body cannot be read was still a refusal: nothing
-  // was written, so the server's value stands and there is nothing new to reload.
-  it('treats a non-OK reply whose JSON cannot be read as a failed save', async () => {
+  // A failure whose JSON is cut off in transit cannot be told from a gateway's own JSON error, so
+  // it is not known to be the route's refusal either (#145).
+  it('says it may not have saved, and reloads, when a failure\'s JSON cannot be read', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue({
-        ok: false,
-        redirected: false,
-        headers: new Headers(JSON_TYPE),
-        json: async () => {
-          throw new SyntaxError('Unexpected end of JSON input')
-        },
-      })
+      answering(() => new Response('{"error":"That could', { status: 500, headers: JSON_TYPE }))
     )
     render(<CategoryPicker {...props} />)
     fireEvent.change(select(), { target: { value: 'Shopping' } })
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('That could not be saved.'))
+    await waitFor(() =>
+      expect(screen.getByRole('alert').textContent).toBe('It may not have saved. Showing the latest.')
+    )
     expect(select().value).toBe('Food & Drink')
-    expect(refresh).not.toHaveBeenCalled()
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  // #103: on a dead connection the picker stayed disabled, and the phone sheet shut, until the
+  // browser gave up.
+  it('says it may not have saved, reloads and stops being busy when the request never settles', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    useFakeSaveClock()
+    vi.stubGlobal('fetch', neverSettles())
+    const onBusyChange = vi.fn()
+    render(<CategoryPicker {...props} onBusyChange={onBusyChange} />)
+    fireEvent.change(select(), { target: { value: 'Shopping' } })
+    expect(select().disabled).toBe(true)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SAVE_TIMEOUT_MS)
+    })
+    expect(screen.getByRole('alert').textContent).toBe('It may not have saved. Showing the latest.')
+    expect(select().value).toBe('Food & Drink')
+    expect(select().disabled).toBe(false)
+    expect(onBusyChange.mock.calls.map((c) => c[0])).toEqual([true, false])
+    expect(refresh).toHaveBeenCalledTimes(1)
   })
 })
