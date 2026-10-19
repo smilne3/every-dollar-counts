@@ -1,14 +1,30 @@
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest'
-import { render, screen, cleanup, fireEvent } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor, within, act } from '@testing-library/react'
 import { CategoryManager } from '@/components/CategoryManager'
 import type { DeleteImpact } from '@/lib/category-views'
+import { SAVE_TIMEOUT_MS } from '@/lib/save-response'
+import {
+  answering,
+  badGateway,
+  neverSettles,
+  offline,
+  redirectedToLogin,
+  refused,
+  saved,
+  useFakeSaveClock,
+} from './helpers/save-replies'
 
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  vi.useRealTimers()
+  vi.restoreAllMocks()
+  refresh.mockClear()
 })
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {} }) }))
+// A spy, so a test can tell whether the list is told to reload.
+const refresh = vi.hoisted(() => vi.fn())
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }))
 
 // jsdom has no showModal()/close() on <dialog> (see tests/unit/confirm-dialog.test.tsx).
 beforeAll(() => {
@@ -132,5 +148,131 @@ describe('CategoryManager delete dialog', () => {
     openDelete('Grocery')
     expect(screen.getByText(/145 transactions/).closest('p')?.textContent).toBe('145 transactions will move to Food & Drink.')
     expect(screen.queryByText('No transactions currently use this category.')).toBeNull()
+  })
+})
+
+// #147: call() counted any OK reply as saved, had no try/finally, so a dropped connection left every
+// button disabled with nothing said, and the add form cleared the typed name before the reply.
+describe('CategoryManager saves', () => {
+  const newName = () => screen.getByLabelText('New category name') as HTMLInputElement
+  const add = () => screen.getByRole('button', { name: 'Add' }) as HTMLButtonElement
+  const deleteGroceries = () => screen.getByLabelText('Delete Groceries') as HTMLButtonElement
+  function confirmDeleteGroceries() {
+    fireEvent.click(deleteGroceries())
+    const dialog = screen.getByRole('dialog', { name: 'Delete “Groceries”?' })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
+  }
+  function addPets() {
+    fireEvent.change(newName(), { target: { value: '  Pets ' } })
+    fireEvent.click(add())
+  }
+
+  it('adds the trimmed name, says so, clears the field and reloads', async () => {
+    const fetchMock = answering(saved)
+    vi.stubGlobal('fetch', fetchMock)
+    render(<CategoryManager {...props} />)
+    addPets()
+    expect(await screen.findByText('Added “Pets”.')).toBeTruthy()
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/categories')
+    expect(init?.method).toBe('POST')
+    expect(JSON.parse(init?.body as string)).toEqual({ name: 'Pets' })
+    expect(newName().value).toBe('')
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(add().disabled).toBe(false)
+  })
+
+  // The bug in #147: the name was cleared before the reply, so a failed add lost what was typed.
+  it('keeps the typed name while the add is in flight', () => {
+    vi.stubGlobal('fetch', neverSettles())
+    render(<CategoryManager {...props} />)
+    addPets()
+    expect(newName().value).toBe('  Pets ')
+    expect(add().disabled).toBe(true)
+    expect(deleteGroceries().disabled).toBe(true)
+  })
+
+  // A name typed while the add was in flight is the person's next one, not the one that saved.
+  it('leaves a name typed while the add was in flight', async () => {
+    let settle!: (res: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => (settle = resolve))))
+    render(<CategoryManager {...props} />)
+    addPets()
+    fireEvent.change(newName(), { target: { value: 'Kids' } })
+    settle(saved())
+    expect(await screen.findByText('Added “Pets”.')).toBeTruthy()
+    expect(newName().value).toBe('Kids')
+  })
+
+  // Nothing saved, or it may have: either way the name stays, and the message says which.
+  it.each([
+    ['a refusal', () => answering(() => refused(400, 'That name is already a category.')), 'That name is already a category.', 0],
+    ['a redirect to the login page', () => answering(redirectedToLogin), 'Your session ended. Sign in again.', 0],
+    ['a 200 without ok: true', () => answering(() => new Response('{}', { headers: { 'content-type': 'application/json' } })), 'That could not be saved.', 0],
+    ['a gateway error page', () => answering(badGateway), 'It may not have saved. Showing the latest.', 1],
+    ['a request that fails in flight', () => offline(), 'It may not have saved. Showing the latest.', 1],
+  ])('after %s, keeps the typed name, says why and re-enables', async (_, fetchMock, message, reloads) => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.stubGlobal('fetch', fetchMock())
+    render(<CategoryManager {...props} />)
+    addPets()
+    expect((await screen.findByRole('alert')).textContent).toBe(message)
+    expect(screen.queryByText(/Added/)).toBeNull()
+    expect(newName().value).toBe('  Pets ')
+    expect(add().disabled).toBe(false)
+    expect(deleteGroceries().disabled).toBe(false)
+    expect(refresh).toHaveBeenCalledTimes(reloads)
+  })
+
+  it('gives up on a request that never settles: says so, reloads and re-enables every control', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    useFakeSaveClock()
+    vi.stubGlobal('fetch', neverSettles())
+    render(<CategoryManager {...props} />)
+    addPets()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SAVE_TIMEOUT_MS)
+    })
+    expect(screen.getByRole('alert').textContent).toBe('It may not have saved. Showing the latest.')
+    expect(add().disabled).toBe(false)
+    expect(deleteGroceries().disabled).toBe(false)
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it('renames, says so and reloads; on a refusal keeps the typed name and says why', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(refused(400, 'That name is already a category.')).mockResolvedValueOnce(saved()))
+    render(<CategoryManager {...props} />)
+    const field = screen.getByLabelText('Rename category Groceries') as HTMLInputElement
+    const save = within(field.closest('[data-category-row]') as HTMLElement).getByRole('button', { name: 'Save' })
+    fireEvent.change(field, { target: { value: 'Food' } })
+    fireEvent.click(save)
+    expect((await screen.findByRole('alert')).textContent).toBe('That name is already a category.')
+    expect(field.value).toBe('Food')
+    expect(refresh).not.toHaveBeenCalled()
+    fireEvent.click(save)
+    expect(await screen.findByText('Renamed to “Food”.')).toBeTruthy()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it('deletes, says so and reloads', async () => {
+    const fetchMock = answering(saved)
+    vi.stubGlobal('fetch', fetchMock)
+    render(<CategoryManager {...props} />)
+    confirmDeleteGroceries()
+    expect(await screen.findByText('Deleted “Groceries”.')).toBeTruthy()
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('DELETE')
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({ id: '1' })
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  // 404: the category is already gone (deleted on the other phone), so the list is stale. Show the
+  // latest under the message, as Settings → Category rules does.
+  it('says why and reloads when a delete is refused because the category is gone', async () => {
+    vi.stubGlobal('fetch', answering(() => refused(404, 'That category no longer exists.')))
+    render(<CategoryManager {...props} />)
+    confirmDeleteGroceries()
+    expect((await screen.findByRole('alert')).textContent).toBe('That category no longer exists.')
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
   })
 })
