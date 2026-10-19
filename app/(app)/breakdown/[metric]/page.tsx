@@ -47,17 +47,6 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
   const accounts = accountsData ?? []
   const currency = accounts[0]?.iso_currency_code ?? 'USD'
 
-  // Manual assets (the home) count on the asset side of net worth, netting against the live mortgage.
-  const { data: membershipRow, error: membershipError } = await supabase
-    .from('memberships')
-    .select('household_id')
-    .limit(1)
-    .single()
-  if (membershipError) throw new Error(`could not read your household: ${membershipError.message}`)
-  const manualAssets = membershipRow
-    ? await listManualAssets(membershipRow.household_id)
-    : []
-
   const header = TITLES[metric]
   let rows: BreakdownRow[] = []
   let total: { label: string; amount: number; currency: string } | undefined
@@ -69,6 +58,17 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
     | undefined
 
   if (metric === 'net-worth') {
+    // Manual assets (the home) count on the asset side of net worth, netting against the live
+    // mortgage. Read here rather than for every metric: only net worth shows them, and a failed read
+    // throws (#91), which would otherwise take down Cash, Spent and Saved over a value none of them shows.
+    const { data: membershipRow, error: membershipError } = await supabase
+      .from('memberships')
+      .select('household_id')
+      .limit(1)
+      .single()
+    if (membershipError) throw new Error(`could not read your household: ${membershipError.message}`)
+    const manualAssets = membershipRow ? await listManualAssets(membershipRow.household_id) : []
+
     const g = groupAccountsByKind(accounts)
     const accountRows: BreakdownRow[] = [...g.assets, ...g.liabilities].map((a) => ({
       key: a.id,

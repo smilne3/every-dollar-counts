@@ -115,6 +115,15 @@ describe('Breakdown reads', () => {
     results.manual_assets = { data: null, error: { message: 'statement timeout' } }
     await expect(render('net-worth')).rejects.toThrow(/could not read manual assets: statement timeout/)
   })
+
+  // Only net worth shows the house, so only net worth reads it. Now that a failed read throws (#91),
+  // reading it for every metric would take down Cash, Spent and Saved over a value none of them shows.
+  it.each(['cash', 'spent', 'saved'])('still renders %s when the household and manual assets reads fail', async (metric) => {
+    vi.setSystemTime(new Date('2026-09-15T16:00:00Z'))
+    results.memberships = { data: null, error: { message: 'statement timeout' } }
+    results.manual_assets = { data: null, error: { message: 'statement timeout' } }
+    await expect(render(metric)).resolves.toBeTruthy()
+  })
 })
 
 // net-worth and cash never touch a date — only spent and saved read the household's month, and
