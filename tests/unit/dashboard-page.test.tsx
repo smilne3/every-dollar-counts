@@ -48,12 +48,14 @@ vi.mock('@/lib/supabase/server', () => ({
       table === 'transactions' && paged.transactions ? paged.transactions.query() : chainFor(table),
   }),
 }))
+// The service-role client answers from `results` too, so lib/manual-assets.ts runs for real and
+// its failed read reaches the page as it would in production (#91).
+vi.mock('@/lib/supabase/admin', () => ({ supabaseAdmin: { from: (table: string) => chainFor(table) } }))
 // Categories and rules come through lib/category-context.ts (#28), whose own test covers paging.
 // Built from `results.categories` / `results.category_rules`, so a failed categories read still
 // rejects with the page's message.
 // The real module otherwise, so the page gets the real SUGGESTION_EMBED and the switch is read by
-// the real suggestionsEnabled (spec §14.7). Its admin client is never used here.
-vi.mock('@/lib/supabase/admin', () => ({ supabaseAdmin: {} }))
+// the real suggestionsEnabled (spec §14.7).
 vi.mock('@/lib/category-context', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/category-context')>()
   const { testData } = await import('./helpers/category-context')
@@ -92,7 +94,6 @@ vi.mock('@/lib/transaction-presentation', async (importOriginal) => {
   }
 })
 vi.mock('@/lib/plaid-items', () => ({ listItemsForHousehold: async () => [] }))
-vi.mock('@/lib/manual-assets', () => ({ listManualAssets: async () => [] }))
 vi.mock('@/lib/receivable', () => ({ fetchReceivable: async () => 0 }))
 vi.mock('@/lib/history-start', () => ({ historyStart: async () => history.value }))
 
@@ -200,6 +201,7 @@ beforeEach(() => {
   results.category_rules = { data: [], error: null }
   results.transactions = { data: [], error: null }
   results.budgets = { data: [], error: null }
+  results.manual_assets = { data: [], error: null }
   paged.transactions = null
   history.value = { kind: 'none' }
   for (const k of Object.keys(selects)) delete selects[k]
@@ -475,6 +477,13 @@ describe('Dashboard reads', () => {
   it('fails loudly when the household read fails, rather than dropping the home value from net worth', async () => {
     results.memberships = { data: null, error: { message: 'permission denied' } }
     await expect(render()).rejects.toThrow(/could not read your household: permission denied/)
+  })
+
+  // #91: the read one step below the household's. Rendered as no assets, net worth dropped by the
+  // house's full value, because the mortgage is still subtracted as a live liability.
+  it('fails loudly when the manual assets read fails, rather than dropping the house from net worth', async () => {
+    results.manual_assets = { data: null, error: { message: 'statement timeout' } }
+    await expect(render()).rejects.toThrow(/could not read manual assets: statement timeout/)
   })
 
   it('fails loudly when the budgets read fails, rather than reporting no budgets set', async () => {

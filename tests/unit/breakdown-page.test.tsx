@@ -45,12 +45,14 @@ const chainFor = (table: string) => {
 vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({ from: (table: string) => chainFor(table) }),
 }))
+// The service-role client answers from `results` too, so lib/manual-assets.ts runs for real and
+// its failed read reaches the page as it would in production (#91).
+vi.mock('@/lib/supabase/admin', () => ({ supabaseAdmin: { from: (table: string) => chainFor(table) } }))
 // Categories and rules come through lib/category-context.ts (#28), whose own test covers paging.
 // Built from `results.categories` / `results.category_rules`, so a failed categories read still
 // rejects with the page's message.
 // The real module otherwise, so the page gets the real SUGGESTION_EMBED and the switch is read by
-// the real suggestionsEnabled (spec §14.7). Its admin client is never used here.
-vi.mock('@/lib/supabase/admin', () => ({ supabaseAdmin: {} }))
+// the real suggestionsEnabled (spec §14.7).
 vi.mock('@/lib/category-context', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/category-context')>()
   const { testData } = await import('./helpers/category-context')
@@ -74,7 +76,6 @@ vi.mock('@/lib/household', () => ({
   DEFAULT_TIMEZONE: 'America/New_York',
   householdTimezone: async () => tz.value,
 }))
-vi.mock('@/lib/manual-assets', () => ({ listManualAssets: async () => [] }))
 vi.mock('@/lib/receivable', () => ({ fetchReceivable: async () => 0 }))
 vi.mock('@/lib/history-start', () => ({ historyStart: async () => history.value }))
 
@@ -98,12 +99,22 @@ beforeEach(() => {
   results.categories = { data: [], error: null }
   results.category_rules = { data: [], error: null }
   results.transactions = { data: [], error: null }
+  results.manual_assets = { data: [], error: null }
   for (const k of Object.keys(selects)) delete selects[k]
   vi.unstubAllEnvs()
 })
 
 afterEach(() => {
   vi.unstubAllEnvs()
+})
+
+describe('Breakdown reads', () => {
+  // #91: this page exists to explain the net-worth figure, and rendered as no assets it explained
+  // one without the house, the mortgage still subtracted as a live liability.
+  it('fails loudly when the manual assets read fails, rather than explaining net worth without the house', async () => {
+    results.manual_assets = { data: null, error: { message: 'statement timeout' } }
+    await expect(render('net-worth')).rejects.toThrow(/could not read manual assets: statement timeout/)
+  })
 })
 
 // net-worth and cash never touch a date — only spent and saved read the household's month, and

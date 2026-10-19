@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 // vi.hoisted for the same reason as tests/unit/dashboard-page.test.tsx: the static page import
 // below is linked before this file's body runs, firing the mock factory.
@@ -54,11 +54,13 @@ vi.mock('@/lib/category-context', async () => {
   }
 })
 // Settings also reads plaid_items/plaid_slot_ledger/manual_assets, all via the service-role
-// client (lib/supabase/admin) rather than the request-scoped one stubbed above. Stubbed out here
-// exactly like tests/unit/dashboard-page.test.tsx does for plaid-items and manual-assets, so the
-// page never makes a real network call — none of these three bear on the property under test.
+// client (lib/supabase/admin) rather than the request-scoped one stubbed above. That client
+// answers from `results` too, so lib/manual-assets.ts runs for real and its failed read reaches the
+// page as it would in production (#91). The other two are stubbed out, as
+// tests/unit/dashboard-page.test.tsx does for plaid-items, so the page never makes a real network
+// call.
+vi.mock('@/lib/supabase/admin', () => ({ supabaseAdmin: { from: (table: string) => chainFor(table) } }))
 vi.mock('@/lib/plaid-items', () => ({ listItemsForHousehold: async () => [] }))
-vi.mock('@/lib/manual-assets', () => ({ listManualAssets: async () => [] }))
 vi.mock('@/lib/plaid-slots', () => ({ countSlotsUsed: async () => null, LIFETIME_SLOTS: 10 }))
 
 import SettingsPage from '@/app/(app)/settings/page'
@@ -66,6 +68,8 @@ import { TimezoneCard } from '@/components/TimezoneCard'
 import { CategoryManager } from '@/components/CategoryManager'
 import { CategoryRulesCard } from '@/components/CategoryRulesCard'
 import { BankList } from '@/components/BankList'
+import { HomeValueCard } from '@/components/HomeValueCard'
+import { Card } from '@/components/ui/Card'
 import { txnRows } from '../stubs/postgrest-pages'
 import { catalogFingerprint } from '@/lib/category-rules'
 
@@ -115,6 +119,26 @@ function flatText(node: unknown): string {
   return flatText((node as { props?: { children?: unknown } }).props?.children)
 }
 
+// The <Card> headed `title`, so an assertion is about that card rather than the whole page.
+function card(node: unknown, title: string): unknown {
+  if (node == null || typeof node !== 'object') return null
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = card(child, title)
+      if (found) return found
+    }
+    return null
+  }
+  const el = node as { type?: unknown; props?: { children?: unknown } }
+  const kids = el.props?.children
+  const headed = (Array.isArray(kids) ? kids : [kids]).some((k) => {
+    const h = k as { type?: unknown; props?: { children?: unknown } } | null
+    return h?.type === 'h2' && flatText(h.props?.children) === title
+  })
+  if (el.type === Card && headed) return el
+  return el.props && 'children' in el.props ? card(kids, title) : null
+}
+
 beforeEach(() => {
   results.households = {
     data: [{ id: 'hh-1', name: 'Test Household', timezone: 'America/Los_Angeles' }],
@@ -128,7 +152,43 @@ beforeEach(() => {
   results.category_rules = { data: [], error: null }
   results.transactions = { data: [], error: null }
   results.budgets = { data: [], error: null }
+  results.manual_assets = { data: [], error: null }
   switchState.suggestionsOn = true
+})
+
+// A console.error spy left behind by a failing test would hand its calls to the next test's spy.
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
+// Settings is the only place a bank can be reconnected (spec §7.3), so it catches a failed read per
+// card, as it does for categories below. A card whose read failed says so; it never shows "none"
+// in place of what it could not read (#46, #91).
+describe('Settings: a failed read says so in its own card (#91)', () => {
+  // Rendered as no assets, a failed read showed the home value as never entered.
+  it('says the home value could not be loaded, and still renders the rest of the page', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    results.manual_assets = { data: null, error: { message: 'boom' } }
+    const tree = await SettingsPage()
+    const home = card(tree, 'Home value')
+    expect(alertText(home)).toBe("Couldn't load your home value. Try again.")
+    expect(findProps(home, 'a')).toMatchObject({ href: '/settings' })
+    expect(findProps(tree, HomeValueCard)).toBeNull()
+    expect(findProps(tree, BankList)).not.toBeNull()
+    expect(findProps(tree, CategoryManager)).not.toBeNull()
+    expect(log).toHaveBeenCalledWith('[settings] could not load the home value', new Error('could not read manual assets: boom'))
+    log.mockRestore()
+  })
+
+  it('hands the Home value card the stored value when the read succeeds', async () => {
+    results.manual_assets = {
+      data: [{ id: 'a1', name: 'Home', value: 750000, updated_at: '2026-10-01T12:00:00Z' }],
+      error: null,
+    }
+    const tree = await SettingsPage()
+    expect(findProps(tree, HomeValueCard)).toEqual({ initialValue: 750000, updatedAt: '2026-10-01T12:00:00Z' })
+    expect(alertText(card(tree, 'Home value'))).toBeNull()
+  })
 })
 
 describe('Settings timezone control', () => {
