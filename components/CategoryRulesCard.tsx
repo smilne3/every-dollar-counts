@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/Button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { selectClass } from '@/components/ui/styles'
-import { MAY_NOT_HAVE_SAVED, readSaveResponse } from '@/lib/save-response'
+import { MAY_NOT_HAVE_SAVED, sendSave } from '@/lib/save-response'
 import type { CategoryRule, Kind } from '@/lib/category-rules'
 import type { RuleCounts } from '@/lib/category-views'
 
@@ -100,25 +100,24 @@ function RuleRow({ rule, categories }: { rule: RuleView; categories: RuleCategor
     let reload = false
     let saved = false
     try {
-      const res = await fetch('/api/category-rules', {
+      const result = await sendSave('/api/category-rules', {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
-      const result = await readSaveResponse(res)
-      if (result.ok) {
+      if (result.outcome === 'saved') {
         saved = true
         reload = true
-      } else {
+      } else if (result.outcome === 'refused') {
         setError(result.error)
         // 404 and 409: the server says this card is stale, so show the latest under the message.
         reload = result.status === 404 || result.status === 409
         setRefusedStale(reload)
+      } else {
+        console.error('[CategoryRulesCard] save failed', result.cause)
+        setError(MAY_NOT_HAVE_SAVED)
+        reload = true
       }
-    } catch (err) {
-      console.error('[CategoryRulesCard] save failed', err)
-      setError(MAY_NOT_HAVE_SAVED)
-      reload = true
     } finally {
       setBusy(false)
     }

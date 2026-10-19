@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest'
-import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor, within, act } from '@testing-library/react'
 import { CategoryRulesCard, type RuleView, type RuleCategory } from '@/components/CategoryRulesCard'
+import { SAVE_TIMEOUT_MS } from '@/lib/save-response'
+import { neverSettles, useFakeSaveClock } from './helpers/save-replies'
 
 const refresh = vi.hoisted(() => vi.fn())
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }))
@@ -16,6 +18,8 @@ beforeAll(() => {
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  vi.useRealTimers()
+  vi.restoreAllMocks()
   refresh.mockClear()
 })
 
@@ -149,6 +153,25 @@ describe('CategoryRulesCard', () => {
     expect((screen.getByRole('combobox') as HTMLSelectElement).value).toBe('c-grocery')
     expect(refresh).toHaveBeenCalledTimes(1)
     vi.mocked(console.error).mockRestore()
+  })
+
+  // #103: a request on a dead connection used to hold the row disabled until the browser gave up.
+  it('says it may not have saved, rolls back and refreshes when a Change never settles', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    useFakeSaveClock()
+    vi.stubGlobal('fetch', neverSettles())
+    render(<CategoryRulesCard rules={[safeway()]} categories={CATS} suggestedCount={null} />)
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'c-food' } })
+    expect((screen.getByRole('combobox') as HTMLSelectElement).disabled).toBe(true)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SAVE_TIMEOUT_MS)
+    })
+    expect(screen.getByRole('alert').textContent).toBe('It may not have saved. Showing the latest.')
+    const select = screen.getByRole('combobox') as HTMLSelectElement
+    expect(select.value).toBe('c-grocery')
+    expect(select.disabled).toBe(false)
+    expect((screen.getByRole('button', { name: 'Remove the Safeway rule' }) as HTMLButtonElement).disabled).toBe(false)
+    expect(refresh).toHaveBeenCalledTimes(1)
   })
 
   it('disables the select and Remove while a Change is in flight', async () => {
