@@ -26,16 +26,17 @@ export function redirectedToLogin() {
 export const badGateway = () =>
   new Response('<html><body>502 Bad Gateway</body></html>', { status: 502, headers: { 'content-type': 'text/html' } })
 
-// fetch stand-ins.
-export const answering = (reply: () => Response) => vi.fn(async (_url: string, _init?: RequestInit) => reply())
+// fetch stand-ins, typed as fetch is called so a test can read the url and init it was given.
+type Fetch = (url: string, init?: RequestInit) => Promise<Response>
+export const answering = (reply: () => Response) => vi.fn<Fetch>(async () => reply())
 export const offline = () =>
-  vi.fn(async (_url: string, _init?: RequestInit): Promise<Response> => {
+  vi.fn<Fetch>(async () => {
     throw new TypeError('Failed to fetch')
   })
 // A request on a dead connection: like a real fetch, it settles only when its signal aborts it.
 export const neverSettles = () =>
-  vi.fn(
-    (_url: string, init?: RequestInit) =>
+  vi.fn<Fetch>(
+    (_url, init) =>
       new Promise<Response>((_, reject) => {
         const signal = init?.signal
         signal?.addEventListener('abort', () => reject(signal.reason))
