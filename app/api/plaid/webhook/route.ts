@@ -54,11 +54,26 @@ export async function POST(req: Request) {
 
   const { webhook_type, webhook_code, item_id, error } = body
 
-  const { data: item } = await supabaseAdmin
+  const { data: item, error: itemError } = await supabaseAdmin
     .from('plaid_items')
     .select('id, household_id, access_token_encrypted, cursor, products, status, plaid_env')
     .eq('item_id', item_id)
     .maybeSingle()
+  // A failed read is not an unknown item (#91). Acknowledged, this webhook would be gone for good:
+  // no sync for new transactions, no needs_reconnect for a broken bank. A 500 makes Plaid deliver
+  // it again, which is what a transient failure needs; this read is cheap and safe to repeat,
+  // unlike the sync below. The log carries the webhook's ids and the database's error, nothing else:
+  // no row came back, so there is no token in hand to leak.
+  if (itemError) {
+    console.error('[plaid] webhook item read failed', {
+      item_id,
+      webhook_type,
+      webhook_code,
+      code: itemError.code,
+      message: itemError.message,
+    })
+    return NextResponse.json({ error: 'could not read the item' }, { status: 500 })
+  }
   // Unknown item (e.g. one abandoned by a failed exchange, or from another environment).
   // Acknowledge so Plaid stops retrying.
   if (!item || item.plaid_env !== plaidEnv) return NextResponse.json({ ok: true })
