@@ -1,13 +1,29 @@
 import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest'
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-library/react'
 import { ReimbursableEditor } from '@/components/ReimbursableEditor'
+import { SAVE_TIMEOUT_MS } from '@/lib/save-response'
+import {
+  answering,
+  badGateway,
+  neverSettles,
+  offline,
+  redirectedToLogin,
+  refused,
+  saved,
+  useFakeSaveClock,
+} from './helpers/save-replies'
 
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  vi.useRealTimers()
+  vi.restoreAllMocks()
+  refresh.mockClear()
 })
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {} }) }))
+// A spy, so a test can tell whether the page is told to reload.
+const refresh = vi.hoisted(() => vi.fn())
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }))
 
 // jsdom does not implement showModal()/close() on <dialog>; stand them up so the open/close effect
 // can run. Real modal behaviour (focus trap, Escape, backdrop) is the platform's job.
@@ -72,7 +88,7 @@ describe('ReimbursableEditor', () => {
   })
 
   it('saves the typed amount and note', async () => {
-    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({}) }))
+    const fetchMock = answering(saved)
     vi.stubGlobal('fetch', fetchMock)
     render(<ReimbursableEditor {...props} />)
     openEditor()
@@ -89,7 +105,7 @@ describe('ReimbursableEditor', () => {
   // Zero coming back is the same statement as no mark at all, so it must not be stored as a zero
   // mark the reader would then see as a partial.
   it('sends null rather than a zero mark', async () => {
-    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({}) }))
+    const fetchMock = answering(saved)
     vi.stubGlobal('fetch', fetchMock)
     render(<ReimbursableEditor {...props} />)
     openEditor()
@@ -136,7 +152,7 @@ describe('ReimbursableEditor', () => {
   // it would send a note alongside an amount that rounds away — leaving reimbursable_note set with
   // reimbursable_amount null, the orphaned state both this editor and the checkbox refuse to make.
   it('treats a sub-cent amount as no mark at all, note included', async () => {
-    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({}) }))
+    const fetchMock = answering(saved)
     vi.stubGlobal('fetch', fetchMock)
     render(<ReimbursableEditor {...props} reimbursableAmount={40} note="Dave" />)
     openEditor()
@@ -148,6 +164,85 @@ describe('ReimbursableEditor', () => {
     const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string)
     expect(body.amount).toBeNull()
     expect(body.note).toBeNull()
+  })
+
+  // Type 40 and a note, then press Save.
+  function saveForty() {
+    openEditor()
+    fireEvent.change(screen.getByLabelText('How much is coming back?'), { target: { value: '40' } })
+    fireEvent.change(screen.getByLabelText('Note (optional)'), { target: { value: 'Dave' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  }
+  const field = (label: string) => screen.getByLabelText(label) as HTMLInputElement
+  const button = (name: string) => screen.getByRole('button', { name }) as HTMLButtonElement
+
+  it('closes and reloads once the save lands', async () => {
+    const onBusyChange = vi.fn()
+    vi.stubGlobal('fetch', answering(saved))
+    render(<ReimbursableEditor {...props} onBusyChange={onBusyChange} />)
+    saveForty()
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(onBusyChange.mock.calls.map((c) => c[0])).toEqual([true, false])
+  })
+
+  // Only the route's own { ok: true } closes the dialog (#103). On anything else it stays open with
+  // what was typed, so a retry is one tap, and says why. A refusal wrote nothing and needs no reload
+  // unless it says this row is stale (404, 409); an unknown outcome may have written, so it reloads.
+  it.each([
+    ['a refusal', () => refused(400, 'Your bank removed that transaction. Refresh and try again.'), 'Your bank removed that transaction. Refresh and try again.', 0],
+    ['a 404', () => refused(404, 'That transaction no longer exists. Refresh and try again.'), 'That transaction no longer exists. Refresh and try again.', 1],
+    ['a 409', () => refused(409, 'This transaction just changed. Refresh and try again.'), 'This transaction just changed. Refresh and try again.', 1],
+    ['a redirect to the login page', redirectedToLogin, 'Your session ended. Sign in again.', 0],
+    // The #103 bug: any OK reply used to close the dialog as if saved.
+    ['a 200 without ok: true', () => new Response('{}', { headers: { 'content-type': 'application/json' } }), 'That could not be saved.', 0],
+    ['a gateway error page', badGateway, 'It may not have saved. Showing the latest.', 1],
+  ])('after %s, stays open with what was typed, says why and stops being busy', async (_, reply, message, reloads) => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const onBusyChange = vi.fn()
+    vi.stubGlobal('fetch', answering(reply))
+    render(<ReimbursableEditor {...props} onBusyChange={onBusyChange} />)
+    saveForty()
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe(message))
+    expect(screen.getByRole('dialog')).toBeTruthy()
+    expect(field('How much is coming back?').value).toBe('40')
+    expect(field('Note (optional)').value).toBe('Dave')
+    expect(button('Save').disabled).toBe(false)
+    expect(refresh).toHaveBeenCalledTimes(reloads)
+    expect(onBusyChange.mock.calls.map((c) => c[0])).toEqual([true, false])
+  })
+
+  it('says it may not have saved and reloads when the request fails in flight', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.stubGlobal('fetch', offline())
+    render(<ReimbursableEditor {...props} />)
+    saveForty()
+    await waitFor(() =>
+      expect(screen.getByRole('alert').textContent).toBe('It may not have saved. Showing the latest.')
+    )
+    expect(screen.getByRole('dialog')).toBeTruthy()
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(logged).toHaveBeenCalledWith('[ReimbursableEditor] save failed', expect.any(TypeError))
+  })
+
+  // #103: Save and Cancel stayed disabled, and the phone sheet shut, until the browser gave up.
+  it('gives up on a request that never settles: says so, reloads and stops being busy', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    useFakeSaveClock()
+    vi.stubGlobal('fetch', neverSettles())
+    const onBusyChange = vi.fn()
+    render(<ReimbursableEditor {...props} onBusyChange={onBusyChange} />)
+    saveForty()
+    expect(button('Save').disabled).toBe(true)
+    expect(button('Cancel').disabled).toBe(true)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SAVE_TIMEOUT_MS)
+    })
+    expect(screen.getByRole('alert').textContent).toBe('It may not have saved. Showing the latest.')
+    expect(button('Save').disabled).toBe(false)
+    expect(button('Cancel').disabled).toBe(false)
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(onBusyChange.mock.calls.map((c) => c[0])).toEqual([true, false])
   })
 
   it('says the limit rather than leaving a disabled Save unexplained', () => {

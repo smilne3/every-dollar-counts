@@ -1,12 +1,28 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-library/react'
 import { ReimbursableCheckbox } from '@/components/ReimbursableCheckbox'
+import { SAVE_TIMEOUT_MS } from '@/lib/save-response'
+import {
+  answering,
+  badGateway,
+  neverSettles,
+  offline,
+  redirectedToLogin,
+  refused,
+  saved,
+  useFakeSaveClock,
+} from './helpers/save-replies'
 
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  vi.useRealTimers()
+  vi.restoreAllMocks()
+  refresh.mockClear()
 })
-vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {} }) }))
+// A spy, so a test can tell whether the row is told to reload.
+const refresh = vi.hoisted(() => vi.fn())
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }))
 
 const props = { transactionId: 't1', amount: 78, reimbursableAmount: null, label: 'Starbucks' }
 
@@ -48,7 +64,7 @@ describe('ReimbursableCheckbox', () => {
   // by sending `amount: null`, never `0` — this is the wire-level counterpart to
   // clampReimbursable's own null-not-zero contract in tests/unit/reimbursable-amount.test.ts.
   it('sends amount: null, not 0, when unticking a marked checkbox', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) })
+    const fetchMock = answering(saved)
     vi.stubGlobal('fetch', fetchMock)
 
     render(<ReimbursableCheckbox {...props} reimbursableAmount={78} />)
@@ -68,7 +84,7 @@ describe('ReimbursableCheckbox', () => {
   // reimbursable_amount is null — data with nowhere it is shown, orphaned by the very action meant to
   // undo the mark.
   it('clears the note along with the amount when unticking', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) })
+    const fetchMock = answering(saved)
     vi.stubGlobal('fetch', fetchMock)
 
     render(<ReimbursableCheckbox {...props} reimbursableAmount={78} note="Dave" />)
@@ -93,27 +109,78 @@ describe('ReimbursableCheckbox', () => {
     expect(box.checked).toBe(true)
   })
 
-  // An optimistic tick that survives a rejection is a lie: it would show the charge as coming back
-  // when nothing was saved.
-  it('puts the box back when the server refuses', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => ({ ok: false, json: async () => ({ error: 'nope' }) }))
-    )
-    render(<ReimbursableCheckbox {...props} />)
+  it('keeps the tick and reloads once the save lands', async () => {
+    const onBusyChange = vi.fn()
+    vi.stubGlobal('fetch', answering(saved))
+    render(<ReimbursableCheckbox {...props} onBusyChange={onBusyChange} />)
     const box = screen.getByRole('checkbox') as HTMLInputElement
     fireEvent.click(box)
-    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy())
-    expect(box.checked).toBe(false)
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+    expect(box.checked).toBe(true)
+    expect(box.disabled).toBe(false)
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(onBusyChange.mock.calls.map((c) => c[0])).toEqual([true, false])
   })
 
-  it('puts the box back when the request never lands', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline') }))
+  // An optimistic tick that survives a failed save is a lie: it would show the charge as coming back
+  // when nothing was saved. So every outcome but a save takes it back (#103). A refusal wrote
+  // nothing and needs no reload, unless it says this row is stale (404, 409). An unknown outcome may
+  // have written, so it reloads to show what the server has.
+  it.each([
+    ['a refusal', () => refused(400, 'Your bank removed that transaction. Refresh and try again.'), 'Your bank removed that transaction. Refresh and try again.', 0],
+    ['a 404', () => refused(404, 'That transaction no longer exists. Refresh and try again.'), 'That transaction no longer exists. Refresh and try again.', 1],
+    ['a 409', () => refused(409, 'This transaction just changed. Refresh and try again.'), 'This transaction just changed. Refresh and try again.', 1],
+    ['a redirect to the login page', redirectedToLogin, 'Your session ended. Sign in again.', 0],
+    // The #103 bug: any OK reply used to count as saved.
+    ['a 200 without ok: true', () => new Response('{}', { headers: { 'content-type': 'application/json' } }), 'That could not be saved.', 0],
+    ['a gateway error page', badGateway, 'It may not have saved. Showing the latest.', 1],
+  ])('after %s, takes the tick back, says why and stops being busy', async (_, reply, message, reloads) => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const onBusyChange = vi.fn()
+    vi.stubGlobal('fetch', answering(reply))
+    render(<ReimbursableCheckbox {...props} onBusyChange={onBusyChange} />)
+    const box = screen.getByRole('checkbox') as HTMLInputElement
+    fireEvent.click(box)
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe(message))
+    expect(box.checked).toBe(false)
+    expect(box.disabled).toBe(false)
+    expect(refresh).toHaveBeenCalledTimes(reloads)
+    expect(onBusyChange.mock.calls.map((c) => c[0])).toEqual([true, false])
+  })
+
+  it('says it may not have saved, takes the tick back and reloads when the request fails in flight', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.stubGlobal('fetch', offline())
     render(<ReimbursableCheckbox {...props} />)
     const box = screen.getByRole('checkbox') as HTMLInputElement
     fireEvent.click(box)
-    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByRole('alert').textContent).toBe('It may not have saved. Showing the latest.')
+    )
     expect(box.checked).toBe(false)
+    expect(box.disabled).toBe(false)
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(logged).toHaveBeenCalledWith('[ReimbursableCheckbox] save failed', expect.any(TypeError))
+  })
+
+  // #103: the box stayed disabled, and the phone sheet shut, until the browser gave up.
+  it('gives up on a request that never settles: says so, takes the tick back, reloads and stops being busy', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    useFakeSaveClock()
+    vi.stubGlobal('fetch', neverSettles())
+    const onBusyChange = vi.fn()
+    render(<ReimbursableCheckbox {...props} onBusyChange={onBusyChange} />)
+    const box = screen.getByRole('checkbox') as HTMLInputElement
+    fireEvent.click(box)
+    expect(box.disabled).toBe(true)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SAVE_TIMEOUT_MS)
+    })
+    expect(screen.getByRole('alert').textContent).toBe('It may not have saved. Showing the latest.')
+    expect(box.checked).toBe(false)
+    expect(box.disabled).toBe(false)
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(onBusyChange.mock.calls.map((c) => c[0])).toEqual([true, false])
   })
 
 

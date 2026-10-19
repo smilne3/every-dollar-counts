@@ -1,11 +1,15 @@
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest'
-import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor, within, act } from '@testing-library/react'
 import { TransactionCard } from '@/components/TransactionCard'
 import { TransactionRow } from '@/components/TransactionRow'
+import { SAVE_TIMEOUT_MS } from '@/lib/save-response'
+import { neverSettles, useFakeSaveClock } from './helpers/save-replies'
 
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  vi.useRealTimers()
+  vi.restoreAllMocks()
 })
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {} }) }))
 
@@ -400,14 +404,16 @@ describe('TransactionCard sheet with a save in flight', () => {
   // A fetch the test settles by hand, so "in flight" is a state the test controls rather than
   // races. Resolving it is how the failure is delivered.
   function pendingFetch() {
-    let settle!: (res: { ok: boolean; headers: Headers; json: () => Promise<unknown> }) => void
+    let settle!: (res: Response) => void
     const fetchMock = vi.fn(() => new Promise((resolve) => { settle = resolve }))
     vi.stubGlobal('fetch', fetchMock)
-    // Both routes answer in JSON, and CategoryPicker reads the content type to know the reply is theirs.
-    const headers = () => new Headers({ 'content-type': 'application/json' })
+    // Both routes answer in JSON, and lib/save-response.ts reads the content type to know the reply
+    // is theirs. Only { ok: true } is a save.
+    const reply = (status: number, body: unknown) =>
+      new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
     return {
-      refuse: () => settle({ ok: false, headers: headers(), json: async () => ({ error: 'nope' }) }),
-      accept: () => settle({ ok: true, headers: headers(), json: async () => ({}) }),
+      refuse: () => settle(reply(400, { error: 'nope' })),
+      accept: () => settle(reply(200, { ok: true })),
     }
   }
 
@@ -559,6 +565,32 @@ describe('TransactionCard sheet with a save in flight', () => {
     expect(screen.queryByRole('combobox')).toBeNull()
     expect(screen.queryByRole('checkbox')).not.toBeNull()
     expect((done() as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  // #103: withholding the exit is right, but it needs a bound. On a dead connection the sheet used
+  // to stay shut until the browser gave up, minutes later. The save timeout turns that into a
+  // failure the sheet can show, and then lets the person out.
+  it.each([
+    ['a reimbursable tick', () => fireEvent.click(screen.getByRole('checkbox'))],
+    ['a category pick', () => fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Grocery' } })],
+  ])('lets the sheet close once %s that never settles times out, and says so first', async (_, startSave) => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    useFakeSaveClock()
+    vi.stubGlobal('fetch', neverSettles())
+    openSheet()
+    startSave()
+    expect((done() as HTMLButtonElement).disabled).toBe(true)
+    escape()
+    expect(screen.queryByRole('checkbox')).not.toBeNull()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SAVE_TIMEOUT_MS)
+    })
+
+    expect(screen.getByRole('alert').textContent).toBe('It may not have saved. Showing the latest.')
+    expect((done() as HTMLButtonElement).disabled).toBe(false)
+    fireEvent.click(done())
+    expect(screen.queryByRole('checkbox')).toBeNull()
   })
 
   // Nothing is in flight here, so the ordinary way out must be untouched.

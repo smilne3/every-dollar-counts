@@ -3,6 +3,7 @@
 import { useId, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { money } from '@/lib/format'
+import { MAY_NOT_HAVE_SAVED, sendSave } from '@/lib/save-response'
 import { inputClass, labelClass } from './ui/styles'
 import { Button } from './ui/Button'
 import { Dialog } from './ui/Dialog'
@@ -66,8 +67,11 @@ export function ReimbursableEditor({
   async function save(next: number | null) {
     working(true)
     setError(null)
+    // Reload after a save, after a refusal that says this row is stale, and after an unknown outcome.
+    let reload = false
     try {
-      const res = await fetch('/api/reimbursable', {
+      // The shared rule (lib/save-response.ts): only the route's own { ok: true } is a save.
+      const result = await sendSave('/api/reimbursable', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         // Clearing the amount clears the memo with it — the same rule ReimbursableCheckbox follows.
@@ -78,18 +82,26 @@ export function ReimbursableEditor({
           note: next === null ? null : memo,
         }),
       })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        setError(body.error ?? 'That could not be saved.')
-        return
+      if (result.outcome === 'saved') {
+        setOpen(false)
+        reload = true
+      } else if (result.outcome === 'refused') {
+        // The dialog stays open with what was typed, so trying again is one tap.
+        setError(result.error)
+        // 404 and 409: the server says this row is stale, so show the latest behind the dialog.
+        reload = result.status === 404 || result.status === 409
+      } else {
+        // It may have saved. The dialog stays open so the message is seen; saving again is safe,
+        // since a mark is set, not added.
+        console.error('[ReimbursableEditor] save failed', result.cause)
+        setError(MAY_NOT_HAVE_SAVED)
+        reload = true
       }
-      setOpen(false)
-      router.refresh()
-    } catch {
-      setError('That could not be saved.')
     } finally {
       working(false)
     }
+    // Outside the try: a throw from refresh is not a failed save.
+    if (reload) router.refresh()
   }
 
   const typed = Number(value)

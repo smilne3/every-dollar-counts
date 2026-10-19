@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { money } from '@/lib/format'
 import { isCreditCardPayment } from '@/lib/categories'
+import { MAY_NOT_HAVE_SAVED, sendSave } from '@/lib/save-response'
 
 export function ReimbursableCheckbox({
   transactionId,
@@ -65,8 +66,11 @@ export function ReimbursableCheckbox({
     working(true)
     setError(null)
     setOptimistic(next ?? 0)
+    // Reload after a save, after a refusal that says this row is stale, and after an unknown outcome.
+    let reload = false
     try {
-      const res = await fetch('/api/reimbursable', {
+      // The shared rule (lib/save-response.ts): only the route's own { ok: true } is a save.
+      const result = await sendSave('/api/reimbursable', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         // Clearing the mark clears the memo too: a note left behind on an unmarked transaction is
@@ -74,22 +78,28 @@ export function ReimbursableCheckbox({
         // reason to exist and nowhere it is shown.
         body: JSON.stringify({ transactionId, amount: next, note: next === null ? null : (note ?? null) }),
       })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        // Put the box back where the server still has it. An optimistic tick that survives a
-        // rejection is a lie: it would show the charge as coming back when nothing was saved.
+      if (result.outcome === 'saved') {
+        reload = true
+      } else {
+        // Put the box back where the server has it, on every outcome but a save. An optimistic tick
+        // that survives a failed save is a lie: it would show the charge as coming back when nothing
+        // was saved. After an unknown outcome the reload shows whether it was.
         setOptimistic(null)
-        setError(body.error ?? 'That could not be saved.')
-        return
+        if (result.outcome === 'refused') {
+          setError(result.error)
+          // 404 and 409: the server says this row is stale, so show the latest under the message.
+          reload = result.status === 404 || result.status === 409
+        } else {
+          console.error('[ReimbursableCheckbox] save failed', result.cause)
+          setError(MAY_NOT_HAVE_SAVED)
+          reload = true
+        }
       }
-      router.refresh()
-    } catch {
-      // Same reasoning as the !res.ok branch — the request never landed, so the tick must not stand.
-      setOptimistic(null)
-      setError('That could not be saved.')
     } finally {
       working(false)
     }
+    // Outside the try: a throw from refresh is not a failed save.
+    if (reload) router.refresh()
   }
 
   // A partial mark has no honest tick state — see the test. Show what is marked; the ⋮ editor is
