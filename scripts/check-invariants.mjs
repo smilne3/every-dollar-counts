@@ -14,13 +14,26 @@ import { join, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 // ---------------------------------------------------------------------------
-// 1. Every read on a page checks `error`.
+// 1. Every read on a page, and in the lib/ helpers pages call, checks `error`.
 //
 // #46, and again in #68, and again in #77. A Supabase read that fails sets `data` to null, and
 // `?? []` turns that into an empty array — so "the query failed" and "you have no data" render
 // identically. On the dashboard that was not even an empty state: with the categories read failing,
 // income stopped being excluded from spending and the tiles read -$1,796.70 and +$1,796.70 against
 // a truth of $3,929.35 and $1,796.70. A number the reader would act on.
+//
+// #91 found six unchecked reads this check could not see while it matched `const { data` one line at
+// a time in app/(app)/ only: two lib/ helpers whose empty lists dropped the house from net worth and
+// hid the "isn't syncing" banner, an array destructure of two reads in a Promise.all, and a
+// `const { count }`. A destructure split across lines was invisible to it too. So it reads code, not
+// lines. Comments and strings are blanked first (views(), under check 3), and each destructure is
+// read whole, however many lines it spans. It fires when an object pattern binds `data` or `count`
+// and not `error`: `const { data } = …`, or each object of an array pattern on its own, as in
+// `const [{ data: a }, { data: b }] = await Promise.all(…)`.
+//
+// Scanned: app/(app)/ and lib/. Not app/api/: its unchecked lookups mostly degrade into a 403 or 404
+// rather than a wrong number (0cfdef1), and have not been audited one by one (#91). Not counted: a
+// destructure of `auth.getUser()`. A failed auth check reads as signed out, a different defect (#143).
 // ---------------------------------------------------------------------------
 const READS_ALLOWED = new Map([
   [
@@ -28,25 +41,75 @@ const READS_ALLOWED = new Map([
     'Sits ABOVE app/(app)/error.tsx, so throwing takes down the whole shell rather than one ' +
       'section. Needs only a display name, and has a fallback for it.',
   ],
+  [
+    'lib/sync.ts',
+    "Destructures Plaid's transactions/sync response, not a Supabase read. Plaid's client rejects a " +
+      'failed call, so there is no `error` to check: the failure reaches the caller as a throw (#91).',
+  ],
 ])
+const READ_SCOPES = ['app/(app)/', 'lib/']
+
+// Index of the bracket that closes the one opening at `open`, in blanked source.
+function closeBracket(code, open) {
+  let depth = 0
+  for (let k = open; k < code.length; k++) {
+    if ('{[('.includes(code[k])) depth++
+    else if ('}])'.includes(code[k]) && --depth === 0) return k
+  }
+  return code.length
+}
+
+// The top-level, comma-separated parts of a pattern's inside, e.g. `data: a, error` -> two parts.
+function parts(inside) {
+  const out = []
+  let depth = 0
+  let from = 0
+  for (let k = 0; k < inside.length; k++) {
+    if ('{[('.includes(inside[k])) depth++
+    else if ('}])'.includes(inside[k])) depth--
+    else if (inside[k] === ',' && depth === 0) {
+      out.push(inside.slice(from, k))
+      from = k + 1
+    }
+  }
+  out.push(inside.slice(from))
+  return out.map((p) => p.trim()).filter(Boolean)
+}
+
+// What an object pattern leaves unchecked: `data` or `count` bound without `error`, else null.
+function uncheckedIn(pattern) {
+  const keys = new Set(parts(pattern.slice(1, -1)).map((p) => /^[A-Za-z_$][\w$]*/.exec(p)?.[0]))
+  if (keys.has('error')) return null
+  return ['data', 'count'].find((k) => keys.has(k)) ?? null
+}
 
 export function checkUncheckedReads(files) {
   const out = []
   for (const { path, text } of files) {
-    if (!path.startsWith('app/(app)/')) continue
+    if (!READ_SCOPES.some((scope) => path.startsWith(scope))) continue
     if (READS_ALLOWED.has(path)) continue
-    text.split('\n').forEach((line, i) => {
-      if (!/const\s*{\s*data\b/.test(line)) return
-      if (/\berror\b/.test(line)) return
-      out.push({
-        check: 'unchecked-read',
-        file: path,
-        line: i + 1,
-        message:
-          'destructures `data` without `error`. A failed read must not render identically to no data ' +
-          '(#46) — check `error` and throw, so app/(app)/error.tsx can show a retryable message.',
-      })
-    })
+    const { code } = views(text)
+    for (const at of findAll(/\bconst\s*[{[]/g, code)) {
+      const open = at + code.slice(at).search(/[{[]/)
+      const close = closeBracket(code, open)
+      // `= await supabase.auth.getUser()`, the awaited call named up to its first parenthesis.
+      const callee = /^\s*=\s*await\s+([^(;]*)\(/.exec(code.slice(close + 1))?.[1] ?? ''
+      if (/\bauth\s*\.\s*getUser\s*$/.test(callee)) continue
+      const pattern = code.slice(open, close + 1)
+      const objects = pattern[0] === '{' ? [pattern] : parts(pattern.slice(1, -1)).filter((p) => p[0] === '{')
+      for (const object of objects) {
+        const name = uncheckedIn(object)
+        if (!name) continue
+        out.push({
+          check: 'unchecked-read',
+          file: path,
+          line: lineOf(text, at),
+          message:
+            `destructures \`${name}\` without \`error\`. A failed read must not render identically to no ` +
+            'data (#46, #91) — check `error` and throw, so app/(app)/error.tsx can show a retryable message.',
+        })
+      }
+    }
   }
   return out
 }

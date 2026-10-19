@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest'
 import {
+  checkUncheckedReads,
   checkCategoryReads,
   checkRulesReads,
   checkUserCategoryWrites,
@@ -8,12 +9,120 @@ import {
   checkBrandCasts,
 } from '../../scripts/check-invariants.mjs'
 
-// Tripwire 4 (#28 spec §7.4): a page that reads categories or rules on its own, a write of
-// user_category outside the two routes allowed it, or a cast that fakes a branded context.
-// Fixtures are inline; none lives under app/, lib/ or components/.
+// Tripwires 1 and 4, called directly. Fixtures are inline; none lives under app/, lib/ or
+// components/.
 const file = (path: string, text: string) => [{ path, text }]
 const checks = (r: { check: string }[]) => r.map((f) => f.check)
+const lines = (r: { line: number }[]) => r.map((f) => f.line)
 
+// Tripwire 1 (#46, widened in #91): a destructured read that binds `data` or `count` and not
+// `error`, so a failed read renders the same as no data. Most fixtures below are a shape the
+// line-based version could not see, or one it must not fire on.
+describe('unchecked-read', () => {
+  const PAGE = 'app/(app)/x/page.tsx'
+
+  it('fires on a page that destructures data without error', () => {
+    expect(checks(checkUncheckedReads(file(PAGE, `const { data: goals } = await supabase.from('goals').select('id')`)))).toEqual(['unchecked-read'])
+  })
+
+  it('passes a page that binds error', () => {
+    expect(checkUncheckedReads(file(PAGE, `const { data: goals, error } = await supabase.from('goals').select('id')`))).toEqual([])
+  })
+
+  // #91: lib/manual-assets.ts and lib/plaid-items.ts each swallowed their own read, and the pages
+  // that called them could not tell the empty list from none.
+  it('fires in lib/, on the line the destructure starts', () => {
+    const src = `export async function listManualAssets(householdId) {
+  const { data } = await supabaseAdmin
+    .from('manual_assets')
+    .select('id, name, value, updated_at')
+    .eq('household_id', householdId)
+  return data ?? []
+}`
+    const found = checkUncheckedReads(file('lib/manual-assets.ts', src))
+    expect(found.map((f) => [f.check, f.file, f.line])).toEqual([['unchecked-read', 'lib/manual-assets.ts', 2]])
+  })
+
+  it('reads a destructure whole, however many lines it spans', () => {
+    const unchecked = `const {
+  data: goals,
+} = await supabase.from('goals').select('id')`
+    const checked = `const {
+  data: goals,
+  error: goalsError,
+} = await supabase.from('goals').select('id')`
+    expect(checks(checkUncheckedReads(file(PAGE, unchecked)))).toEqual(['unchecked-read'])
+    expect(checkUncheckedReads(file(PAGE, checked))).toEqual([])
+  })
+
+  // #91: Settings read transactions and budgets as const [{ data: catTxns }, { data: budgetRows }].
+  // Each read in the array is its own read: one that binds error does not cover its neighbour.
+  it('fires on an array destructure for each read in it that binds data without error', () => {
+    const src = `const [{ data: catTxns }, { data: budgetRows, error: budgetsError }, { data: goals }] = await Promise.all([
+  supabase.from('transactions').select('id'),
+  supabase.from('budgets').select('category'),
+  supabase.from('goals').select('id'),
+])`
+    const found = checkUncheckedReads(file(PAGE, src))
+    expect(checks(found)).toEqual(['unchecked-read', 'unchecked-read'])
+    expect(found.map((f) => f.message)).toEqual([
+      expect.stringContaining('destructures `data` without `error`'),
+      expect.stringContaining('destructures `data` without `error`'),
+    ])
+  })
+
+  it('passes an array destructure whose every read binds error', () => {
+    const src = `const [{ data: a, error: aError }, { data: b, error: bError }] = await Promise.all([x, y])`
+    expect(checkUncheckedReads(file(PAGE, src))).toEqual([])
+  })
+
+  it('does not take a bare name in an array pattern for a read', () => {
+    expect(checkUncheckedReads(file('lib/crypto.ts', `const [iv, tag, data] = payload.split(':')`))).toEqual([])
+  })
+
+  // #91: Settings' const { count } printed "No banks connected yet." when the read failed.
+  it.each([
+    [`const { count } = await supabase.from('accounts').select('id', { count: 'exact', head: true })`],
+    [`const { count: n } = await supabase.from('accounts').select('id', { count: 'exact', head: true })`],
+  ])('fires on a count without error: %s', (src) => {
+    const found = checkUncheckedReads(file(PAGE, src))
+    expect(checks(found)).toEqual(['unchecked-read'])
+    expect(found[0].message).toContain('destructures `count` without `error`')
+  })
+
+  it('passes a count that binds error', () => {
+    const src = `const { count, error } = await supabase.from('accounts').select('id', { count: 'exact', head: true })`
+    expect(checkUncheckedReads(file(PAGE, src))).toEqual([])
+  })
+
+  // A failed auth check reads as signed out, which is a different defect (#143), not a wrong number.
+  it.each([
+    ['on one line', 'const { data: { user } } = await supabase.auth.getUser()'],
+    ['across lines', 'const {\n  data: { user },\n} = await supabase\n  .auth\n  .getUser()'],
+  ])('leaves out an auth.getUser() destructure %s', (_name, src) => {
+    expect(checkUncheckedReads(file(PAGE, src))).toEqual([])
+  })
+
+  it('still fires on a read right after an auth.getUser() destructure', () => {
+    const src = `const { data: { user } } = await supabase.auth.getUser()
+const { data: goals } = await supabase.from('goals').select('id')`
+    expect(lines(checkUncheckedReads(file(PAGE, src)))).toEqual([2])
+  })
+
+  it('ignores a destructure in a comment or a string', () => {
+    const src = `// const { data } = await supabase.from('goals').select('id')
+const sql = 'const { data } = await supabase.from(goals)'`
+    expect(checkUncheckedReads(file(PAGE, src))).toEqual([])
+  })
+
+  it("allows the layout's display-name read, and lib/sync.ts's Plaid response", () => {
+    expect(checkUncheckedReads(file('app/(app)/layout.tsx', `const { data: households } = await supabase.from('households').select('id, name').limit(1)`))).toEqual([])
+    expect(checkUncheckedReads(file('lib/sync.ts', `const { data } = await plaidClient.transactionsSync({ access_token, cursor: next })`))).toEqual([])
+  })
+})
+
+// Tripwire 4 (#28 spec §7.4): a page that reads categories or rules on its own, a write of
+// user_category outside the two routes allowed it, or a cast that fakes a branded context.
 describe('category-read', () => {
   it('fires on a page reading categories itself', () => {
     expect(checks(checkCategoryReads(file('app/(app)/x/page.tsx', `supabase.from('categories').select('id')`)))).toEqual(['category-read'])
