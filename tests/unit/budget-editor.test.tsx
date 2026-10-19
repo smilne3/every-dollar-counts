@@ -1,13 +1,29 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-library/react'
 import { BudgetEditor } from '@/components/BudgetEditor'
+import { SAVE_TIMEOUT_MS } from '@/lib/save-response'
+import {
+  answering,
+  badGateway,
+  neverSettles,
+  offline,
+  redirectedToLogin,
+  refused,
+  saved,
+  useFakeSaveClock,
+} from './helpers/save-replies'
 
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  vi.useRealTimers()
+  vi.restoreAllMocks()
+  refresh.mockClear()
 })
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {} }) }))
+// A spy, so a test can tell whether the page is told to reload.
+const refresh = vi.hoisted(() => vi.fn())
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }))
 
 // Two categories, the second over its limit, so both the ordinary and the coral branch render.
 const props = {
@@ -68,5 +84,130 @@ describe('BudgetEditor', () => {
     expect((screen.getByLabelText('Dining monthly budget limit') as HTMLInputElement).value).toBe(
       '150'
     )
+  })
+})
+
+// #162: save() never looked at the reply, so every save said "Saved.", a dropped connection froze
+// the button on "Saving…", and the typed limits stayed on screen whatever the server had.
+describe('BudgetEditor saves', () => {
+  const limit = (c: string) => screen.getByLabelText(`${c} monthly budget limit`) as HTMLInputElement
+  const button = () => screen.getByRole('button', { name: /Save budgets|Saving…/ }) as HTMLButtonElement
+  // Raise Groceries to 500, clear Dining, and press Save budgets.
+  function editAndSave() {
+    fireEvent.change(limit('Groceries'), { target: { value: '500' } })
+    fireEvent.change(limit('Dining'), { target: { value: '' } })
+    fireEvent.click(button())
+  }
+
+  it('sends every category, a cleared limit as 0, then says Saved. and reloads', async () => {
+    const fetchMock = answering(saved)
+    vi.stubGlobal('fetch', fetchMock)
+    render(<BudgetEditor {...props} />)
+    editAndSave()
+    expect(await screen.findByText('Saved.')).toBeTruthy()
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/budgets')
+    expect(init?.method).toBe('POST')
+    expect(JSON.parse(init?.body as string)).toEqual({
+      items: [
+        { category: 'Groceries', monthly_limit: 500 },
+        { category: 'Dining', monthly_limit: 0 },
+      ],
+    })
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(button().textContent).toBe('Save budgets')
+    expect(button().disabled).toBe(false)
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  // A definite failure wrote nothing: say why under the button, keep what was typed for a retry,
+  // and do not reload.
+  it.each([
+    ['a refusal', () => refused(500, 'The limits you cleared could not be removed. Please try again.'), 'The limits you cleared could not be removed. Please try again.'],
+    ['a redirect to the login page', redirectedToLogin, 'Your session ended. Sign in again.'],
+    ['a 200 without ok: true', () => new Response('{}', { headers: { 'content-type': 'application/json' } }), 'That could not be saved.'],
+  ])('after %s, says why under the button and keeps what was typed', async (_, reply, message) => {
+    vi.stubGlobal('fetch', answering(reply))
+    render(<BudgetEditor {...props} />)
+    editAndSave()
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toBe(message)
+    // Under the button: after it in the page.
+    expect(button().compareDocumentPosition(alert) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.queryByText('Saved.')).toBeNull()
+    expect(limit('Groceries').value).toBe('500')
+    expect(limit('Dining').value).toBe('')
+    expect(refresh).not.toHaveBeenCalled()
+    expect(button().disabled).toBe(false)
+  })
+
+  // It may have saved, so the typed limits are not shown as if they were the server's. The editor
+  // goes back to the limits the server last sent, and the reload brings the latest.
+  it.each([
+    ['a gateway error page', () => answering(badGateway)],
+    ['a request that fails in flight', () => offline()],
+  ])('after %s, says it may not have saved, shows the server\'s limits and reloads', async (_, fetchMock) => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.stubGlobal('fetch', fetchMock())
+    render(<BudgetEditor {...props} />)
+    editAndSave()
+    expect((await screen.findByRole('alert')).textContent).toBe('It may not have saved. Showing the latest.')
+    expect(screen.queryByText('Saved.')).toBeNull()
+    expect(limit('Groceries').value).toBe('400')
+    expect(limit('Dining').value).toBe('150')
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(button().disabled).toBe(false)
+    expect(logged).toHaveBeenCalledWith('[BudgetEditor] save failed', expect.anything())
+  })
+
+  // #162 (and #103): on a weak signal the button froze on "Saving…" until a reload.
+  it('gives up on a request that never settles: says so, shows the server\'s limits, reloads and re-enables', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    useFakeSaveClock()
+    vi.stubGlobal('fetch', neverSettles())
+    render(<BudgetEditor {...props} />)
+    editAndSave()
+    expect(button().textContent).toBe('Saving…')
+    expect(button().disabled).toBe(true)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SAVE_TIMEOUT_MS)
+    })
+    expect(screen.getByRole('alert').textContent).toBe('It may not have saved. Showing the latest.')
+    expect(button().textContent).toBe('Save budgets')
+    expect(button().disabled).toBe(false)
+    expect(limit('Groceries').value).toBe('400')
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  // The reload after a save, or after an unknown outcome, brings the server's limits. Seeded once,
+  // the editor kept showing what was typed whatever the server held.
+  it('shows the limits a reload brings', () => {
+    const { rerender } = render(<BudgetEditor {...props} />)
+    rerender(<BudgetEditor {...props} initialLimits={{ Groceries: 500 }} />)
+    expect(limit('Groceries').value).toBe('500')
+    expect(limit('Dining').value).toBe('')
+  })
+
+  it('clears an earlier error once a save succeeds', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(refused(500, 'That could not be saved. Please try again.')).mockResolvedValueOnce(saved())
+    )
+    render(<BudgetEditor {...props} />)
+    editAndSave()
+    await screen.findByRole('alert')
+    fireEvent.click(button())
+    expect(await screen.findByText('Saved.')).toBeTruthy()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  // "Saved." beside a limit typed after the save would be the #162 lie again.
+  it('stops saying Saved. once a limit is edited again', async () => {
+    vi.stubGlobal('fetch', answering(saved))
+    render(<BudgetEditor {...props} />)
+    editAndSave()
+    await screen.findByText('Saved.')
+    fireEvent.change(limit('Groceries'), { target: { value: '600' } })
+    await waitFor(() => expect(screen.queryByText('Saved.')).toBeNull())
   })
 })
