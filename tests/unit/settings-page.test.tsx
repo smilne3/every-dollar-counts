@@ -11,7 +11,15 @@ const { results, switchState } = vi.hoisted(() => ({
 // method and resolves to whatever the test configured for that table.
 const chainFor = (table: string) => {
   const chain: Record<string, unknown> = {}
-  for (const m of ['select', 'order', 'eq', 'limit']) chain[m] = () => chain
+  // PostgREST sends a count only when the select asks for one, so the stub does too: without
+  // { count: 'exact' } the count comes back null, as in production. Otherwise dropping the option
+  // from the accounts read would still pass while every visit said "Couldn't check your accounts."
+  let countAsked = false
+  chain.select = (_columns?: string, options?: { count?: string }) => {
+    countAsked = options?.count === 'exact'
+    return chain
+  }
+  for (const m of ['order', 'eq', 'limit']) chain[m] = () => chain
   // readAllRows (lib/read-all.ts) asks for the rows after its cursor with .or(); there are none
   // past this fixture, so a continuation page is empty and the read ends.
   let afterCursor = false
@@ -21,10 +29,10 @@ const chainFor = (table: string) => {
   }
   chain.single = async () => results[table] ?? { data: null, error: null }
   chain.maybeSingle = async () => results[table] ?? { data: null, error: null }
-  chain.then = (resolve: (v: unknown) => unknown) =>
-    Promise.resolve(
-      afterCursor ? { data: [], error: null } : (results[table] ?? { data: [], error: null })
-    ).then(resolve)
+  chain.then = (resolve: (v: unknown) => unknown) => {
+    const reply = afterCursor ? { data: [], error: null } : (results[table] ?? { data: [], error: null })
+    return Promise.resolve('count' in reply && !countAsked ? { ...reply, count: null } : reply).then(resolve)
+  }
   return chain
 }
 
@@ -242,6 +250,13 @@ describe('Settings: a failed read says so in its own card (#91)', () => {
     const banks = card(await SettingsPage(), 'Banks')
     expect(flatText(banks)).toContain(line)
     expect(alertText(banks)).toBeNull()
+  })
+
+  // The household read gates every card below it: unchecked, a read with neither rows nor an error
+  // rendered every card as if nothing were connected (#46).
+  it('throws when the household read returns no data and no error', async () => {
+    results.households = { data: null, error: null }
+    await expect(SettingsPage()).rejects.toThrow('could not read your household: read returned no data and no error')
   })
 })
 

@@ -118,7 +118,10 @@ export default async function SettingsPage() {
     .select('id, name, timezone')
     .limit(1)
   if (householdsError) throw new Error(`could not read your household: ${householdsError.message}`)
-  const household = households?.[0]
+  // No data and no error is not "no household" either (#46): every card below would render as if
+  // nothing were connected.
+  if (!households) throw new Error('could not read your household: read returned no data and no error')
+  const household = households[0]
   const accountCount = await readOrNull('the account count', () => countAccounts(supabase))
   const items = household ? await readOrNull('the banks', () => listItemsForHousehold(household.id)) : []
   // Null when it cannot be established — BankList falls back to the old wording rather than
