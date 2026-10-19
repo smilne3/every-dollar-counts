@@ -39,6 +39,19 @@ async function readBudgetNames(supabase: Supabase): Promise<Set<string>> {
   return new Set(budgetRows.map((b) => b.category as string))
 }
 
+// How many accounts are connected, for the Banks card's first line. Checked (#91): unchecked, a
+// failed read printed "No banks connected yet." beside Connect a bank.
+async function countAccounts(supabase: Supabase): Promise<number> {
+  const { count, error } = await supabase.from('accounts').select('id', { count: 'exact', head: true })
+  if (error) {
+    const code = error.code ? `${error.code} ` : ''
+    throw new Error(`could not count accounts: ${code}${error.message}`)
+  }
+  // No count and no error is not "no accounts" (#46).
+  if (count == null) throw new Error('could not count accounts: read returned no count and no error')
+  return count
+}
+
 // Everything the Categories and Category rules cards need. Throws if any read fails; the page
 // catches it, because Settings is the only place a bank can be reconnected (spec §7.3).
 async function loadCategorySettings(supabase: Supabase): Promise<CategorySettings> {
@@ -106,7 +119,7 @@ export default async function SettingsPage() {
     .limit(1)
   if (householdsError) throw new Error(`could not read your household: ${householdsError.message}`)
   const household = households?.[0]
-  const { count } = await supabase.from('accounts').select('id', { count: 'exact', head: true })
+  const accountCount = await readOrNull('the account count', () => countAccounts(supabase))
   const items = household ? await readOrNull('the banks', () => listItemsForHousehold(household.id)) : []
   // Null when it cannot be established — BankList falls back to the old wording rather than
   // printing a number nobody stands behind.
@@ -139,9 +152,13 @@ export default async function SettingsPage() {
 
       <Card className="p-5 space-y-3">
         <h2 className="text-base font-semibold text-ink">Banks</h2>
-        <p className="text-sm text-muted">
-          {count ? `${count} account(s) connected.` : 'No banks connected yet.'}
-        </p>
+        {accountCount === null ? (
+          unavailable("Couldn't check your accounts.")
+        ) : (
+          <p className="text-sm text-muted">
+            {accountCount ? `${accountCount} account(s) connected.` : 'No banks connected yet.'}
+          </p>
+        )}
         {/* With the list unreadable, Connect a bank would invite a relink of a bank that is still
             connected, which spends one of ten lifetime connections (#51), and its own warning
             points at "the list above". So it waits for the list. */}

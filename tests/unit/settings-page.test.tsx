@@ -214,6 +214,35 @@ describe('Settings: a failed read says so in its own card (#91)', () => {
     expect(findProps(banks, LinkButton)).not.toBeNull()
     expect(alertText(banks)).toBeNull()
   })
+
+  // The count read printed "No banks connected yet." whenever it had no count, failed or not. Here
+  // the household has a bank, so that line would be a plain falsehood.
+  it.each([
+    ['fails', { data: null, error: { message: 'boom' }, count: null }, 'could not count accounts: boom'],
+    ['returns no count and no error', { data: null, error: null, count: null }, 'could not count accounts: read returned no count and no error'],
+  ])('says the accounts could not be checked when the count read %s', async (_name, reply, message) => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    results.accounts = reply as never
+    results.plaid_items = {
+      data: [{ id: 'item-1', institution_name: 'Capital One', status: 'ok', status_detail: null, products: ['transactions'], created_at: '2026-07-14T18:05:30Z' }],
+      error: null,
+    }
+    const banks = card(await SettingsPage(), 'Banks')
+    expect(alertText(banks)).toBe("Couldn't check your accounts. Try again.")
+    expect(flatText(banks)).not.toContain('No banks connected yet.')
+    expect(findProps(banks, BankList)).not.toBeNull()
+    expect(log).toHaveBeenCalledWith('[settings] could not load the account count', new Error(message))
+  })
+
+  it.each([
+    [0, 'No banks connected yet.'],
+    [3, '3 account(s) connected.'],
+  ])('says how many accounts are connected when the count is %i', async (count, line) => {
+    results.accounts = { data: null, error: null, count } as never
+    const banks = card(await SettingsPage(), 'Banks')
+    expect(flatText(banks)).toContain(line)
+    expect(alertText(banks)).toBeNull()
+  })
 })
 
 describe('Settings timezone control', () => {
