@@ -79,13 +79,26 @@ export async function POST(req: Request) {
   if (!item || item.plaid_env !== plaidEnv) return NextResponse.json({ ok: true })
 
   if (webhook_type === 'ITEM' && BREAKING.has(webhook_code)) {
-    await supabaseAdmin
+    const { error: writeError } = await supabaseAdmin
       .from('plaid_items')
       .update({
         status: 'needs_reconnect',
         status_detail: error?.error_code ?? webhook_code,
       })
       .eq('id', item.id)
+    // A failed write loses what a failed read would (#91): acknowledged, the bank stays 'ok' and the
+    // "isn't syncing" banner never shows, and for a balances-only item this webhook is the only sign
+    // of a broken login. Setting a status is safe to repeat, so a 500 lets Plaid deliver it again.
+    if (writeError) {
+      console.error('[plaid] webhook status write failed', {
+        item_id,
+        webhook_type,
+        webhook_code,
+        code: writeError.code,
+        message: writeError.message,
+      })
+      return NextResponse.json({ error: 'could not record the item status' }, { status: 500 })
+    }
     return NextResponse.json({ ok: true })
   }
 

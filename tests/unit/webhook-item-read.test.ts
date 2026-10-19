@@ -10,8 +10,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 // columns asked for, and every call is recorded, writes included.
 //
 // vi.hoisted for the same reason as tests/unit/webhook-suggest.test.ts.
-const { reply, calls, storeAccounts, syncAndStore, afterFns } = vi.hoisted(() => ({
+const { reply, writeReply, calls, storeAccounts, syncAndStore, afterFns } = vi.hoisted(() => ({
   reply: { value: { data: null as unknown, error: null as unknown } },
+  // What the needs_reconnect update resolves to.
+  writeReply: { value: { error: null as unknown } },
   calls: [] as unknown[][],
   storeAccounts: vi.fn(),
   syncAndStore: vi.fn(),
@@ -59,7 +61,7 @@ vi.mock('@/lib/supabase/admin', () => ({
           return {
             eq: (col: string, value: unknown) => {
               calls.push(['eq', col, value])
-              return Promise.resolve({ error: null })
+              return Promise.resolve(writeReply.value)
             },
           }
         },
@@ -108,6 +110,7 @@ beforeEach(() => {
   storeAccounts.mockReset().mockResolvedValue(undefined)
   syncAndStore.mockReset().mockResolvedValue({ added: 1, modified: 0, removed: 0 })
   reply.value = { data: ITEM, error: null }
+  writeReply.value = { error: null }
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 afterEach(() => {
@@ -174,5 +177,26 @@ describe('POST /api/plaid/webhook: the item read (#91)', () => {
       ['update', { status: 'needs_reconnect', status_detail: 'ITEM_LOGIN_REQUIRED' }],
       ['eq', 'id', 'item-1'],
     ])
+    expect(console.error).not.toHaveBeenCalled()
+  })
+})
+
+// A failed write loses what a failed read did. Answered 200, the bank stays 'ok' and the "isn't
+// syncing" banner never shows; for a balances-only item this webhook is the only breakage signal.
+// Setting a status is safe to repeat, so Plaid should deliver it again.
+describe('POST /api/plaid/webhook: the needs_reconnect write (#91)', () => {
+  it('answers 500, and logs the failed write, when the status cannot be recorded', async () => {
+    writeReply.value = { error: { message: 'canceling statement due to statement timeout', code: '57014' } }
+    const res = await POST(hook({ webhook_type: 'ITEM', webhook_code: 'ERROR', error: { error_code: 'ITEM_LOGIN_REQUIRED' } }))
+    expect(res.status).toBe(500)
+    // No database text in the answer.
+    expect(await res.json()).toEqual({ error: 'could not record the item status' })
+    expect(console.error).toHaveBeenCalledExactlyOnceWith('[plaid] webhook status write failed', {
+      item_id: 'plaid-item-1',
+      webhook_type: 'ITEM',
+      webhook_code: 'ERROR',
+      code: '57014',
+      message: 'canceling statement due to statement timeout',
+    })
   })
 })
