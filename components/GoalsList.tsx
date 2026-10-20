@@ -12,21 +12,59 @@ import { inputClass, labelClass } from '@/components/ui/styles'
 
 type Goal = { id: string; name: string; target_amount: number; saved_amount: number }
 type Outcome = SaveOutcome['outcome']
+// A goal's failure: what its card says, and what the list says instead if a reload no longer lists
+// the goal. The second is worded as done, since by then the page has reloaded.
+type GoalFailure = { message: string; gone: string }
+
+// The list's words for a goal that a reload no longer lists, unless the route's 404 said it already.
+const GONE = 'That goal no longer exists.'
 
 export function GoalsList({ initialGoals }: { initialGoals: Goal[] }) {
   const router = useRouter()
   const [name, setName] = useState('')
   const [target, setTarget] = useState('')
   const [busy, setBusy] = useState(false)
-  // The last save's failure, shown where it was made: under the add form (goalId null) or on the
-  // goal it was for.
-  const [failure, setFailure] = useState<{ goalId: string | null; message: string } | null>(null)
+  // Each failure stays where it was made, under the add form or on its goal, until that control's
+  // next save. One failure for the whole list was cleared by any save, and a refused goal's card then
+  // went on showing the amount typed, which the server did not have, with nothing to say so.
+  const [addError, setAddError] = useState<string | null>(null)
+  const [goalErrors, setGoalErrors] = useState<Record<string, GoalFailure>>({})
+  // Failures of goals a reload no longer lists: their cards are gone and the messages with them, so
+  // each is said once at the top of the list, until the next save.
+  const [goneMessages, setGoneMessages] = useState<string[]>([])
+  // React's documented way to adjust state when a prop changes. The goals change only on a reload.
+  const [listed, setListed] = useState(initialGoals)
+  if (listed !== initialGoals) {
+    setListed(initialGoals)
+    const ids = new Set(initialGoals.map((g) => g.id))
+    const gone = Object.keys(goalErrors).filter((id) => !ids.has(id))
+    if (gone.length > 0) {
+      setGoneMessages((said) => [...new Set([...said, ...gone.map((id) => goalErrors[id].gone)])])
+      setGoalErrors((all) => Object.fromEntries(Object.entries(all).filter(([id]) => ids.has(id))))
+    }
+  }
+
+  // Sets, or with null clears, the failure of one control: the add form (goalId null) or a goal.
+  function setFailure(goalId: string | null, failure: GoalFailure | null) {
+    if (goalId === null) {
+      setAddError(failure?.message ?? null)
+      return
+    }
+    setGoalErrors((all) => {
+      const next = { ...all }
+      if (failure) next[goalId] = failure
+      else delete next[goalId]
+      return next
+    })
+  }
 
   // Add, update and delete all save through here (#165). Returns what happened, so the caller can
   // decide what becomes of what was typed.
   async function call(method: 'POST' | 'PATCH' | 'DELETE', body: unknown, goalId: string | null): Promise<Outcome> {
     setBusy(true)
-    setFailure(null)
+    // Only this control's own failure goes; another's stays until its own next save.
+    setFailure(goalId, null)
+    setGoneMessages([])
     let reload = false
     let outcome: Outcome = 'unknown'
     try {
@@ -40,12 +78,13 @@ export function GoalsList({ initialGoals }: { initialGoals: Goal[] }) {
       if (result.outcome === 'saved') {
         reload = true
       } else if (result.outcome === 'refused') {
-        setFailure({ goalId, message: result.error })
         // 404: the goal is gone (deleted on the other phone), so the list is stale. Show the latest.
+        // The route's 404 is worded as done, so the list can say it once the card has gone.
+        setFailure(goalId, { message: result.error, gone: result.status === 404 ? result.error : GONE })
         reload = result.status === 404
       } else {
         console.error('[GoalsList] save failed', result.cause)
-        setFailure({ goalId, message: MAY_NOT_HAVE_SAVED })
+        setFailure(goalId, { message: MAY_NOT_HAVE_SAVED, gone: GONE })
         reload = true
       }
     } finally {
@@ -105,12 +144,18 @@ export function GoalsList({ initialGoals }: { initialGoals: Goal[] }) {
             Add goal
           </Button>
         </form>
-        {failure && failure.goalId === null && (
+        {addError && (
           <p role="alert" className="mt-3 text-sm text-coral">
-            {failure.message}
+            {addError}
           </p>
         )}
       </Card>
+
+      {goneMessages.length > 0 && (
+        <p role="alert" className="text-sm text-coral">
+          {goneMessages.join(' ')}
+        </p>
+      )}
 
       {initialGoals.length === 0 ? (
         <p className="text-sm text-muted">No savings goals yet. Add one above.</p>
@@ -121,7 +166,7 @@ export function GoalsList({ initialGoals }: { initialGoals: Goal[] }) {
               key={g.id}
               goal={g}
               busy={busy}
-              error={failure?.goalId === g.id ? failure.message : null}
+              error={goalErrors[g.id]?.message ?? null}
               onSave={(saved) => call('PATCH', { id: g.id, saved_amount: saved }, g.id)}
               onDelete={() => void call('DELETE', { id: g.id }, g.id)}
             />

@@ -303,10 +303,10 @@ describe('GoalsList saves', () => {
 
     // Deleted on the other phone: the list is stale, so show the latest under the message.
     it('says why and reloads when an update is refused because the goal is gone', async () => {
-      vi.stubGlobal('fetch', answering(() => refused(404, 'That goal no longer exists. Refresh and try again.')))
+      vi.stubGlobal('fetch', answering(() => refused(404, 'That goal no longer exists.')))
       render(<GoalsList {...props} />)
       updateEmergencyFund()
-      expect((await within(card(EF)).findByRole('alert')).textContent).toBe('That goal no longer exists. Refresh and try again.')
+      expect((await within(card(EF)).findByRole('alert')).textContent).toBe('That goal no longer exists.')
       expect(refresh).toHaveBeenCalledTimes(1)
     })
 
@@ -448,23 +448,141 @@ describe('GoalsList saves', () => {
     })
   })
 
-  // A failure left beside the next save would be read as that save's.
-  it('clears an earlier failure once the next save starts', async () => {
-    let settle!: (res: Response) => void
-    vi.stubGlobal(
-      'fetch',
-      vi
-        .fn()
-        .mockResolvedValueOnce(refused(400, "The amount saved can't be negative."))
-        .mockImplementationOnce(() => new Promise<Response>((resolve) => (settle = resolve)))
-    )
-    render(<GoalsList {...props} />)
-    updateEmergencyFund('-50')
-    await screen.findByRole('alert')
-    addVacation()
-    expect(screen.queryByRole('alert')).toBeNull()
-    settle(saved())
-    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
-    expect(screen.queryByRole('alert')).toBeNull()
+  // Each failure belongs to the control it was made at, and only that control's next save clears it.
+  describe('failures', () => {
+    const TRY_AGAIN = 'That could not be saved. Please try again.'
+    // A save that settles when the test says.
+    const deferred = () => {
+      let resolveIt!: (res: Response) => void
+      const promise = () => new Promise<Response>((resolve) => (resolveIt = resolve))
+      return { promise, settle: (res: Response) => resolveIt(res) }
+    }
+
+    // #177 review: one failure for the whole list was cleared by any save, so after another goal's
+    // save the refused card still read "50%, $1,500.00 of $3,000.00" with nothing to say the server
+    // held $1,200. The bar follows the field as a preview; the message that stays explains it.
+    it("keeps a goal's refusal, beside the amount it explains, when another goal and the add form save", async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(refused(500, TRY_AGAIN)).mockResolvedValueOnce(saved()).mockResolvedValueOnce(saved()))
+      const { rerender } = render(<GoalsList {...props} />)
+      updateEmergencyFund('1500')
+      await within(card(EF)).findByRole('alert')
+      fireEvent.change(amount(ROOF), { target: { value: '450' } })
+      fireEvent.click(updateButton(ROOF))
+      await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+      addVacation()
+      await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2))
+      // The reload after both saves: the server still holds $1,200.
+      rerender(<GoalsList initialGoals={[{ ...props.initialGoals[0] }, { ...props.initialGoals[1], saved_amount: 450 }]} />)
+      expect(within(card(EF)).getByRole('alert').textContent).toBe(TRY_AGAIN)
+      expect(screen.getAllByRole('alert')).toHaveLength(1)
+      expect(amount(EF).value).toBe('1500')
+      expect(within(card(EF)).getByText(/\$1,500\.00 of \$3,000\.00/)).toBeTruthy()
+      expect(within(card(EF)).getByText('50%')).toBeTruthy()
+    })
+
+    // A failure left beside that goal's next save would be read as that save's.
+    it("clears a goal's failure once that goal's next save starts", async () => {
+      const next = deferred()
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(refused(500, TRY_AGAIN)).mockImplementationOnce(next.promise))
+      render(<GoalsList {...props} />)
+      updateEmergencyFund('1500')
+      await within(card(EF)).findByRole('alert')
+      fireEvent.click(updateButton(EF))
+      expect(screen.queryByRole('alert')).toBeNull()
+      next.settle(saved())
+      await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+      expect(screen.queryByRole('alert')).toBeNull()
+    })
+
+    it("keeps the add form's failure when a goal saves, and clears it once the form's next save starts", async () => {
+      const next = deferred()
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValueOnce(refused(500, TRY_AGAIN)).mockResolvedValueOnce(saved()).mockImplementationOnce(next.promise)
+      )
+      render(<GoalsList {...props} />)
+      addVacation()
+      await within(addCard()).findByRole('alert')
+      updateEmergencyFund('1500')
+      await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+      expect(within(addCard()).getByRole('alert').textContent).toBe(TRY_AGAIN)
+      fireEvent.click(addButton())
+      expect(screen.queryByRole('alert')).toBeNull()
+      next.settle(saved())
+      await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2))
+      expect(screen.queryByRole('alert')).toBeNull()
+    })
+  })
+
+  // A goal's failure whose card a reload drops: the message would go with the card, so the list
+  // says it instead, once, in words that fit a page that has already reloaded.
+  describe('a goal a reload no longer lists', () => {
+    const withoutEmergencyFund = () => [{ ...props.initialGoals[1] }]
+    const goneLine = () => screen.getByRole('alert')
+    // At the top of the list: after the add form's card, before the goals.
+    function expectAtTopOfList(alert: HTMLElement) {
+      expect(addCard().contains(alert)).toBe(false)
+      expect(addCard().compareDocumentPosition(alert) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+      expect(alert.compareDocumentPosition(card(ROOF)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    }
+
+    // #177 review: the 404's own reload dropped the card and its message with it, so to the person
+    // the goal just disappeared after Update.
+    it('after an update refused because the goal is gone, says so at the top of the list once its card goes', async () => {
+      vi.stubGlobal('fetch', answering(() => refused(404, 'That goal no longer exists.')))
+      const { rerender } = render(<GoalsList {...props} />)
+      updateEmergencyFund()
+      await within(card(EF)).findByRole('alert')
+      rerender(<GoalsList initialGoals={withoutEmergencyFund()} />)
+      expect(screen.queryByLabelText(`Amount saved for ${EF}`)).toBeNull()
+      expect(goneLine().textContent).toBe('That goal no longer exists.')
+      expectAtTopOfList(goneLine())
+    })
+
+    it('after a delete refused because the goal was already deleted, says so at the top of the list once its card goes', async () => {
+      vi.stubGlobal('fetch', answering(() => refused(404, 'That goal was already deleted.')))
+      const { rerender } = render(<GoalsList {...props} />)
+      deleteEmergencyFund()
+      await within(card(EF)).findByRole('alert')
+      rerender(<GoalsList initialGoals={withoutEmergencyFund()} />)
+      expect(goneLine().textContent).toBe('That goal was already deleted.')
+      expectAtTopOfList(goneLine())
+    })
+
+    // It may have saved, and the reload shows it did. "It may not have saved" would argue with the
+    // list, so the line says what the list shows.
+    it('after a delete whose outcome is unknown, says the goal no longer exists once the reload drops it', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      vi.stubGlobal('fetch', offline())
+      const { rerender } = render(<GoalsList {...props} />)
+      deleteEmergencyFund()
+      expect((await within(card(EF)).findByRole('alert')).textContent).toBe('It may not have saved. Showing the latest.')
+      rerender(<GoalsList initialGoals={withoutEmergencyFund()} />)
+      expect(goneLine().textContent).toBe('That goal no longer exists.')
+    })
+
+    it('says it once: the next save clears it, and a later reload does not bring it back', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(refused(404, 'That goal no longer exists.')).mockResolvedValueOnce(saved()))
+      const { rerender } = render(<GoalsList {...props} />)
+      updateEmergencyFund()
+      await within(card(EF)).findByRole('alert')
+      rerender(<GoalsList initialGoals={withoutEmergencyFund()} />)
+      expect(goneLine().textContent).toBe('That goal no longer exists.')
+      fireEvent.change(amount(ROOF), { target: { value: '450' } })
+      fireEvent.click(updateButton(ROOF))
+      expect(screen.queryByRole('alert')).toBeNull()
+      await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2))
+      rerender(<GoalsList initialGoals={withoutEmergencyFund()} />)
+      expect(screen.queryByRole('alert')).toBeNull()
+    })
+
+    it('says nothing for a goal deleted without a failure', async () => {
+      vi.stubGlobal('fetch', answering(saved))
+      const { rerender } = render(<GoalsList {...props} />)
+      deleteEmergencyFund()
+      await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+      rerender(<GoalsList initialGoals={withoutEmergencyFund()} />)
+      expect(screen.queryByRole('alert')).toBeNull()
+    })
   })
 })

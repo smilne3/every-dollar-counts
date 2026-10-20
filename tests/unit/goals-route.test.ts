@@ -104,7 +104,7 @@ const errorOf = async (res: Response) => (await res.json()).error
 const writes = (calls: ReturnType<typeof makeSupabase>) => calls.inserts.length + calls.writes.length
 
 const TRY_AGAIN = 'That could not be saved. Please try again.'
-const GONE = 'That goal no longer exists. Refresh and try again.'
+const GONE = 'That goal no longer exists.'
 
 let logs: unknown[][]
 beforeEach(() => {

@@ -7,7 +7,9 @@ import { createClient } from '@/lib/supabase/server'
 // log. The goals page reads the table directly, so there is no GET.
 const TRY_AGAIN = 'That could not be saved. Please try again.'
 const REFRESH = 'That could not be saved. Refresh and try again.'
-const GONE = 'That goal no longer exists. Refresh and try again.'
+// No "Refresh and try again": GoalsList reloads on a 404, and once the goal's card has gone it says
+// this at the top of the list.
+const GONE = 'That goal no longer exists.'
 const fail = (status: number, error: string) => NextResponse.json({ error }, { status })
 
 // A finite number, by type: NaN and Infinity have no JSON form and arrive as null, which Number()
