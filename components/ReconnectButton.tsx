@@ -8,9 +8,15 @@ import {
   savePendingLink,
   clearPendingLink,
   completePendingLink,
+  type CompleteResult,
 } from '@/components/plaid-link-context'
 import { useIsStandalone } from '@/lib/useIsStandalone'
 import { SAVE_TIMEOUT_MS, sendRequest } from '@/lib/save-response'
+
+// For a reconnect whose reply was lost, timed out or could not be read (#165): the login is fixed at
+// Plaid, but whether this app recorded it is not known. The reload shows whether the bank still
+// needs reconnecting, and pressing Reconnect again costs nothing.
+const MAY_NOT_HAVE_FINISHED = 'The reconnect may not have finished. Showing the latest.'
 
 // Reopens Link in update mode to fix a broken login. The access token is unchanged, so on success
 // completePendingLink just clears the broken flag and resyncs. Critically, update mode does NOT
@@ -27,14 +33,18 @@ export function ReconnectButton({ itemId }: { itemId: string }) {
 
   const onSuccess = useCallback(async () => {
     setBusy(true)
-    const result = await completePendingLink('', { institution: null })
-    setBusy(false)
-    setToken(null)
-    if (!result.ok) {
+    let result: CompleteResult
+    try {
+      result = await completePendingLink('', { institution: null })
+    } finally {
+      setBusy(false)
+      setToken(null)
+    }
+    if (result.outcome === 'failed') {
       setError(result.error)
       return
     }
-    setError(null)
+    setError(result.outcome === 'unknown' ? MAY_NOT_HAVE_FINISHED : null)
     router.refresh()
   }, [router])
 

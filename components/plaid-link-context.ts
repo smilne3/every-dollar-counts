@@ -1,5 +1,7 @@
 'use client'
 
+import { SAVE_TIMEOUT_MS, sendRequest } from '@/lib/save-response'
+
 // Plaid Link survives an OAuth round-trip (bank's own site → back to /plaid/oauth, a completely
 // fresh page load) by stashing what it needs in localStorage. Non-OAuth banks never leave the page
 // and read the same context in place. Both finish through completePendingLink.
@@ -52,7 +54,22 @@ export function clearPendingLink() {
   window.localStorage.removeItem(KEY)
 }
 
-export type CompleteResult = { ok: true; warning?: string } | { ok: false; error: string }
+// How long to wait for the public-token exchange before saying the bank may have connected (#165).
+// It must outlast the route: given up on while the exchange was still running, and called a
+// failure, the person links again, which makes a duplicate and spends a second of the ten
+// connections (#51). The route pins its limit at 300 seconds (maxDuration in
+// app/api/plaid/exchange-public-token/route.ts: Vercel's default, and the most Hobby allows), and
+// the extra minute covers the request reaching it: the network, proxy.ts's session check, a cold
+// start. So when this fires the exchange has finished or been stopped, and the reload shows which.
+// tests/unit/exchange-public-token-route.test.ts fails if the two drift.
+export const EXCHANGE_TIMEOUT_MS = 360_000
+
+export type CompleteResult =
+  | { outcome: 'done'; warning?: string }
+  | { outcome: 'failed'; error: string }
+  // The reply was lost, timed out or could not be read, so it may have worked. Callers say so, and
+  // never that it failed.
+  | { outcome: 'unknown' }
 
 // Finish whatever Link just completed. Add mode → exchange the public token for a stored,
 // encrypted access token. Update mode (reconnect) → the access token is unchanged, so we just
@@ -67,12 +84,16 @@ export async function completePendingLink(
   metadata: { institution?: { name?: string } | null }
 ): Promise<CompleteResult> {
   const ctx = loadPendingLink()
-  if (!ctx) return { ok: false, error: 'That connection attempt expired. Please start again.' }
+  if (!ctx) return { outcome: 'failed', error: 'That connection attempt expired. Please start again.' }
 
-  try {
-    const res =
-      ctx.mode === 'add'
-        ? await fetch('/api/plaid/exchange-public-token', {
+  // The shared reply rules (lib/save-response.ts). The exchange waits EXCHANGE_TIMEOUT_MS, above. A
+  // reconnect gets a save's timeout: update mode makes no Item, so trying again costs nothing, and
+  // the reload shows whether the bank still needs it.
+  const result =
+    ctx.mode === 'add'
+      ? await sendRequest(
+          '/api/plaid/exchange-public-token',
+          {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -80,20 +101,27 @@ export async function completePendingLink(
               institution_name: metadata?.institution?.name ?? null,
               products: ctx.products ?? ['transactions'],
             }),
-          })
-        : await fetch('/api/plaid/reconnect', {
+          },
+          EXCHANGE_TIMEOUT_MS
+        )
+      : await sendRequest(
+          '/api/plaid/reconnect',
+          {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ itemId: ctx.itemId }),
-          })
+          },
+          SAVE_TIMEOUT_MS
+        )
 
-    const body = (await res.json().catch(() => ({}))) as { error?: string; warning?: string }
-    if (!res.ok) {
-      return { ok: false, error: body.error ?? "That didn't save. Don't try again yet." }
-    }
+  if (result.outcome === 'refused') return { outcome: 'failed', error: result.error }
+  // Both routes answer ok: true when they finish, with a warning when the bank is linked but its
+  // data has not arrived yet. An OK reply without it did not come from them.
+  if (result.outcome === 'answered' && result.body.ok === true) {
     clearPendingLink()
-    return { ok: true, warning: body.warning }
-  } catch {
-    return { ok: false, error: "Couldn't reach the app. Check your connection, then retry." }
+    const warning = result.body.warning
+    return { outcome: 'done', warning: typeof warning === 'string' ? warning : undefined }
   }
+  console.error('[plaid] link reply lost or unreadable', ctx.mode, result.outcome === 'unknown' ? result.cause : result.body)
+  return { outcome: 'unknown' }
 }

@@ -23,6 +23,11 @@ function useMounted() {
   )
 }
 
+// What went wrong, and whether it is known to have. A reply that was lost, timed out or could not
+// be read may have come after the bank was linked, so its heading does not say it failed (#165): a
+// person told that would link again, which spends another of the ten connections.
+type Problem = { message: string; confirmed: boolean }
+
 // Where an OAuth bank (Wells Fargo, Chase, BofA…) sends the user back to. Re-initialize Link with
 // the SAME token we saved before redirecting, plus receivedRedirectUri, and Link resumes and fires
 // onSuccess here.
@@ -35,13 +40,17 @@ export default function PlaidOAuthPage() {
   const router = useRouter()
   const mounted = useMounted()
   const [token] = useState<string | null>(() => loadPendingLink()?.token ?? null)
-  const [error, setError] = useState<string | null>(null)
+  const [problem, setProblem] = useState<Problem | null>(null)
 
   const onSuccess = useCallback(
     async (public_token: string, metadata: { institution?: { name?: string } | null }) => {
       const result = await completePendingLink(public_token, metadata)
-      if (!result.ok) {
-        setError(result.error)
+      if (result.outcome === 'failed') {
+        setProblem({ message: result.error, confirmed: true })
+        return
+      }
+      if (result.outcome === 'unknown') {
+        setProblem({ message: 'Your bank may be connected already.', confirmed: false })
         return
       }
       // Carry a "connected but still importing" note across the redirect so it isn't lost — this is
@@ -57,7 +66,7 @@ export default function PlaidOAuthPage() {
 
   const onExit = useCallback((err: { display_message?: string | null } | null) => {
     clearPendingLink()
-    setError(err?.display_message ?? "That didn't finish.")
+    setProblem({ message: err?.display_message ?? "That didn't finish.", confirmed: true })
   }, [])
 
   const { open, ready } = usePlaidLink({
@@ -85,13 +94,15 @@ export default function PlaidOAuthPage() {
   // No saved context: an expired attempt, a different browser, or a private window. Never leave
   // the user on a spinner that cannot resolve — the bank connection may already exist at Plaid,
   // and a spinner is exactly what makes someone give up and link a second time.
-  if (!token || error) {
+  if (!token || problem) {
     return (
       <div className="grid min-h-screen place-items-center bg-canvas px-4">
         <div className="max-w-sm space-y-3 text-center">
-          <h1 className="text-lg font-semibold text-ink">We couldn&apos;t finish that connection</h1>
+          <h1 className="text-lg font-semibold text-ink">
+            {problem?.confirmed === false ? "We couldn't confirm that connection" : "We couldn't finish that connection"}
+          </h1>
           <p className="text-sm text-muted">
-            {error ?? 'That attempt expired, or it was started in a different browser.'}
+            {problem?.message ?? 'That attempt expired, or it was started in a different browser.'}
           </p>
           <p className="text-sm text-muted">
             Check Settings before trying again — if the bank is listed there, it worked. Every fresh

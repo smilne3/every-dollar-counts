@@ -40,6 +40,7 @@ vi.mock('@/lib/app-env', async (importOriginal) => ({
 
 import { AuthRetryableFetchError, type AuthError } from '@supabase/supabase-js'
 import { POST, maxDuration } from '@/app/api/plaid/exchange-public-token/route'
+import { EXCHANGE_TIMEOUT_MS } from '@/components/plaid-link-context'
 
 type Row = Record<string, unknown>
 type DbError = { code?: string; message: string } | null
@@ -109,6 +110,12 @@ afterEach(() => vi.restoreAllMocks())
 // pinned in code, where a dashboard default cannot move it (#165).
 it('pins its time limit at 300 seconds', () => {
   expect(maxDuration).toBe(300)
+})
+
+// When the browser gives up, the exchange must have finished or been stopped, so the browser waits
+// longer, with a minute for the request to reach the route (components/plaid-link-context.ts).
+it('is outlasted by the browser’s wait for it, by at least a minute', () => {
+  expect(EXCHANGE_TIMEOUT_MS - maxDuration * 1000).toBeGreaterThanOrEqual(60_000)
 })
 
 describe('POST /api/plaid/exchange-public-token: before the exchange', () => {

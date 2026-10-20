@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup, fireEvent, act } from '@testing-library/react'
 import { ReconnectButton } from '@/components/ReconnectButton'
+import { savePendingLink } from '@/components/plaid-link-context'
 import { SAVE_TIMEOUT_MS } from '@/lib/save-response'
 import {
   answering,
@@ -97,5 +98,74 @@ describe('ReconnectButton: starting a reconnection', () => {
     })
     expect(screen.getByText(NOT_STARTED)).toBeTruthy()
     expect(plaid.open).not.toHaveBeenCalled()
+  })
+})
+
+// Link fires onSuccess once update mode has fixed the login at Plaid. The reconnect route then
+// records it; whether it did decides what the bank's row should say.
+describe('ReconnectButton: finishing a reconnection', () => {
+  const MAY_NOT_HAVE_FINISHED = 'The reconnect may not have finished. Showing the latest.'
+  const errorLine = () => document.querySelector('span.text-coral')?.textContent ?? null
+  const reconnectButton = () => screen.getByRole('button', { name: /Reconnect/ }) as HTMLButtonElement
+
+  // Renders, keeps what start() would before Link opens, and returns what Link does on success.
+  function fixedAtPlaid() {
+    render(<ReconnectButton itemId="item-1" />)
+    savePendingLink({ token: 'link-sandbox-update', mode: 'update', itemId: 'item-1' })
+    return () => plaid.config!.onSuccess()
+  }
+
+  it('reloads the list once the reconnect is recorded', async () => {
+    const fetchMock = answering(() => replyWith({ ok: true }))
+    vi.stubGlobal('fetch', fetchMock)
+    await act(fixedAtPlaid())
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/plaid/reconnect')
+    expect(errorLine()).toBeNull()
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(reconnectButton().disabled).toBe(false)
+  })
+
+  it.each([
+    [
+      "the route's refusal",
+      () => refused(500, "Couldn't finish reconnecting that bank. Please try again."),
+      "Couldn't finish reconnecting that bank. Please try again.",
+    ],
+    ['a redirect to the login page', redirectedToLogin, 'Your session ended. Sign in again.'],
+  ])('after %s, says why and does not reload', async (_, reply, words) => {
+    vi.stubGlobal('fetch', answering(reply))
+    await act(fixedAtPlaid())
+    expect(errorLine()).toBe(words)
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  // The route may have recorded it: the reload shows whether the bank still needs reconnecting.
+  it.each([
+    ['a gateway error page', () => answering(badGateway)],
+    ['a request that fails in flight', () => offline()],
+  ])('after %s, says it may not have finished and reloads', async (_, fetchMock) => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.stubGlobal('fetch', fetchMock())
+    await act(fixedAtPlaid())
+    expect(errorLine()).toBe(MAY_NOT_HAVE_FINISHED)
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it('gives up on a reconnect that never answers once SAVE_TIMEOUT_MS has passed', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    useFakeSaveClock()
+    vi.stubGlobal('fetch', neverSettles())
+    const onSuccess = fixedAtPlaid()
+    act(() => void onSuccess())
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SAVE_TIMEOUT_MS - 1)
+    })
+    expect(reconnectButton().textContent).toBe('Reconnecting…')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1)
+    })
+    expect(errorLine()).toBe(MAY_NOT_HAVE_FINISHED)
+    expect(reconnectButton().disabled).toBe(false)
+    expect(refresh).toHaveBeenCalledTimes(1)
   })
 })

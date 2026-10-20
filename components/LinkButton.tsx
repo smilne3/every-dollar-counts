@@ -9,6 +9,7 @@ import {
   savePendingLink,
   clearPendingLink,
   completePendingLink,
+  type CompleteResult,
 } from '@/components/plaid-link-context'
 import { useIsStandalone } from '@/lib/useIsStandalone'
 import { SAVE_TIMEOUT_MS, sendRequest } from '@/lib/save-response'
@@ -28,6 +29,11 @@ import { SAVE_TIMEOUT_MS, sendRequest } from '@/lib/save-response'
 // drift away from the message it describes.
 type LinkError = { message: string; slotAtRisk: boolean }
 
+// For an exchange whose reply was lost, timed out or could not be read (#165). The bank may well be
+// connected, so saying it failed would invite a second link: a duplicate that spends another of the
+// ten connections (#51). The slot warning beside it says to check the list first.
+const MAY_HAVE_CONNECTED = 'That bank may have connected. Showing the latest.'
+
 export function LinkButton() {
   const router = useRouter()
   // Link keeps the pending connection in localStorage (plaid-link-context). The installed iOS app
@@ -42,17 +48,25 @@ export function LinkButton() {
   const onSuccess = useCallback(
     async (public_token: string, metadata: { institution?: { name?: string } | null }) => {
       setBusy(true)
-      const result = await completePendingLink(public_token, metadata)
-      setBusy(false)
-      setToken(null)
-      if (!result.ok) {
+      let result: CompleteResult
+      try {
+        result = await completePendingLink(public_token, metadata)
+      } finally {
+        setBusy(false)
+        setToken(null)
+      }
+      if (result.outcome === 'failed') {
         // Loud on purpose: the Plaid connection already exists at this point, so a silent failure
         // invites a retry that spends another unrefundable slot.
         setError({ message: result.error, slotAtRisk: true })
         return
       }
-      setError(null)
-      setNotice(result.warning ?? null)
+      if (result.outcome === 'unknown') {
+        setError({ message: MAY_HAVE_CONNECTED, slotAtRisk: true })
+      } else {
+        setError(null)
+        setNotice(result.warning ?? null)
+      }
       router.refresh()
     },
     [router]
