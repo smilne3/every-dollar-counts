@@ -16,6 +16,9 @@ function limitsText(categoryNames: string[], limits: Record<string, number>) {
   return o
 }
 
+// The same limit however it is written: '' and '0' are both no limit, '150.50' and '150.5' one amount.
+const sameLimit = (a: string | undefined, b: string | undefined) => Number(a || 0) === Number(b || 0)
+
 export function BudgetEditor({
   categoryNames,
   initialLimits,
@@ -26,29 +29,48 @@ export function BudgetEditor({
   spend: Record<string, number>
 }) {
   const router = useRouter()
-  const serverLimits = limitsText(categoryNames, initialLimits)
-  const [limits, setLimits] = useState(serverLimits)
-  // Follow the server (#162). When a reload brings different limits, after a save or after one
-  // that may not have saved, show them: seeded once, the editor kept showing what was typed
-  // whatever the server held. React's documented way to adjust state when a prop changes, as in
-  // CategoryPicker. Null forgets what was last shown, so the next render shows the server's limits.
-  const serverKey = JSON.stringify(serverLimits)
-  const [seen, setSeen] = useState<string | null>(serverKey)
-  if (seen !== serverKey) {
-    setSeen(serverKey)
-    setLimits(serverLimits)
-  }
+  const [limits, setLimits] = useState(() => limitsText(categoryNames, initialLimits))
+  // Each field's base: what it was last filled with from the server, or last sent. A field that
+  // still equals its base holds nothing typed since; one that does not holds typing no reload may
+  // overwrite.
+  const [base, setBase] = useState(limits)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Follow the server (#162): each reload's limits refill the fields nobody has typed into since,
+  // and leave the rest. Compared by identity, not content, because a reload that brings the same
+  // limits back, after a save that did not land, must still refill what was sent but not stored.
+  // React's documented way to adjust state when a prop changes.
+  const [shown, setShown] = useState(initialLimits)
+  if (shown !== initialLimits) {
+    setShown(initialLimits)
+    const server = limitsText(categoryNames, initialLimits)
+    const nextLimits = { ...limits }
+    const nextBase = { ...base }
+    let differs = false
+    for (const c of categoryNames) {
+      if (limits[c] !== base[c]) continue
+      if (!sameLimit(limits[c], server[c])) differs = true
+      nextLimits[c] = server[c]
+      nextBase[c] = server[c]
+    }
+    setLimits(nextLimits)
+    setBase(nextBase)
+    // "Saved." only ever sits beside what was sent, so not beside other limits the reload brought.
+    if (differs) setSaved(false)
+  }
 
   async function save() {
-    setSaving(true)
     setSaved(false)
     setError(null)
+    setSaving(true)
+    // What is sent becomes each field's base, so the reload refills it unless it is edited after.
+    // The inputs are disabled while saving, so what is sent is what stays on screen.
+    const sent = { ...limits }
+    setBase(sent)
     let reload = false
     try {
-      const items = categoryNames.map((c) => ({ category: c, monthly_limit: Number(limits[c] || 0) }))
+      const items = categoryNames.map((c) => ({ category: c, monthly_limit: Number(sent[c] || 0) }))
       // The shared rule (lib/save-response.ts): only the route's own { ok: true } is a save.
       const result = await sendSave('/api/budgets', {
         method: 'POST',
@@ -63,11 +85,12 @@ export function BudgetEditor({
         // trying again is one tap.
         setError(result.error)
       } else {
-        // It may have saved, so the typed limits must not stand as if they were the server's. Go
-        // back to the server's limits; the reload brings the latest.
+        // It may have saved, and nothing is reset: with no connection the reload may never come,
+        // and the old limits back on screen would be sent by the next Save, undoing a save that
+        // may have landed. Saving again is safe, since a save sets every limit and adds nothing.
+        // The reload, when it comes, refills every field not edited since.
         console.error('[BudgetEditor] save failed', result.cause)
         setError(MAY_NOT_HAVE_SAVED)
-        setSeen(null)
         reload = true
       }
     } finally {
@@ -113,7 +136,9 @@ export function BudgetEditor({
                 step="1"
                 placeholder="No limit"
                 aria-label={`${c} monthly budget limit`}
-                value={limits[c]}
+                value={limits[c] ?? ''}
+                // Fixed while a save is in flight, so "Saved." sits beside exactly what was sent.
+                disabled={saving}
                 onChange={(e) => {
                   setLimits({ ...limits, [c]: e.target.value })
                   // "Saved." beside a limit typed since would be the #162 lie again.

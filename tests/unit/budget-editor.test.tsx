@@ -141,27 +141,61 @@ describe('BudgetEditor saves', () => {
     expect(button().disabled).toBe(false)
   })
 
-  // It may have saved, so the typed limits are not shown as if they were the server's. The editor
-  // goes back to the limits the server last sent, and the reload brings the latest.
+  // It may have saved, so nothing is reset: with no connection the reload may never come, and the
+  // server's last limits put back would sit under "Showing the latest." while Save sent them again,
+  // undoing a save that may have landed. Saving again is safe, since a save sets every limit and
+  // adds nothing. The reload, when it comes, refills the limits nobody has touched since.
   it.each([
     ['a gateway error page', () => answering(badGateway)],
     ['a request that fails in flight', () => offline()],
-  ])('after %s, says it may not have saved, shows the server\'s limits and reloads', async (_, fetchMock) => {
+  ])('after %s, says it may not have saved, keeps what was typed and reloads', async (_, fetchMock) => {
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.stubGlobal('fetch', fetchMock())
     render(<BudgetEditor {...props} />)
     editAndSave()
     expect((await screen.findByRole('alert')).textContent).toBe('It may not have saved. Showing the latest.')
     expect(screen.queryByText('Saved.')).toBeNull()
-    expect(limit('Groceries').value).toBe('400')
-    expect(limit('Dining').value).toBe('150')
+    expect(limit('Groceries').value).toBe('500')
+    expect(limit('Dining').value).toBe('')
     expect(refresh).toHaveBeenCalledTimes(1)
     expect(button().disabled).toBe(false)
     expect(logged).toHaveBeenCalledWith('[BudgetEditor] save failed', expect.anything())
   })
 
+  // Whether or not it landed, the reload is the latest, and nothing was typed since the save.
+  it.each([
+    ["it did not land, and the server's limits come back unchanged", { Groceries: 400, Dining: 150 }, '400', '150'],
+    ['it landed', { Groceries: 500 }, '500', ''],
+  ])('after an unknown outcome, the reload shows the latest when %s', async (_, latest, groceries, dining) => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.stubGlobal('fetch', answering(badGateway))
+    const { rerender } = render(<BudgetEditor {...props} />)
+    editAndSave()
+    await screen.findByRole('alert')
+    rerender(<BudgetEditor {...props} initialLimits={latest} />)
+    expect(limit('Groceries').value).toBe(groceries)
+    expect(limit('Dining').value).toBe(dining)
+  })
+
+  it('with no reload after an unknown outcome, saving again sends what was typed', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const fetchMock = vi.fn().mockRejectedValueOnce(new TypeError('Failed to fetch')).mockResolvedValueOnce(saved())
+    vi.stubGlobal('fetch', fetchMock)
+    render(<BudgetEditor {...props} />)
+    editAndSave()
+    await screen.findByRole('alert')
+    fireEvent.click(button())
+    expect(await screen.findByText('Saved.')).toBeTruthy()
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body as string)).toEqual({
+      items: [
+        { category: 'Groceries', monthly_limit: 500 },
+        { category: 'Dining', monthly_limit: 0 },
+      ],
+    })
+  })
+
   // #162 (and #103): on a weak signal the button froze on "Saving…" until a reload.
-  it('gives up on a request that never settles: says so, shows the server\'s limits, reloads and re-enables', async () => {
+  it('gives up on a request that never settles: says so, keeps what was typed, reloads and re-enables', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     useFakeSaveClock()
     vi.stubGlobal('fetch', neverSettles())
@@ -175,7 +209,7 @@ describe('BudgetEditor saves', () => {
     expect(screen.getByRole('alert').textContent).toBe('It may not have saved. Showing the latest.')
     expect(button().textContent).toBe('Save budgets')
     expect(button().disabled).toBe(false)
-    expect(limit('Groceries').value).toBe('400')
+    expect(limit('Groceries').value).toBe('500')
     expect(refresh).toHaveBeenCalledTimes(1)
   })
 
@@ -186,6 +220,78 @@ describe('BudgetEditor saves', () => {
     rerender(<BudgetEditor {...props} initialLimits={{ Groceries: 500 }} />)
     expect(limit('Groceries').value).toBe('500')
     expect(limit('Dining').value).toBe('')
+  })
+
+  // A limit changed mid-save was not what the request sent, so "Saved." sat beside a number the
+  // server never got, and the reload then put the sent one back.
+  it('disables every limit while a save is in flight, and re-enables them after', async () => {
+    let settle!: (res: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => (settle = resolve))))
+    render(<BudgetEditor {...props} />)
+    editAndSave()
+    expect(limit('Groceries').disabled).toBe(true)
+    expect(limit('Dining').disabled).toBe(true)
+    settle(saved())
+    await screen.findByText('Saved.')
+    expect(limit('Groceries').disabled).toBe(false)
+    expect(limit('Dining').disabled).toBe(false)
+  })
+
+  // Refilling every field wiped a limit edited after "Saved." but before the reload arrived.
+  it('keeps a limit edited after the save when the reload arrives, and refills the rest', async () => {
+    vi.stubGlobal('fetch', answering(saved))
+    const { rerender } = render(<BudgetEditor {...props} />)
+    fireEvent.change(limit('Groceries'), { target: { value: '500.50' } })
+    fireEvent.click(button())
+    await screen.findByText('Saved.')
+    fireEvent.change(limit('Dining'), { target: { value: '175' } })
+    // The reload brings what was saved, as the server stores it.
+    rerender(<BudgetEditor {...props} initialLimits={{ Groceries: 500.5, Dining: 150 }} />)
+    expect(limit('Groceries').value).toBe('500.5')
+    expect(limit('Dining').value).toBe('175')
+  })
+
+  it("refills only the limits nobody has typed into when the server's limits change", () => {
+    const { rerender } = render(<BudgetEditor {...props} />)
+    fireEvent.change(limit('Groceries'), { target: { value: '500' } })
+    // Dining changed on the other phone: 150 to 175.
+    rerender(<BudgetEditor {...props} initialLimits={{ Groceries: 400, Dining: 175 }} />)
+    expect(limit('Groceries').value).toBe('500')
+    expect(limit('Dining').value).toBe('175')
+  })
+
+  // "Saved." only ever sits beside what was sent. The server writes a limit its own way (500.50 as
+  // 500.5, a 0 as no limit), which is still what was sent.
+  it('keeps Saved. when the reload brings what was saved, and drops it when the reload brings something else', async () => {
+    vi.stubGlobal('fetch', answering(saved))
+    const { rerender } = render(<BudgetEditor {...props} />)
+    fireEvent.change(limit('Groceries'), { target: { value: '500.50' } })
+    fireEvent.change(limit('Dining'), { target: { value: '0' } })
+    fireEvent.click(button())
+    await screen.findByText('Saved.')
+    rerender(<BudgetEditor {...props} initialLimits={{ Groceries: 500.5 }} />)
+    expect(limit('Groceries').value).toBe('500.5')
+    expect(limit('Dining').value).toBe('')
+    expect(screen.getByText('Saved.')).toBeTruthy()
+    // The other phone saved over it.
+    rerender(<BudgetEditor {...props} initialLimits={{ Groceries: 450 }} />)
+    expect(limit('Groceries').value).toBe('450')
+    expect(screen.queryByText('Saved.')).toBeNull()
+  })
+
+  // Deleting setSaved(false) at the start of a save passed every test, and a second Save with
+  // nothing edited then showed "Saved." beside its own error.
+  it('drops Saved. when the next save, with nothing edited, fails', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(saved()).mockResolvedValueOnce(refused(500, 'That could not be saved. Please try again.'))
+    )
+    render(<BudgetEditor {...props} />)
+    editAndSave()
+    await screen.findByText('Saved.')
+    fireEvent.click(button())
+    expect((await screen.findByRole('alert')).textContent).toBe('That could not be saved. Please try again.')
+    expect(screen.queryByText('Saved.')).toBeNull()
   })
 
   it('clears an earlier error once a save succeeds', async () => {
