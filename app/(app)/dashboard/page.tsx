@@ -23,6 +23,7 @@ import {
   sumManualAssets,
 } from '@/lib/dashboard'
 import { listItemsForHousehold } from '@/lib/plaid-items'
+import { balancesPending } from '@/lib/bank-state'
 import { listManualAssets } from '@/lib/manual-assets'
 import { budgetedSpend, spendByCategory, monthKey } from '@/lib/budget'
 import { buildSpendContext } from '@/lib/spend-context'
@@ -82,6 +83,27 @@ export default async function DashboardPage({
   const dateStr = longDate(today)
 
   if (accounts.length === 0) {
+    // Banks with no accounts yet are not "no banks" (#164). A bank whose first balance pull failed
+    // is kept, with a note to press Refresh, and Refresh pulls its balances: the sync route stores
+    // accounts for every bank it does not skip. Connect here would invite linking the same bank
+    // again, which spends one of ten lifetime connections (#51).
+    if (items.length > 0) {
+      return (
+        <div className="space-y-6">
+          <NotSyncingBanner items={items} />
+          <PageHeader title={greeting(hourIn(tz))} subtitle={dateStr} />
+          <Card className="p-8 text-center">
+            <h2 className="text-lg font-semibold text-ink">Your balances are on their way</h2>
+            <p className="mx-auto mt-1 max-w-sm text-sm text-muted">
+              {balancesPending(items)} Press Refresh to fetch them.
+            </p>
+            <div className="mt-5 flex justify-center">
+              <RefreshButton />
+            </div>
+          </Card>
+        </div>
+      )
+    }
     return (
       <div className="space-y-6">
         <PageHeader title={greeting(hourIn(tz))} subtitle={dateStr} />

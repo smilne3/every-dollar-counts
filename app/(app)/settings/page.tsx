@@ -2,7 +2,8 @@ import { createClient } from '@/lib/supabase/server'
 import { InvitePartnerForm } from '@/components/InvitePartnerForm'
 import { LinkButton } from '@/components/LinkButton'
 import { BankList } from '@/components/BankList'
-import { listItemsForHousehold } from '@/lib/plaid-items'
+import { listItemsForHousehold, type ItemSummary } from '@/lib/plaid-items'
+import { balancesPending } from '@/lib/bank-state'
 import { countSlotsUsed, LIFETIME_SLOTS } from '@/lib/plaid-slots'
 import { HomeValueCard } from '@/components/HomeValueCard'
 import { TimezoneCard } from '@/components/TimezoneCard'
@@ -50,6 +51,16 @@ async function countAccounts(supabase: Supabase): Promise<number> {
   // No count and no error is not "no accounts" (#46).
   if (count == null) throw new Error('could not count accounts: read returned no count and no error')
   return count
+}
+
+// The Banks card's first line, from the account count and the bank list. A bank can be connected
+// before its balances arrive, and has no accounts until they do (#164), so a count of zero is not
+// "no banks": when the list has banks, the line comes from it. With the list unreadable, a zero
+// count says nothing about banks either, so there is no line; the card says the list didn't load.
+function banksLine(accountCount: number, items: ItemSummary[] | null): string | null {
+  if (accountCount) return `${accountCount} account(s) connected.`
+  if (!items) return null
+  return items.length ? balancesPending(items) : 'No banks connected yet.'
 }
 
 // Everything the Categories and Category rules cards need. Throws if any read fails; the page
@@ -129,6 +140,7 @@ export default async function SettingsPage() {
   const slotsUsed = household ? await countSlotsUsed(household.id) : null
   const manualAssets = household ? await readOrNull('the home value', () => listManualAssets(household.id)) : []
   const home = manualAssets?.find((a) => a.name === 'Home') ?? null
+  const firstLine = accountCount === null ? null : banksLine(accountCount, items)
   // Four reads (see loadCategorySettings); if any fails, the Categories and Category rules cards
   // both say so.
   const categorySettings = await readOrNull('categories and rules', () => loadCategorySettings(supabase))
@@ -155,13 +167,9 @@ export default async function SettingsPage() {
 
       <Card className="p-5 space-y-3">
         <h2 className="text-base font-semibold text-ink">Banks</h2>
-        {accountCount === null ? (
-          unavailable("Couldn't check your accounts.")
-        ) : (
-          <p className="text-sm text-muted">
-            {accountCount ? `${accountCount} account(s) connected.` : 'No banks connected yet.'}
-          </p>
-        )}
+        {accountCount === null
+          ? unavailable("Couldn't check your accounts.")
+          : firstLine && <p className="text-sm text-muted">{firstLine}</p>}
         {/* With the list unreadable, Connect a bank would invite a relink of a bank that is still
             connected, which spends one of ten lifetime connections (#51), and its own warning
             points at "the list above". So it waits for the list. */}

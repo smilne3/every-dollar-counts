@@ -117,6 +117,8 @@ import DashboardPage from '@/app/(app)/dashboard/page'
 import BreakdownPage from '@/app/(app)/breakdown/[metric]/page'
 import { BreakdownList } from '@/components/BreakdownList'
 import { NotSyncingBanner } from '@/components/NotSyncingBanner'
+import { RefreshButton } from '@/components/RefreshButton'
+import { LinkButton } from '@/components/LinkButton'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { moneyWhole } from '@/lib/format'
 import { catalogFingerprint } from '@/lib/category-rules'
@@ -259,6 +261,84 @@ describe('Dashboard banks (#135)', () => {
     const order = blocks(tree)
     expect(textOf(order[0]).trim()).toBe('Bank connected.')
     expect(order[1].type).toBe(NotSyncingBanner)
+  })
+})
+
+// Whether `type` is rendered anywhere in the tree the page returned.
+function renders(node: unknown, type: unknown): boolean {
+  if (node == null || typeof node !== 'object') return false
+  if (Array.isArray(node)) return node.some((n) => renders(n, type))
+  const el = node as { type?: unknown; props?: { children?: unknown } }
+  return el.type === type || (el.props ? renders(el.props.children, type) : false)
+}
+
+// #164: the exchange route keeps a bank whose first balance pull failed, and says to press Refresh.
+// Until the balances arrive it has no accounts. Read as "no bank", the page offered Connect, which
+// would link the same bank again and spend one of ten lifetime connections (#51).
+describe('Dashboard before a bank\'s balances arrive (#164)', () => {
+  beforeEach(() => {
+    results.accounts = { data: [], error: null }
+  })
+
+  it('says the balances are on their way, and offers Refresh instead of Connect', async () => {
+    results.plaid_items = { data: [storedItem()], error: null }
+    const tree = await render()
+    const text = textOf(tree).replace(/\s+/g, ' ')
+    expect(text).toContain('Your balances are on their way')
+    expect(text).toContain("Capital One is connected, but its balances haven't arrived yet. Press Refresh to fetch them.")
+    expect(text).not.toContain('Connect your first account')
+    expect(renders(tree, RefreshButton)).toBe(true)
+    expect(renders(tree, LinkButton)).toBe(false)
+  })
+
+  it('counts several banks whose balances have not arrived', async () => {
+    results.plaid_items = { data: [storedItem(), storedItem({ id: 'item-2', institution_name: 'Amex', created_at: '2026-07-15T09:00:00Z' })], error: null }
+    expect(textOf(await render()).replace(/\s+/g, ' ')).toContain(
+      "2 banks are connected, but their balances haven't arrived yet."
+    )
+  })
+
+  it('says "Your bank" when the bank has no name', async () => {
+    results.plaid_items = { data: [storedItem({ institution_name: null })], error: null }
+    expect(textOf(await render()).replace(/\s+/g, ' ')).toContain(
+      "Your bank is connected, but its balances haven't arrived yet."
+    )
+  })
+
+  // Refresh skips a bank whose login broke, so the banner's "reconnect in Settings" has to be there
+  // too, first, as it is above the figures.
+  it("warns above the header when that bank isn't syncing either", async () => {
+    results.plaid_items = { data: [storedItem({ status: 'needs_reconnect' })], error: null }
+    const tree = await render()
+    expect(bannerText(tree)).toBe(
+      "Capital One isn't syncing — reconnect in Settings to resume. These figures may be out of date."
+    )
+    const order = blocks(tree).map((b) => b.type)
+    expect(order.indexOf(NotSyncingBanner)).toBe(0)
+    expect(order.indexOf(PageHeader)).toBe(1)
+  })
+
+  it('still offers Connect to a household with no banks at all', async () => {
+    const tree = await render()
+    expect(textOf(tree)).toContain('Connect your first account')
+    expect(renders(tree, LinkButton)).toBe(true)
+    expect(renders(tree, RefreshButton)).toBe(false)
+  })
+
+  // Another household's bank, or this household's from the other Plaid environment, is not this
+  // household's bank waiting for balances.
+  it("still offers Connect when the only banks are another household's or the other environment's", async () => {
+    results.plaid_items = { data: FOREIGN_ITEMS, error: null }
+    const tree = await render()
+    expect(textOf(tree)).toContain('Connect your first account')
+    expect(renders(tree, LinkButton)).toBe(true)
+  })
+
+  it('greets by the household\'s hour here too', async () => {
+    results.plaid_items = { data: [storedItem()], error: null }
+    const text = textOf(await render())
+    expect(text).toContain('Good evening')
+    expect(text).toContain('Wednesday, September 2')
   })
 })
 
