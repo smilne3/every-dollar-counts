@@ -98,3 +98,49 @@ describe('Plaid OAuth return page', () => {
     expect(router.replace).not.toHaveBeenCalled()
   })
 })
+
+// An OAuth bank's Reconnect returns here too: create-link-token sends the redirect URI in update mode.
+// The bank is listed either way, and reconnecting again is free, so the new-link words would mislead:
+// "if the bank is listed there, it worked" always reads as success, and the slot warning warns off a
+// retry that costs nothing.
+describe('Plaid OAuth return page, back from a Reconnect', () => {
+  const CHECK_RECONNECT = 'Check Settings — if the bank no longer says “Connection lost”, it worked. Reconnecting again is free.'
+  const SLOT_WARNING = /ten bank connections/
+
+  beforeEach(() => {
+    savePendingLink({ token: 'link-sandbox-update', mode: 'update', itemId: 'item-1' })
+  })
+
+  it('goes to the dashboard once the reconnect is recorded, carrying its warning', async () => {
+    const warning = 'Reconnected. New transactions have not arrived yet — press Refresh in a moment.'
+    const fetchMock = answering(() => replyWith({ ok: true, warning }))
+    vi.stubGlobal('fetch', fetchMock)
+    await back()
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/plaid/reconnect')
+    expect(router.replace).toHaveBeenCalledWith(`/dashboard?notice=${encodeURIComponent(warning)}`)
+  })
+
+  it("after the route's refusal, says the reconnect could not finish, with no slot warning", async () => {
+    vi.stubGlobal('fetch', answering(() => refused(500, "Couldn't finish reconnecting that bank. Please try again.")))
+    await back()
+    expect(heading()).toBe("We couldn't finish the reconnect")
+    expect(screen.getByText("Couldn't finish reconnecting that bank. Please try again.")).toBeTruthy()
+    expect(screen.getByText(CHECK_RECONNECT)).toBeTruthy()
+    expect(screen.queryByText(SLOT_WARNING)).toBeNull()
+    expect(router.replace).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['a gateway error page', () => answering(badGateway)],
+    ['a request that fails in flight', () => offline()],
+  ])('after %s, says the reconnect could not be confirmed, with no slot warning', async (_, fetchMock) => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.stubGlobal('fetch', fetchMock())
+    await back()
+    expect(heading()).toBe("We couldn't confirm the reconnect")
+    expect(screen.getByText('Your bank may be reconnected already.')).toBeTruthy()
+    expect(screen.getByText(CHECK_RECONNECT)).toBeTruthy()
+    expect(screen.queryByText(SLOT_WARNING)).toBeNull()
+    expect(router.replace).not.toHaveBeenCalled()
+  })
+})

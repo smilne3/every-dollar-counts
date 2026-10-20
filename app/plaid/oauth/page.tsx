@@ -28,6 +28,24 @@ function useMounted() {
 // person told that would link again, which spends another of the ten connections.
 type Problem = { message: string; confirmed: boolean }
 
+// The words for each, by what was being finished. A reconnect is not a new link: the bank is listed
+// either way, and trying again makes no Item, so it is free and gets no slot warning (#165).
+const WORDS = {
+  add: {
+    failed: "We couldn't finish that connection",
+    unconfirmed: "We couldn't confirm that connection",
+    mayHave: 'Your bank may be connected already.',
+    check:
+      'Check Settings before trying again — if the bank is listed there, it worked. Every fresh attempt uses one of your ten bank connections permanently.',
+  },
+  update: {
+    failed: "We couldn't finish the reconnect",
+    unconfirmed: "We couldn't confirm the reconnect",
+    mayHave: 'Your bank may be reconnected already.',
+    check: 'Check Settings — if the bank no longer says “Connection lost”, it worked. Reconnecting again is free.',
+  },
+}
+
 // Where an OAuth bank (Wells Fargo, Chase, BofA…) sends the user back to. Re-initialize Link with
 // the SAME token we saved before redirecting, plus receivedRedirectUri, and Link resumes and fires
 // onSuccess here.
@@ -39,7 +57,11 @@ type Problem = { message: string; confirmed: boolean }
 export default function PlaidOAuthPage() {
   const router = useRouter()
   const mounted = useMounted()
-  const [token] = useState<string | null>(() => loadPendingLink()?.token ?? null)
+  // The whole saved link, not only its token. A Reconnect returns here too, since create-link-token
+  // sends the redirect URI in update mode, and what it is told differs (#165).
+  const [pending] = useState(() => loadPendingLink())
+  const token = pending?.token ?? null
+  const mode = pending?.mode === 'update' ? 'update' : 'add'
   const [problem, setProblem] = useState<Problem | null>(null)
 
   const onSuccess = useCallback(
@@ -50,7 +72,7 @@ export default function PlaidOAuthPage() {
         return
       }
       if (result.outcome === 'unknown') {
-        setProblem({ message: 'Your bank may be connected already.', confirmed: false })
+        setProblem({ message: WORDS[mode].mayHave, confirmed: false })
         return
       }
       // Carry a "connected but still importing" note across the redirect so it isn't lost — this is
@@ -61,7 +83,7 @@ export default function PlaidOAuthPage() {
         : '/dashboard'
       router.replace(dest)
     },
-    [router]
+    [router, mode]
   )
 
   const onExit = useCallback((err: { display_message?: string | null } | null) => {
@@ -99,15 +121,12 @@ export default function PlaidOAuthPage() {
       <div className="grid min-h-screen place-items-center bg-canvas px-4">
         <div className="max-w-sm space-y-3 text-center">
           <h1 className="text-lg font-semibold text-ink">
-            {problem?.confirmed === false ? "We couldn't confirm that connection" : "We couldn't finish that connection"}
+            {problem?.confirmed === false ? WORDS[mode].unconfirmed : WORDS[mode].failed}
           </h1>
           <p className="text-sm text-muted">
             {problem?.message ?? 'That attempt expired, or it was started in a different browser.'}
           </p>
-          <p className="text-sm text-muted">
-            Check Settings before trying again — if the bank is listed there, it worked. Every fresh
-            attempt uses one of your ten bank connections permanently.
-          </p>
+          <p className="text-sm text-muted">{WORDS[mode].check}</p>
           <Link
             href="/settings"
             className="inline-block text-sm font-medium text-emerald hover:text-emerald-600"
