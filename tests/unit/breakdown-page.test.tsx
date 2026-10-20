@@ -297,6 +297,32 @@ describe('Saved breakdown: average per month (#126)', () => {
     expect(lists(tree)).toHaveLength(1)
     expect(textOf(tree)).toMatch(reason)
   })
+
+  // #135: August would be missing a broken bank's transactions from the day it broke, and still be
+  // averaged as a full month. So the average goes, and one line says why, where it would have been.
+  it("has no average while a bank isn't syncing, and says why in its place", async () => {
+    history.value = { kind: 'ready', month: '2026-05' }
+    results.plaid_items = { data: [storedItem({ status: 'needs_reconnect' }), storedItem({ id: 'item-2', institution_name: 'Amex' })], error: null }
+    const tree = await render('saved')
+    expect(lists(tree)).toHaveLength(1)
+    expect(textOf(tree)).not.toMatch(/average saved/i)
+    const avgCard = blocks(tree).at(-1)!
+    expect(textOf(avgCard)).toBe("No average while Capital One isn't syncing.")
+  })
+
+  // This month's own money in and out still show: the banner above says they may be out of date.
+  it("still shows this month's money in and out while a bank isn't syncing", async () => {
+    history.value = { kind: 'ready', month: '2026-05' }
+    results.plaid_items = { data: [storedItem({ status: 'needs_reconnect' })], error: null }
+    expect(lists(await render('saved'))[0].rows.map((r) => r.label)).toEqual(['Money in (income)', 'Money out (spending)'])
+  })
+
+  // Only this household's banks count: a broken bank elsewhere leaves the average alone.
+  it("keeps the average when only another household's bank, or one from the other environment, is broken", async () => {
+    history.value = { kind: 'ready', month: '2026-05' }
+    results.plaid_items = { data: [storedItem(), ...FOREIGN_ITEMS], error: null }
+    expect(lists(await render('saved'))).toHaveLength(2)
+  })
 })
 
 describe('Breakdown categories and rules (#28)', () => {

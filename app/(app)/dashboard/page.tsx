@@ -143,7 +143,7 @@ export default async function DashboardPage({
   // so a partial fix could have had the label and the amount naming different months.
   const thisMonthLabel = monthNameLong(months[months.length - 1].key)
   const chartFlows = flows.slice(-6)
-  const avgSaved = savedAverage(flows, months[months.length - 1].key, await historyStart())
+  const avgSaved = savedAverage(flows, months[months.length - 1].key, await historyStart(), items)
 
   const { data: budgetRows, error: budgetsError } = await supabase
     .from('budgets')
@@ -192,7 +192,8 @@ export default async function DashboardPage({
     </span>
   )
   // No average line when there is no figure (the phone row shows money in and out instead):
-  // neither layout has room to say why, and the saved breakdown it links to does. The month count keeps a one- or two-month "average" from passing for a
+  // neither layout has room to say why, and the saved breakdown it links to does. That includes a
+  // bank that isn't syncing (#135), which the banner above names. The month count keeps a one- or two-month "average" from passing for a
   // settled one. Coral by the rounded figure, so a few cents below zero does not read as a red "$0".
   const avgLine =
     avgSaved.kind === 'average' ? (

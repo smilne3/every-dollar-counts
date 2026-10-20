@@ -82,28 +82,67 @@ describe('averageSaved', () => {
   })
 })
 
-// The pages show the average, or say why there is none, from the history state (lib/history-start).
-// One function, so the tile and the drill-down cannot word it differently.
+// The pages show the average, or say why there is none, from the history state (lib/history-start)
+// and the household's banks. One function, so the tile and the drill-down cannot word it differently.
 describe('savedAverage', () => {
   const flows = [flow('2026-08', 9000, 6000), flow('2026-09', 9000, 4000), flow('2026-10', 0, 900)]
+  const bank = (institution_name: string | null, status: string) => ({ institution_name, status })
+  const syncing = [bank('Capital One', 'ok'), bank('Amex', 'ok')]
 
   it('averages once every bank\'s history is in', () => {
-    const r = savedAverage(flows, '2026-10', { kind: 'ready', month: '2026-07' })
+    const r = savedAverage(flows, '2026-10', { kind: 'ready', month: '2026-07' }, syncing)
     expect(r).toMatchObject({ kind: 'average', average: 4000 })
   })
 
   it('names the bank it is waiting for', () => {
-    const r = savedAverage(flows, '2026-10', { kind: 'pending', bank: 'Capital One' })
+    const r = savedAverage(flows, '2026-10', { kind: 'pending', bank: 'Capital One' }, syncing)
     expect(r).toEqual({ kind: 'unavailable', reason: expect.stringContaining("waiting for Capital One's") })
   })
 
   it('says when history is in but no full month has followed it yet', () => {
-    const r = savedAverage(flows, '2026-10', { kind: 'ready', month: '2026-09' })
+    const r = savedAverage(flows, '2026-10', { kind: 'ready', month: '2026-09' }, syncing)
     expect(r).toEqual({ kind: 'unavailable', reason: expect.stringMatching(/not enough history yet/i) })
   })
 
   it('says when there are no transactions at all', () => {
-    const r = savedAverage(flows, '2026-10', { kind: 'none' })
+    const r = savedAverage(flows, '2026-10', { kind: 'none' }, [])
     expect(r).toEqual({ kind: 'unavailable', reason: expect.stringMatching(/no transactions yet/i) })
+  })
+
+  // #135: a bank that stopped syncing on 20 August leaves August, and every month after it, short of
+  // that bank's transactions, and the date it broke is not stored. So no month can be trusted, and
+  // there is no figure, rather than one that counts a short month as complete.
+  describe("while a bank isn't syncing (#135)", () => {
+    const ready = { kind: 'ready', month: '2026-07' } as const
+
+    it('has no average, and names the bank', () => {
+      const r = savedAverage(flows, '2026-10', ready, [bank('Amex', 'ok'), bank('Capital One', 'needs_reconnect')])
+      expect(r).toEqual({ kind: 'unavailable', reason: "No average while Capital One isn't syncing." })
+    })
+
+    // The same definition as the banner: anything but 'ok'.
+    it.each(['action_at_bank', 'temporarily_unavailable', 'config_error', 'something_new'])(
+      'has no average while a bank is %s',
+      (status) => {
+        expect(savedAverage(flows, '2026-10', ready, [bank('Capital One', status)]).kind).toBe('unavailable')
+      }
+    )
+
+    it('counts several banks', () => {
+      const r = savedAverage(flows, '2026-10', ready, [bank('Capital One', 'needs_reconnect'), bank('Amex', 'temporarily_unavailable')])
+      expect(r).toEqual({ kind: 'unavailable', reason: "No average while 2 banks aren't syncing." })
+    })
+
+    it('says "a bank" when the bank has no name', () => {
+      const r = savedAverage(flows, '2026-10', ready, [bank(null, 'needs_reconnect')])
+      expect(r).toEqual({ kind: 'unavailable', reason: "No average while a bank isn't syncing." })
+    })
+
+    // A bank whose first sync broke is not merely late: the reader has to reconnect it, so that is
+    // the reason given.
+    it('gives the broken bank as the reason, ahead of history still arriving', () => {
+      const r = savedAverage(flows, '2026-10', { kind: 'pending', bank: 'Capital One' }, [bank('Capital One', 'needs_reconnect')])
+      expect(r).toEqual({ kind: 'unavailable', reason: "No average while Capital One isn't syncing." })
+    })
   })
 })

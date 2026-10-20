@@ -5,6 +5,7 @@ import { spendableAmount } from './reimbursements'
 import type { SpendContext } from './spend-context'
 import { MONTH_LABELS } from './format'
 import type { HistoryStart } from './history-start'
+import { notSyncing } from './bank-state'
 
 export type FlowTxn = {
   id: string
@@ -159,15 +160,31 @@ export type SavedAverage =
   | { kind: 'average'; average: number; months: { key: string; label: string; saved: number }[] }
   | { kind: 'unavailable'; reason: string }
 
-// The average, or why there is none, from the history state. The dashboard tile and the saved
-// breakdown both come through here, so they cannot disagree about the figure or word its absence
-// differently. Each reason is a different situation, and says so: a household waiting on one bank
-// is not a household with no history.
+// The average, or why there is none, from the history state and the household's banks. The
+// dashboard tile and the saved breakdown both come through here, so they cannot disagree about the
+// figure or word its absence differently. Each reason is a different situation, and says so: a
+// household waiting on one bank is not a household with no history.
+//
+// While any bank isn't syncing there is no average at all (#135). Every month since it broke is
+// missing that bank's transactions, and when it broke is not stored, so there is no telling which
+// months to leave out. That reason comes first: it is the one the reader can act on, and it is true
+// whatever the history says.
 export function savedAverage(
   flows: { key: string; label: string; spending: number; income: number }[],
   currentKey: string,
-  start: HistoryStart
+  start: HistoryStart,
+  banks: { institution_name: string | null; status: string }[]
 ): SavedAverage {
+  const behind = notSyncing(banks)
+  if (behind.length) {
+    return {
+      kind: 'unavailable',
+      reason:
+        behind.length === 1
+          ? `No average while ${behind[0].institution_name ?? 'a bank'} isn't syncing.`
+          : `No average while ${behind.length} banks aren't syncing.`,
+    }
+  }
   if (start.kind === 'none') {
     return { kind: 'unavailable', reason: 'No transactions yet, so there is no average.' }
   }

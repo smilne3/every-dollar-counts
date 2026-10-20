@@ -394,6 +394,29 @@ describe('Dashboard average savings (#126)', () => {
     expect(foot.replace(/\s+/g, ' ')).toContain('$0 in · $5,000 out')
   })
 
+  // #135: every month since a bank broke is short of its transactions, so there is no average on
+  // either layout. Neither has room to say why; the banner above names the bank, and the saved
+  // breakdown gives the reason where the average would have been.
+  it("shows no average while a bank isn't syncing, on the tile or the phone row", async () => {
+    results.categories = income
+    results.transactions = fixture()
+    history.value = { kind: 'ready', month: '2026-02' }
+    results.plaid_items = { data: [storedItem({ status: 'needs_reconnect' }), storedItem({ id: 'item-2', institution_name: 'Amex' })], error: null }
+    expect(await avgLine()).toBeUndefined()
+    const foot = textOf((await phoneRows()).rows[2].foot)
+    expect(foot).not.toContain('Avg')
+    expect(foot.replace(/\s+/g, ' ')).toContain('$0 in · $5,000 out')
+  })
+
+  // Only this household's banks count: a broken bank elsewhere leaves the average alone.
+  it("keeps the average when only another household's bank, or one from the other environment, is broken", async () => {
+    results.categories = income
+    results.transactions = fixture()
+    history.value = { kind: 'ready', month: '2026-02' }
+    results.plaid_items = { data: [storedItem(), ...FOREIGN_ITEMS], error: null }
+    expect((await avgLine())!.props.children).toBe('Avg $3,000/mo · 6 mo')
+  })
+
   // Beside a whole-dollar figure, on a narrow row, the budget note is whole dollars too.
   it('gives the Spent row its budget note in whole dollars', async () => {
     results.categories = { data: [{ id: 'c2', name: 'Food & Drink', pfc_primary: 'FOOD_AND_DRINK', sort_order: 1 }], error: null }
