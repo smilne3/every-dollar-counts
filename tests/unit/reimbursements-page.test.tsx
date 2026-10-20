@@ -63,6 +63,26 @@ function cardsOf(node: unknown): { props: CardProps }[] {
   return found
 }
 
+// The subtitle the page hands its PageHeader.
+function subtitleOf(node: unknown): unknown {
+  let found: unknown
+  const walk = (n: unknown) => {
+    if (found !== undefined || n == null || typeof n !== 'object') return
+    if (Array.isArray(n)) {
+      n.forEach(walk)
+      return
+    }
+    const el = n as { type?: unknown; props?: { subtitle?: unknown; children?: unknown } }
+    if (typeof el.type === 'function' && (el.type as { name?: string }).name === 'PageHeader') {
+      found = el.props?.subtitle
+      return
+    }
+    if (el.props?.children) walk(el.props.children)
+  }
+  walk(node)
+  return found
+}
+
 // The nearest enclosing className for every <table> and every ReimbursementCard in the tree.
 //
 // A page-wide `toContain('md:hidden')` is NOT evidence that both sections are gated: the page ships
@@ -169,6 +189,14 @@ describe('Reimbursements page', () => {
   it('fails loudly when the read fails, rather than reporting nothing outstanding', async () => {
     results.transactions = { data: null, error: { message: 'connection reset' } }
     await expect(render()).rejects.toThrow(/could not read reimbursable transactions/)
+  })
+
+  // #159: only a marked deposit covers a marked expense, and nothing said to mark one, so a
+  // repayment left unmarked kept its expense owed here for good.
+  it('says to mark the deposit when the money comes back, while something is owed', async () => {
+    expect(subtitleOf(await render())).toMatch(
+      /^You're owed .+\. These are the expenses to put on your next report\. When it's paid back, mark that deposit reimbursable on Transactions too\.$/
+    )
   })
 
   it('offers a card for the outstanding expense', async () => {

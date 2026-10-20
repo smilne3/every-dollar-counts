@@ -77,8 +77,10 @@ export default async function ReimbursementsPage() {
       <PageHeader
         title="Reimbursable"
         subtitle={
+          // Only a marked deposit covers a marked expense (lib/reimbursements.ts), and nothing else
+          // said to mark one, so a repayment left unmarked kept its expense owed here (#159).
           owed > 0
-            ? `You're owed ${money(owed)}. These are the expenses to put on your next report.`
+            ? `You're owed ${money(owed)}. These are the expenses to put on your next report. When it's paid back, mark that deposit reimbursable on Transactions too.`
             : 'Nothing outstanding. Tick a transaction as reimbursable and it will appear here.'
         }
       />

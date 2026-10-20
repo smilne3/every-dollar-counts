@@ -8,8 +8,9 @@ import { inputClass, labelClass } from './ui/styles'
 import { Button } from './ui/Button'
 import { Dialog } from './ui/Dialog'
 
-// Marking part of a charge as coming back. The tick box in the Reimbursable column handles the
-// whole-charge case; this is for "£40 of this £100", plus the note saying who owes it.
+// Marking part of a charge as coming back, or part of a deposit as a repayment. The tick box in the
+// Reimbursable column handles the whole-amount case; this is for "£40 of this £100", plus the note
+// saying who owes it.
 //
 // It opens in a dialog rather than inline. The form used to render in normal flow inside the row's
 // 80px "More" cell (#49): the question wrapped across four lines, the amount input was about one
@@ -40,6 +41,9 @@ export function ReimbursableEditor({
   const router = useRouter()
   const full = Math.abs(amount)
   const marked = Number(reimbursableAmount ?? 0)
+  // A deposit marked here is money already back, a repayment, and it covers marked expenses.
+  // "Coming back" asked about it as if it were still owed (#159).
+  const question = amount < 0 ? 'How much of this is a repayment?' : 'How much is coming back?'
 
   const [open, setOpen] = useState(false)
   const [value, setValue] = useState(String(reimbursableAmount ?? ''))
@@ -180,7 +184,7 @@ export function ReimbursableEditor({
 
         <div className="mt-4 space-y-3">
           <label className="block">
-            <span className={labelClass}>How much is coming back?</span>
+            <span className={labelClass}>{question}</span>
             <input
               ref={amountRef}
               type="number"

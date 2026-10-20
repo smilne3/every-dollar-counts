@@ -68,6 +68,20 @@ describe('ReimbursableEditor', () => {
     expect(dialog!.querySelector('input[type="text"]')).not.toBeNull()
   })
 
+  // #159: a deposit marked here is a repayment that has already arrived, and asking how much is
+  // "coming back" read as if the control were for expenses only.
+  it('asks how much of a deposit is a repayment, and how much of a charge is coming back', () => {
+    render(<ReimbursableEditor {...props} amount={-100} />)
+    openEditor()
+    expect(screen.getByLabelText('How much of this is a repayment?')).toBeTruthy()
+    expect(screen.queryByLabelText('How much is coming back?')).toBeNull()
+    cleanup()
+    render(<ReimbursableEditor {...props} />)
+    openEditor()
+    expect(screen.getByLabelText('How much is coming back?')).toBeTruthy()
+    expect(screen.queryByLabelText('How much of this is a repayment?')).toBeNull()
+  })
+
   it('names the charge it is editing', () => {
     render(<ReimbursableEditor {...props} />)
     openEditor()
