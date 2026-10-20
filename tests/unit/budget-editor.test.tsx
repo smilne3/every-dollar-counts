@@ -279,6 +279,21 @@ describe('BudgetEditor saves', () => {
     expect(screen.queryByText('Saved.')).toBeNull()
   })
 
+  // min="0" does not stop a minus sign being typed, and a limit below zero used to read as "no
+  // limit": the old one was deleted and the editor said "Saved.".
+  it('refuses a negative limit: says so under the button and sends nothing', async () => {
+    const fetchMock = answering(saved)
+    vi.stubGlobal('fetch', fetchMock)
+    render(<BudgetEditor {...props} />)
+    fireEvent.change(limit('Dining'), { target: { value: '-50' } })
+    fireEvent.click(button())
+    expect((await screen.findByRole('alert')).textContent).toBe("Limits can't be negative.")
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(screen.queryByText('Saved.')).toBeNull()
+    expect(limit('Dining').value).toBe('-50')
+    expect(button().disabled).toBe(false)
+  })
+
   // Deleting setSaved(false) at the start of a save passed every test, and a second Save with
   // nothing edited then showed "Saved." beside its own error.
   it('drops Saved. when the next save, with nothing edited, fails', async () => {

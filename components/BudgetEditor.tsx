@@ -63,6 +63,12 @@ export function BudgetEditor({
   async function save() {
     setSaved(false)
     setError(null)
+    // min="0" does not stop a minus sign being typed, and a limit below zero would otherwise go to
+    // the route, which refuses it. Said here, before anything is sent.
+    if (categoryNames.some((c) => Number(limits[c] || 0) < 0)) {
+      setError("Limits can't be negative.")
+      return
+    }
     setSaving(true)
     // What is sent becomes each field's base, so the reload refills it unless it is edited after.
     // The inputs are disabled while saving, so what is sent is what stays on screen.
