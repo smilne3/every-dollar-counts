@@ -51,3 +51,32 @@ export async function sendSave(url: string, init: RequestInit): Promise<SaveOutc
     return { outcome: 'unknown', cause }
   }
 }
+
+// For a request whose reply carries data rather than a bare save: a link token, a sync's counts, a
+// linked bank's warning (#165). The rules are sendSave's. A redirect, or an OK reply that is not
+// JSON, is the login page, so the session ended. A reply that cannot be read may have come after the
+// work was done, so it is 'unknown'. A failure is a refusal only when it is the route's own { error }
+// in words, as every refusal those routes give is; anything else came from in front of the route.
+// 'answered' hands back the route's JSON object for the caller to check. The timeout is the caller's,
+// because how long a route may run, and whether giving up early is harmless, differ by route.
+export type RequestOutcome =
+  | { outcome: 'answered'; body: Record<string, unknown> }
+  | { outcome: 'refused'; error: string; status: number }
+  | { outcome: 'unknown'; cause: unknown }
+
+// Never throws. The timeout covers reading the reply too, as sendSave's does.
+export async function sendRequest(url: string, init: RequestInit, timeoutMs: number): Promise<RequestOutcome> {
+  try {
+    const res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
+    const isJson = (res.headers.get('content-type') ?? '').includes('application/json')
+    if (res.redirected || (res.ok && !isJson)) return { outcome: 'refused', error: SESSION_ENDED, status: res.status }
+    const body: unknown = isJson ? await res.json() : null
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new Error(`unreadable ${res.status} reply`)
+    const fields = body as Record<string, unknown>
+    if (res.ok) return { outcome: 'answered', body: fields }
+    if (typeof fields.error === 'string') return { outcome: 'refused', error: fields.error, status: res.status }
+    throw new Error(`unreadable ${res.status} reply`)
+  } catch (cause) {
+    return { outcome: 'unknown', cause }
+  }
+}

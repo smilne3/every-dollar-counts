@@ -11,6 +11,10 @@ export const saved = () => json(200, { ok: true })
 // A refusal in the route's own words.
 export const refused = (status: number, error: string) => json(status, { error })
 
+// A route's own JSON answer that carries data: a link token, a sync's counts (lib/save-response.ts
+// sendRequest).
+export const replyWith = (body: unknown, status = 200) => json(status, body)
+
 // Signed out: proxy.ts redirects the request to /login, and fetch follows it to the login page's
 // HTML, which answers 200.
 export function redirectedToLogin() {

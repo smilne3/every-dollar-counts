@@ -1,6 +1,16 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { readSaveResponse, sendSave, SAVE_TIMEOUT_MS, SESSION_ENDED, SAVE_FAILED } from '@/lib/save-response'
-import { answering, badGateway, neverSettles, offline, redirectedToLogin, refused, saved, useFakeSaveClock } from './helpers/save-replies'
+import { readSaveResponse, sendRequest, sendSave, SAVE_TIMEOUT_MS, SESSION_ENDED, SAVE_FAILED } from '@/lib/save-response'
+import {
+  answering,
+  badGateway,
+  neverSettles,
+  offline,
+  redirectedToLogin,
+  refused,
+  replyWith,
+  saved,
+  useFakeSaveClock,
+} from './helpers/save-replies'
 
 // #28 spec §8.2's rule, shared by the rules card: a save counts only when the reply is OK, not
 // redirected, and JSON with ok: true.
@@ -99,6 +109,107 @@ describe('sendSave', () => {
     let result: unknown
     void sendSave('/api/budgets', { method: 'POST' }).then((r) => (result = r))
     await vi.advanceTimersByTimeAsync(SAVE_TIMEOUT_MS - 1)
+    expect(result).toBeUndefined()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(result).toEqual({ outcome: 'unknown', cause: expect.objectContaining({ name: 'TimeoutError' }) })
+  })
+})
+
+// sendSave's rules for a reply that carries data (#165): a link token, a sync's counts. #119's false
+// "Everything up to date" was a signed-out Refresh whose login page read as an empty, successful sync.
+describe('sendRequest', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it("sends the request as given, with a timeout, and hands back the route's JSON", async () => {
+    const fetchMock = answering(() => replyWith({ link_token: 'link-sandbox-1' }))
+    vi.stubGlobal('fetch', fetchMock)
+    const init = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"mode":"add"}' }
+    expect(await sendRequest('/api/plaid/create-link-token', init, 20_000)).toEqual({
+      outcome: 'answered',
+      body: { link_token: 'link-sandbox-1' },
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/plaid/create-link-token')
+    expect(fetchMock.mock.calls[0][1]).toMatchObject(init)
+    expect(fetchMock.mock.calls[0][1]?.signal).toBeInstanceOf(AbortSignal)
+  })
+
+  it("reports a refusal in the route's words, with its status", async () => {
+    vi.stubGlobal('fetch', answering(() => refused(409, 'You have used all 10 of your Plaid bank connections.')))
+    expect(await sendRequest('/api/plaid/create-link-token', { method: 'POST' }, 20_000)).toEqual({
+      outcome: 'refused',
+      error: 'You have used all 10 of your Plaid bank connections.',
+      status: 409,
+    })
+  })
+
+  // The login page answers 200, so without this a signed-out request reads as an answer.
+  it('reports a redirect to the login page as an ended session, not an answer', async () => {
+    vi.stubGlobal('fetch', answering(redirectedToLogin))
+    expect(await sendRequest('/api/plaid/sync-transactions', { method: 'POST' }, 20_000)).toEqual({
+      outcome: 'refused',
+      error: SESSION_ENDED,
+      status: 200,
+    })
+  })
+
+  // Each rule on its own, as readSaveResponse has them: a redirect is never the route's answer, even
+  // as JSON, and an OK reply that is not JSON is never the route's either.
+  it.each([
+    [
+      'a redirected reply, even one that is JSON',
+      () => {
+        const res = replyWith({ link_token: 'link-sandbox-1' })
+        Object.defineProperty(res, 'redirected', { value: true })
+        return res
+      },
+    ],
+    ['an OK reply that is a page, not JSON', () => new Response('<!doctype html>', { headers: { 'content-type': 'text/html' } })],
+  ])('reports %s as an ended session', async (_, reply) => {
+    vi.stubGlobal('fetch', answering(reply))
+    expect(await sendRequest('/api/plaid/create-link-token', { method: 'POST' }, 20_000)).toEqual({
+      outcome: 'refused',
+      error: SESSION_ENDED,
+      status: 200,
+    })
+  })
+
+  // Every refusal these routes give is { error } in words. A failure in any other shape came from in
+  // front of the route, and can arrive after the work was done.
+  it.each([
+    ['a gateway error page', badGateway],
+    ['a failure that is JSON but not the route’s words', () => replyWith({ message: 'FUNCTION_INVOCATION_TIMEOUT' }, 504)],
+    ['an OK reply whose JSON is cut off', () => new Response('{"ok":tr', { headers: { 'content-type': 'application/json' } })],
+    ['an OK reply that is JSON null', () => replyWith(null)],
+    ['an OK reply that is a JSON number', () => replyWith(42)],
+    ['an OK reply that is a JSON list', () => replyWith([1, 2])],
+  ])('reports %s as unknown, because the work may have been done', async (_, reply) => {
+    vi.stubGlobal('fetch', answering(reply))
+    const result = await sendRequest('/api/plaid/exchange-public-token', { method: 'POST' }, 20_000)
+    expect(result.outcome).toBe('unknown')
+  })
+
+  it('reports a request that fails in flight as unknown, with its cause', async () => {
+    vi.stubGlobal('fetch', offline())
+    expect(await sendRequest('/api/plaid/sync-transactions', { method: 'POST' }, 20_000)).toEqual({
+      outcome: 'unknown',
+      cause: new TypeError('Failed to fetch'),
+    })
+  })
+
+  // The caller's bound, not a save's: a Refresh or a bank link may outlast SAVE_TIMEOUT_MS.
+  it('gives up on a request that never settles at the timeout it was given, as unknown', async () => {
+    useFakeSaveClock()
+    vi.stubGlobal('fetch', neverSettles())
+    let result: unknown
+    void sendRequest('/api/plaid/sync-transactions', { method: 'POST' }, 60_000).then((r) => (result = r))
+    await vi.advanceTimersByTimeAsync(SAVE_TIMEOUT_MS)
+    expect(result).toBeUndefined()
+    await vi.advanceTimersByTimeAsync(60_000 - SAVE_TIMEOUT_MS - 1)
     expect(result).toBeUndefined()
     await vi.advanceTimersByTimeAsync(1)
     expect(result).toEqual({ outcome: 'unknown', cause: expect.objectContaining({ name: 'TimeoutError' }) })
