@@ -10,6 +10,7 @@ import {
   completePendingLink,
 } from '@/components/plaid-link-context'
 import { useIsStandalone } from '@/lib/useIsStandalone'
+import { SAVE_TIMEOUT_MS, sendRequest } from '@/lib/save-response'
 
 // Reopens Link in update mode to fix a broken login. The access token is unchanged, so on success
 // completePendingLink just clears the broken flag and resyncs. Critically, update mode does NOT
@@ -52,24 +53,25 @@ export function ReconnectButton({ itemId }: { itemId: string }) {
 
   const start = useCallback(async () => {
     setError(null)
-    let body: { link_token?: string; error?: string } = {}
-    try {
-      const res = await fetch('/api/plaid/create-link-token', {
+    // As LinkButton's start: a link token is free, so a save's timeout, and a lost reply changed
+    // nothing, since Link never opened (#165).
+    const result = await sendRequest(
+      '/api/plaid/create-link-token',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode: 'update', itemId }),
-      })
-      body = await res.json().catch(() => ({}))
-      if (!res.ok || !body.link_token) {
-        setError(body.error ?? "Couldn't start the reconnection. Please try again.")
-        return
-      }
-    } catch {
-      setError("Couldn't reach the app. Check your connection, then try again.")
+      },
+      SAVE_TIMEOUT_MS
+    )
+    const linkToken = result.outcome === 'answered' ? result.body.link_token : undefined
+    if (typeof linkToken !== 'string' || linkToken === '') {
+      if (result.outcome === 'unknown') console.error('[ReconnectButton] link token request failed', result.cause)
+      setError(result.outcome === 'refused' ? result.error : "Couldn't start the reconnection. Please try again.")
       return
     }
-    savePendingLink({ token: body.link_token, mode: 'update', itemId })
-    setToken(body.link_token)
+    savePendingLink({ token: linkToken, mode: 'update', itemId })
+    setToken(linkToken)
   }, [itemId])
 
   return (

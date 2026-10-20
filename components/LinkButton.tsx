@@ -11,6 +11,7 @@ import {
   completePendingLink,
 } from '@/components/plaid-link-context'
 import { useIsStandalone } from '@/lib/useIsStandalone'
+import { SAVE_TIMEOUT_MS, sendRequest } from '@/lib/save-response'
 
 // Two paths, because Plaid Link only lists institutions supporting EVERY requested product:
 // asking for transactions + investments at once would hide most banks AND most brokerages.
@@ -81,32 +82,31 @@ export function LinkButton() {
   const start = useCallback(async (products: string[]) => {
     setError(null)
     setNotice(null)
-    let body: { link_token?: string; error?: string } = {}
-    try {
-      const res = await fetch('/api/plaid/create-link-token', {
+    // The shared reply rules (lib/save-response.ts), and a save's timeout: a link token is free and
+    // an unused one expires, so giving up on a slow one costs nothing (#165).
+    const result = await sendRequest(
+      '/api/plaid/create-link-token',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode: 'add', products }),
-      })
-      body = await res.json().catch(() => ({}))
-      if (!res.ok || !body.link_token) {
-        // No link token means Link never opened, so no Item exists and no slot is at risk —
-        // including the environment guard's 409/500, which says "Nothing was connected."
-        setError({
-          message: body.error ?? "Couldn't start the connection. Please try again.",
-          slotAtRisk: false,
-        })
-        return
-      }
-    } catch {
+      },
+      SAVE_TIMEOUT_MS
+    )
+    const linkToken = result.outcome === 'answered' ? result.body.link_token : undefined
+    if (typeof linkToken !== 'string' || linkToken === '') {
+      // No link token means Link never opened, so no Item exists and no slot is at risk —
+      // including the environment guard's 409/500, which says "Nothing was connected." That holds
+      // for a reply that was lost too.
+      if (result.outcome === 'unknown') console.error('[LinkButton] link token request failed', result.cause)
       setError({
-        message: "Couldn't reach the app. Check your connection, then try again.",
+        message: result.outcome === 'refused' ? result.error : "Couldn't start the connection. Please try again.",
         slotAtRisk: false,
       })
       return
     }
-    savePendingLink({ token: body.link_token, mode: 'add', products })
-    setToken(body.link_token)
+    savePendingLink({ token: linkToken, mode: 'add', products })
+    setToken(linkToken)
   }, [])
 
   return (
