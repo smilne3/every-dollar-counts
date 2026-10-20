@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
-const { calls, tz, results, selects } = vi.hoisted(() => ({
+const { calls, tz, results, selects, onRead } = vi.hoisted(() => ({
   // Every `.select()` the page sends, per table, so a test can pin the suggestion embed (§7.4).
   selects: {} as Record<string, string[]>,
   calls: { gte: [] as string[], lt: [] as string[] },
   tz: { value: 'America/New_York' },
   results: {} as Record<string, { data: unknown; error: { message: string } | null }>,
+  // Run as a table's read is awaited, so a test can move the clock on during it.
+  onRead: {} as Record<string, () => void>,
 }))
 
 // A supabase query is a builder awaited at the end, so the stub returns itself for every chained
@@ -36,10 +38,12 @@ const chainFor = (table: string) => {
   // maybeSingle only. Null data and no error is its answer for no row; .single() makes no row an
   // error (PGRST116), which a stand-in answering null would hide (#172).
   chain.maybeSingle = async () => results[table] ?? { data: null, error: null }
-  chain.then = (resolve: (v: unknown) => unknown) =>
-    Promise.resolve(
+  chain.then = (resolve: (v: unknown) => unknown) => {
+    onRead[table]?.()
+    return Promise.resolve(
       afterCursor ? { data: [], error: null } : (results[table] ?? { data: [], error: null })
     ).then(resolve)
+  }
   return chain
 }
 
@@ -131,6 +135,7 @@ beforeEach(() => {
   results.memberships = { data: { household_id: 'hh-1' }, error: null }
   results.plaid_items = { data: [], error: null }
   for (const k of Object.keys(selects)) delete selects[k]
+  for (const k of Object.keys(onRead)) delete onRead[k]
   vi.unstubAllEnvs()
 })
 
@@ -275,4 +280,17 @@ describe('Budgets categories and rules (#28)', () => {
     results.category_rules = { data: null, error: { message: 'boom' } }
     await expect(BudgetsPage()).rejects.toThrow(/could not read category rules/)
   })
+})
+
+// #176: BudgetEditor refills what it sent only from a read made after its last save was written,
+// so the time it is given is taken before the limits are read. Taken after, a read that began
+// before the save and returned after it would pass as newer.
+it('tells BudgetEditor when it read the limits, timed from before the read', async () => {
+  vi.setSystemTime(new Date('2026-09-15T12:00:00Z'))
+  const before = Date.now()
+  onRead.budgets = () => vi.setSystemTime(before + 5_000)
+  results.budgets = { data: [{ category: 'Food & Drink', monthly_limit: 400 }], error: null }
+  const props = findProps(await BudgetsPage(), BudgetEditor)
+  expect(props?.initialLimits).toEqual({ 'Food & Drink': 400 })
+  expect(props?.readAt).toBe(before)
 })

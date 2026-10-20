@@ -13,6 +13,20 @@ import { currentHouseholdId, householdTimezone } from '@/lib/household'
 import { listItemsForHousehold } from '@/lib/plaid-items'
 import { readAllRows } from '@/lib/read-all'
 
+type Supabase = Awaited<ReturnType<typeof createClient>>
+
+// The household's limits, and when they were read by the server's clock, for BudgetEditor to tell
+// this read from one made before its last save was written. The time is taken before the read, so
+// it is never later than it (#176).
+async function readBudgets(supabase: Supabase) {
+  const readAt = Date.now()
+  const { data: budgets, error: budgetsError } = await supabase
+    .from('budgets')
+    .select('category, monthly_limit')
+  if (budgetsError) throw new Error(`could not read budgets: ${budgetsError.message}`)
+  return { budgets, readAt }
+}
+
 export default async function BudgetsPage() {
   const supabase = await createClient()
 
@@ -51,10 +65,7 @@ export default async function BudgetsPage() {
   // Every bar would read empty — indistinguishable from a month where nothing was spent (#46).
   if (txnsError) throw new Error(`could not read transactions: ${txnsError.message}`)
 
-  const { data: budgets, error: budgetsError } = await supabase
-    .from('budgets')
-    .select('category, monthly_limit')
-  if (budgetsError) throw new Error(`could not read budgets: ${budgetsError.message}`)
+  const { budgets, readAt } = await readBudgets(supabase)
 
   // The reimbursable map is built straight from this page's own transaction rows — see
   // buildSpendContext.
@@ -83,7 +94,7 @@ export default async function BudgetsPage() {
         </Link>
         .
       </p>
-      <BudgetEditor categoryNames={categoryNames} initialLimits={initialLimits} spend={spend} />
+      <BudgetEditor categoryNames={categoryNames} initialLimits={initialLimits} readAt={readAt} spend={spend} />
     </div>
   )
 }

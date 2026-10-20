@@ -22,10 +22,13 @@ const sameLimit = (a: string | undefined, b: string | undefined) => Number(a || 
 export function BudgetEditor({
   categoryNames,
   initialLimits,
+  readAt,
   spend,
 }: {
   categoryNames: string[]
   initialLimits: Record<string, number>
+  // When the page read initialLimits, by the server's clock (#176).
+  readAt: number
   spend: Record<string, number>
 }) {
   const router = useRouter()
@@ -35,8 +38,12 @@ export function BudgetEditor({
   // overwrite.
   const [base, setBase] = useState(limits)
   const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
+  // Whether "Saved." shows. null while a save is in flight and nothing beside it has changed; a
+  // reload that fills a limit meanwhile sets it false, so the save's "Saved." does not claim it.
+  const [saved, setSaved] = useState<boolean | null>(false)
   const [error, setError] = useState<string | null>(null)
+  // When the last save confirmed here was written, by the server's clock: 0 until one is.
+  const [savedAt, setSavedAt] = useState(0)
   // Follow the server (#162): each reload's limits refill the fields nobody has typed into since,
   // and leave the rest. Compared by identity, not content, because a reload that brings the same
   // limits back, after a save that did not land, must still refill what was sent but not stored.
@@ -44,12 +51,22 @@ export function BudgetEditor({
   const [shown, setShown] = useState(initialLimits)
   if (shown !== initialLimits) {
     setShown(initialLimits)
+    // Only a read made after a save can hold what it wrote (#176). With two quick saves, the reload
+    // asked for after the first can read the limits before the second writes them and land after
+    // the second is sent (in Next 16.4.2, while it is in flight). Refilled from it, the fields showed
+    // the first save's limits beside "Saved.", and the next Save sent them back, undoing the second.
+    // So a field holding what was sent is not refilled while its save is in flight, when the time of
+    // the write is not known yet, nor from a read made by then.
+    const current = !saving && readAt > savedAt
     const server = limitsText(categoryNames, initialLimits)
     const nextLimits = { ...limits }
     const nextBase = { ...base }
     let differs = false
     for (const c of categoryNames) {
       if (limits[c] !== base[c]) continue
+      // A field with no base was never filled or sent here (a category added on the other phone),
+      // so any read can fill it. Left blank, the next Save would clear the limit it has.
+      if (!current && Object.hasOwn(base, c)) continue
       if (!sameLimit(limits[c], server[c])) differs = true
       nextLimits[c] = server[c]
       nextBase[c] = server[c]
@@ -61,7 +78,7 @@ export function BudgetEditor({
   }
 
   async function save() {
-    setSaved(false)
+    setSaved(null)
     setError(null)
     // min="0" does not stop a minus sign being typed, and a limit below zero would otherwise go to
     // the route, which refuses it. Said here, before anything is sent.
@@ -84,7 +101,11 @@ export function BudgetEditor({
         body: JSON.stringify({ items }),
       })
       if (result.outcome === 'saved') {
-        setSaved(true)
+        // Unless a reload filled a limit while it was in flight: a category added on the other
+        // phone, which this save did not send.
+        setSaved((s) => s === null)
+        // From here on, a read made before this write carries the limits it replaced.
+        if (result.savedAt !== undefined) setSavedAt(result.savedAt)
         reload = true
       } else if (result.outcome === 'refused') {
         // Nothing was written, or the message says which part was not. What was typed stays, so
