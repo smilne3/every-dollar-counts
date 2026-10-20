@@ -51,6 +51,9 @@ const renderList = () => render(<BankList items={items} slotsUsed={6} lifetimeSl
 // The <dialog> itself, open or not: once closed it leaves the accessibility tree, and its title
 // falls back to "Disconnect this bank?".
 const confirmDialog = () => document.querySelector('dialog') as HTMLDialogElement
+// Dialog calls close() in an effect after the commit that shows the outcome, so under load that
+// commit can be seen first.
+const dialogCloses = () => vi.waitFor(() => expect(confirmDialog().open).toBe(false))
 const confirmButton = () =>
   within(screen.getByRole('dialog', { name: 'Disconnect Capital One?' })).getByRole('button', { name: 'Disconnect' }) as HTMLButtonElement
 function disconnectCapitalOne() {
@@ -70,7 +73,7 @@ describe('BankList Disconnect', () => {
     expect(url).toBe('/api/plaid/remove-item')
     expect(init?.method).toBe('POST')
     expect(JSON.parse(init?.body as string)).toEqual({ itemId: 'item-1' })
-    expect(confirmDialog().open).toBe(false)
+    await dialogCloses()
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
@@ -93,7 +96,7 @@ describe('BankList Disconnect', () => {
     renderList()
     disconnectCapitalOne()
     expect((await screen.findByRole('alert')).textContent).toBe(message)
-    expect(confirmDialog().open).toBe(false)
+    await dialogCloses()
     expect(refresh).not.toHaveBeenCalled()
   })
 
