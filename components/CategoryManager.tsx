@@ -29,6 +29,9 @@ export function CategoryManager({
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
+  // Bumped after a save whose outcome is unknown, so every row drops what was typed and shows the
+  // server's name, as "Showing the latest" says. See the rows' key below.
+  const [resets, setResets] = useState(0)
 
   // Add, rename and delete all save through here (#147). True only when the route said it saved.
   async function call(method: 'POST' | 'PATCH' | 'DELETE', body: unknown, okMsg: string): Promise<boolean> {
@@ -56,6 +59,7 @@ export function CategoryManager({
       } else {
         console.error('[CategoryManager] save failed', result.cause)
         setErr(MAY_NOT_HAVE_SAVED)
+        setResets((n) => n + 1)
         reload = true
       }
     } finally {
@@ -78,7 +82,11 @@ export function CategoryManager({
 
       {initialCategories.map((c) => (
         <CategoryRow
-          key={c.id}
+          // A row fills its field from the server's name once, when it mounts, so the key holds what
+          // must refill it: a new name from the server (renamed on the other phone, or a rename that
+          // landed) or a save whose outcome is unknown. A refusal changes neither, so what was typed
+          // stays for another try.
+          key={`${c.id}:${c.name}:${resets}`}
           cat={c}
           busy={busy}
           usage={usage[c.name] ?? NO_USAGE}

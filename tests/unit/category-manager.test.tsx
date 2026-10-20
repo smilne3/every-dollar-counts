@@ -242,14 +242,15 @@ describe('CategoryManager saves', () => {
   it('renames, says so and reloads; on a refusal keeps the typed name and says why', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(refused(400, 'That name is already a category.')).mockResolvedValueOnce(saved()))
     render(<CategoryManager {...props} />)
-    const field = screen.getByLabelText('Rename category Groceries') as HTMLInputElement
-    const save = within(field.closest('[data-category-row]') as HTMLElement).getByRole('button', { name: 'Save' })
-    fireEvent.change(field, { target: { value: 'Food' } })
-    fireEvent.click(save)
+    // Queried afresh each time: a row that remounted would leave a stale element still saying "Food".
+    const field = () => screen.getByLabelText('Rename category Groceries') as HTMLInputElement
+    const save = () => within(field().closest('[data-category-row]') as HTMLElement).getByRole('button', { name: 'Save' })
+    fireEvent.change(field(), { target: { value: 'Food' } })
+    fireEvent.click(save())
     expect((await screen.findByRole('alert')).textContent).toBe('That name is already a category.')
-    expect(field.value).toBe('Food')
+    expect(field().value).toBe('Food')
     expect(refresh).not.toHaveBeenCalled()
-    fireEvent.click(save)
+    fireEvent.click(save())
     expect(await screen.findByText('Renamed to “Food”.')).toBeTruthy()
     expect(screen.queryByRole('alert')).toBeNull()
     expect(refresh).toHaveBeenCalledTimes(1)
@@ -267,6 +268,51 @@ describe('CategoryManager saves', () => {
     fireEvent.keyDown(field, { key: 'Enter' })
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({ name: 'Pets' })
+  })
+
+  const renameField = () => screen.getByLabelText(/^Rename category /) as HTMLInputElement
+  function renameGroceriesTo(name: string) {
+    const field = screen.getByLabelText('Rename category Groceries') as HTMLInputElement
+    fireEvent.change(field, { target: { value: name } })
+    fireEvent.click(within(field.closest('[data-category-row]') as HTMLElement).getByRole('button', { name: 'Save' }))
+  }
+  const onlyGroceries = [{ id: '1', name: 'Groceries', pfc_primary: 'FOOD_AND_DRINK' }]
+
+  // Seeded once, the field kept the typed "Food" under "It may not have saved. Showing the latest."
+  // even when the reload said "Groceries", so the rename looked done.
+  it("shows the server's name again after a rename that may not have saved", async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.stubGlobal('fetch', answering(badGateway))
+    const { rerender } = render(<CategoryManager initialCategories={onlyGroceries} />)
+    renameGroceriesTo('Food')
+    expect((await screen.findByRole('alert')).textContent).toBe('It may not have saved. Showing the latest.')
+    expect(renameField().value).toBe('Groceries')
+    // The reload still says Groceries: the rename did not land.
+    rerender(<CategoryManager initialCategories={[{ ...onlyGroceries[0] }]} />)
+    expect(renameField().value).toBe('Groceries')
+  })
+
+  it('shows a name the server now has: renamed on the other phone, or a rename that landed', async () => {
+    vi.stubGlobal('fetch', answering(saved))
+    const { rerender } = render(<CategoryManager initialCategories={onlyGroceries} />)
+    renameGroceriesTo('  Food ')
+    expect(await screen.findByText('Renamed to “Food”.')).toBeTruthy()
+    rerender(<CategoryManager initialCategories={[{ ...onlyGroceries[0], name: 'Food' }]} />)
+    expect(renameField().value).toBe('Food')
+    rerender(<CategoryManager initialCategories={[{ ...onlyGroceries[0], name: 'Food & Groceries' }]} />)
+    expect(renameField().value).toBe('Food & Groceries')
+  })
+
+  // An "Added …" left beside the next save's failure would claim that save worked too.
+  it('clears an earlier success message once the next save fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(saved()).mockResolvedValueOnce(refused(400, 'That name is already a category.')))
+    render(<CategoryManager {...props} />)
+    addPets()
+    expect(await screen.findByText('Added “Pets”.')).toBeTruthy()
+    fireEvent.change(newName(), { target: { value: 'Groceries' } })
+    fireEvent.click(add())
+    expect((await screen.findByRole('alert')).textContent).toBe('That name is already a category.')
+    expect(screen.queryByText('Added “Pets”.')).toBeNull()
   })
 
   it('deletes, says so and reloads', async () => {
