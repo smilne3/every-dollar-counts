@@ -179,6 +179,41 @@ describe('GoalsList saves', () => {
       expect(addButton().disabled).toBe(false)
     })
 
+    // #177 review: Add goal with either missing did nothing at all, with nothing said.
+    it.each([
+      ['no name', '', '2000'],
+      ['a name of only spaces', '   ', '2000'],
+      ['no target', 'Vacation', ''],
+    ])('with %s, says to give the goal a name and a target under the form, and sends nothing', (_, goal, goalTarget) => {
+      const fetchMock = answering(saved)
+      vi.stubGlobal('fetch', fetchMock)
+      render(<GoalsList {...props} />)
+      fireEvent.change(goalField(), { target: { value: goal } })
+      fireEvent.change(targetField(), { target: { value: goalTarget } })
+      fireEvent.click(addButton())
+      expect(within(addCard()).getByRole('alert').textContent).toBe('Give the goal a name and a target above zero.')
+      expect(fetchMock).not.toHaveBeenCalled()
+      expect(goalField().value).toBe(goal)
+      expect(targetField().value).toBe(goalTarget)
+      expect(addButton().disabled).toBe(false)
+    })
+
+    // A target under the field's min="1" is stopped by the browser's own check before the handler
+    // runs, so the handler's check is reached by submitting the form directly.
+    it.each([
+      ['a target of zero', '0'],
+      ['a negative target', '-5'],
+    ])('with %s, says the same and sends nothing', (_, goalTarget) => {
+      const fetchMock = answering(saved)
+      vi.stubGlobal('fetch', fetchMock)
+      render(<GoalsList {...props} />)
+      fireEvent.change(goalField(), { target: { value: 'Vacation' } })
+      fireEvent.change(targetField(), { target: { value: goalTarget } })
+      fireEvent.submit(addForm())
+      expect(within(addCard()).getByRole('alert').textContent).toBe('Give the goal a name and a target above zero.')
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+
     // Nothing was written: say why under the form, and keep what was typed for another try.
     it.each(definite)('after %s, says why under the add form and keeps what was typed', async (_, fetchMock, message) => {
       vi.stubGlobal('fetch', fetchMock())

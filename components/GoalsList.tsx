@@ -18,6 +18,8 @@ type GoalFailure = { message: string; gone: string }
 
 // The list's words for a goal that a reload no longer lists, unless the route's 404 said it already.
 const GONE = 'That goal no longer exists.'
+// The route refuses an add without either in the same words.
+const NAME_AND_TARGET = 'Give the goal a name and a target above zero.'
 
 export function GoalsList({ initialGoals }: { initialGoals: Goal[] }) {
   const router = useRouter()
@@ -107,14 +109,17 @@ export function GoalsList({ initialGoals }: { initialGoals: Goal[] }) {
             if (busy) return
             const n = name.trim()
             const t = Number(target)
-            if (n && t > 0) {
-              // Cleared once it saved, not before the reply, so a refused add keeps what was typed.
-              // Cleared too when it may have saved: an add is not a set, and a second Add of the same
-              // goal could make two. The reload shows whether it landed.
-              if ((await call('POST', { name: n, target_amount: t }, null)) !== 'refused') {
-                setName('')
-                setTarget('')
-              }
+            // Said here, and nothing sent. Without it, Add goal did nothing at all.
+            if (!n || !(t > 0)) {
+              setAddError(NAME_AND_TARGET)
+              return
+            }
+            // Cleared once it saved, not before the reply, so a refused add keeps what was typed.
+            // Cleared too when it may have saved: an add is not a set, and a second Add of the same
+            // goal could make two. The reload shows whether it landed.
+            if ((await call('POST', { name: n, target_amount: t }, null)) !== 'refused') {
+              setName('')
+              setTarget('')
             }
           }}
         >
