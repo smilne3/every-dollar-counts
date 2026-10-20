@@ -5,18 +5,23 @@ import { spendingCategoryNames } from '@/lib/categories'
 import { fetchCategoryContext, SUGGESTION_EMBED, withSuggestion } from '@/lib/category-context'
 import { buildSpendContext } from '@/lib/spend-context'
 import { BudgetEditor } from '@/components/BudgetEditor'
+import { NotSyncingBanner } from '@/components/NotSyncingBanner'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { buttonClass } from '@/components/ui/Button'
 import { todayIn } from '@/lib/clock'
-import { householdTimezone } from '@/lib/household'
+import { currentHouseholdId, householdTimezone } from '@/lib/household'
+import { listItemsForHousehold } from '@/lib/plaid-items'
 import { readAllRows } from '@/lib/read-all'
 
 export default async function BudgetsPage() {
   const supabase = await createClient()
 
+  // The household beside its timezone, and its banks beside the categories below: the bank list
+  // the "isn't syncing" banner needs (#135) is two reads, and this way it adds no wait of its own.
+  const [tz, householdId] = await Promise.all([householdTimezone(), currentHouseholdId()])
   // The household's month, not the server's: at 8pm US Eastern the server is already tomorrow, so
   // on the last evening of a month every bar on this page emptied four hours early (#73).
-  const today = todayIn(await householdTimezone())
+  const today = todayIn(tz)
   const year = Number(today.slice(0, 4))
   const month = Number(today.slice(5, 7))
   const monthStart = `${today.slice(0, 7)}-01`
@@ -25,9 +30,9 @@ export default async function BudgetsPage() {
   const next = new Date(Date.UTC(year, month, 1))
   const nextMonthStart = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-01`
 
-  // Throws on a failed read: with no categories the page would render as though the household had
-  // never set any up (#46).
-  const data = await fetchCategoryContext()
+  // Both throw on a failed read: with no categories the page would render as though the household
+  // had never set any up, and with no banks every bank would look healthy (#46).
+  const [data, items] = await Promise.all([fetchCategoryContext(), listItemsForHousehold(householdId)])
   const categoryNames = spendingCategoryNames(data.categories)
 
   // Paged, so the month cannot silently pass the 1,000-row cap (#69).
@@ -57,6 +62,7 @@ export default async function BudgetsPage() {
 
   return (
     <div className="space-y-6">
+      <NotSyncingBanner items={items} />
       <PageHeader
         title="Budgets"
         subtitle="Set a monthly limit per category — bars show this month's spending against each."

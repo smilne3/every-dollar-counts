@@ -35,6 +35,7 @@ const chainFor = (table: string) => {
     calls.lte.push(v)
     return chain
   }
+  chain.single = async () => results[table] ?? { data: null, error: null }
   chain.maybeSingle = async () => results[table] ?? { data: null, error: null }
   chain.then = (resolve: (v: unknown) => unknown) =>
     Promise.resolve(
@@ -46,12 +47,27 @@ const chainFor = (table: string) => {
 vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({ from: (table: string) => chainFor(table) }),
 }))
+// The service-role client reads only plaid_items here, for the "isn't syncing" banner (#135),
+// through the strict stand-in in tests/stubs/plaid-items.ts: it applies the read's filters to the
+// stored rows, so the banner shows only this household's banks. lib/plaid-items.ts runs for real,
+// and needs only plaidEnv from lib/plaid.
+vi.mock('@/lib/supabase/admin', async () => {
+  const { plaidItemsQuery } = await import('../stubs/plaid-items')
+  return {
+    supabaseAdmin: {
+      from: (table: string) => {
+        if (table !== 'plaid_items') throw new Error(`trends page read ${table} through the service-role client`)
+        return plaidItemsQuery(results.plaid_items ?? { data: [], error: null })
+      },
+    },
+  }
+})
+vi.mock('@/lib/plaid', () => ({ plaidEnv: 'sandbox' }))
 // Categories and rules come through lib/category-context.ts (#28), whose own test covers paging.
 // Built from `results.categories` / `results.category_rules`, so a failed categories read still
 // rejects with the page's message.
 // The real module otherwise, so the page gets the real SUGGESTION_EMBED and the switch is read by
-// the real suggestionsEnabled (spec §14.7). Its admin client is never used here.
-vi.mock('@/lib/supabase/admin', () => ({ supabaseAdmin: {} }))
+// the real suggestionsEnabled (spec §14.7).
 vi.mock('@/lib/category-context', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/category-context')>()
   const { testData } = await import('./helpers/category-context')
@@ -74,8 +90,12 @@ vi.mock('@/lib/category-context', async (importOriginal) => {
 
 import TrendsPage from '@/app/(app)/trends/page'
 import { SpendByCategoryChart } from '@/components/SpendByCategoryChart'
+import { NotSyncingBanner } from '@/components/NotSyncingBanner'
+import { PageHeader } from '@/components/ui/PageHeader'
 import { catalogFingerprint } from '@/lib/category-rules'
 import { sug } from './helpers/category-context'
+import { blocks, bannerText } from './helpers/banner'
+import { storedItem, FOREIGN_ITEMS } from '../stubs/plaid-items'
 
 const FOOD = { id: 'c-food', name: 'Food & Drink', pfc_primary: 'FOOD_AND_DRINK', sort_order: 0 }
 const GROCERY = { id: 'c-grocery', name: 'Grocery', pfc_primary: null, sort_order: 1 }
@@ -88,6 +108,8 @@ beforeEach(() => {
   results.category_rules = ok
   results.transactions = ok
   results.households = { data: { timezone: 'America/New_York' }, error: null }
+  results.memberships = { data: { household_id: 'hh-1' }, error: null }
+  results.plaid_items = ok
   calls.gte = []
   calls.lte = []
   for (const k of Object.keys(selects)) delete selects[k]
@@ -97,6 +119,47 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers()
   vi.unstubAllEnvs()
+})
+
+// The dashboard's banner, above last month's spending and the month before's (#135).
+describe('Trends banks (#135)', () => {
+  it("warns that a bank isn't syncing, first, above the header", async () => {
+    results.plaid_items = {
+      data: [
+        storedItem({ status: 'needs_reconnect' }),
+        storedItem({ id: 'item-2', institution_name: 'Amex', status: 'action_at_bank' }),
+        storedItem({ id: 'item-3', institution_name: 'Chase' }),
+        ...FOREIGN_ITEMS,
+      ],
+      error: null,
+    }
+    const tree = await TrendsPage()
+    expect(bannerText(tree)).toBe(
+      "2 banks aren't syncing — reconnect in Settings to resume. These figures may be out of date."
+    )
+    const order = blocks(tree).map((b) => b.type)
+    expect(order.indexOf(NotSyncingBanner)).toBe(0)
+    expect(order.indexOf(PageHeader)).toBe(1)
+  })
+
+  // Another household's broken bank, or this household's from the other Plaid environment, must
+  // not raise the banner here.
+  it("says nothing while every one of the household's banks is syncing", async () => {
+    results.plaid_items = { data: [storedItem(), ...FOREIGN_ITEMS], error: null }
+    expect(bannerText(await TrendsPage())).toBe('')
+  })
+
+  // Rendered as no banks, a failed read would chart a broken bank's months with no warning (#46).
+  // It throws, as the dashboard does, and app/(app)/error.tsx offers a retry.
+  it('fails loudly when the banks read fails, rather than hiding the banner', async () => {
+    results.plaid_items = { data: null, error: { message: 'statement timeout' } }
+    await expect(TrendsPage()).rejects.toThrow(/could not read linked banks: statement timeout/)
+  })
+
+  it('fails loudly when the household read fails, rather than hiding the banner', async () => {
+    results.memberships = { data: null, error: { message: 'permission denied' } }
+    await expect(TrendsPage()).rejects.toThrow(/could not read your household: permission denied/)
+  })
 })
 
 describe('Trends page reads', () => {

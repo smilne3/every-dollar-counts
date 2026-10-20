@@ -2,11 +2,13 @@ import { createClient } from '@/lib/supabase/server'
 import { lastCompleteMonths } from '@/lib/budget'
 import { trendsView } from '@/lib/trends'
 import { todayIn } from '@/lib/clock'
-import { householdTimezone } from '@/lib/household'
+import { currentHouseholdId, householdTimezone } from '@/lib/household'
 import { fetchCategoryContext, SUGGESTION_EMBED, withSuggestion } from '@/lib/category-context'
 import { buildSpendContext } from '@/lib/spend-context'
+import { listItemsForHousehold } from '@/lib/plaid-items'
 import { SpendByCategoryChart } from '@/components/SpendByCategoryChart'
 import { PeriodOverPeriodChart } from '@/components/PeriodOverPeriodChart'
+import { NotSyncingBanner } from '@/components/NotSyncingBanner'
 import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { readAllRows } from '@/lib/read-all'
@@ -21,13 +23,17 @@ import { readAllRows } from '@/lib/read-all'
 export default async function TrendsPage() {
   const supabase = await createClient()
 
+  // The household beside its timezone, and its banks beside the categories below: the bank list
+  // the "isn't syncing" banner needs (#135) is two reads, and this way it adds no wait of its own.
+  const [tz, householdId] = await Promise.all([householdTimezone(), currentHouseholdId()])
   // The household's day, not the server's: at 8pm US Eastern the server is already tomorrow, and
   // on the last evening of a month that moved this page forward a whole month early (#73).
-  const windows = lastCompleteMonths(todayIn(await householdTimezone()))
+  const windows = lastCompleteMonths(todayIn(tz))
 
-  // Throws on a failed read: with no categories a paycheck is charted as negative spending under
-  // "Uncategorized", and a failed read must not become a plausible number (#46).
-  const data = await fetchCategoryContext()
+  // Both throw on a failed read: with no categories a paycheck is charted as negative spending
+  // under "Uncategorized", and with no banks every bank would look healthy. A failed read must not
+  // become a plausible number, or a missing warning (#46).
+  const [data, items] = await Promise.all([fetchCategoryContext(), listItemsForHousehold(householdId)])
 
   // Date-bounded at both ends. `previous.from` is the earliest date either card reads; the upper bound
   // is what stops a row dated beyond the window being fetched at all. `inRange` is what actually
@@ -52,6 +58,7 @@ export default async function TrendsPage() {
 
   return (
     <div className="space-y-6">
+      <NotSyncingBanner items={items} />
       <PageHeader
         title="Trends"
         subtitle="Where your money went last month, and how that compares with the month before."

@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { BreakdownList, type BreakdownRow } from '@/components/BreakdownList'
+import { NotSyncingBanner } from '@/components/NotSyncingBanner'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
 import { groupAccountsByKind, sortedSpendRows } from '@/lib/breakdown'
@@ -14,12 +15,13 @@ import {
   sumManualAssets,
 } from '@/lib/dashboard'
 import { listManualAssets } from '@/lib/manual-assets'
+import { listItemsForHousehold, type ItemSummary } from '@/lib/plaid-items'
 import { spendByCategory, monthKey } from '@/lib/budget'
 import { fetchCategoryContext, SUGGESTION_EMBED, withSuggestion } from '@/lib/category-context'
 import { buildSpendContext } from '@/lib/spend-context'
 import { fetchReceivable } from '@/lib/receivable'
 import { todayIn } from '@/lib/clock'
-import { householdTimezone } from '@/lib/household'
+import { currentHouseholdId, householdTimezone } from '@/lib/household'
 import { readAllRows } from '@/lib/read-all'
 import { historyStart } from '@/lib/history-start'
 import { monthNameLong } from '@/lib/format'
@@ -36,11 +38,12 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
   if (!TITLES[metric]) notFound()
 
   const supabase = await createClient()
-  const { data: accountsData, error: accountsError } = await supabase
-    .from('accounts')
-    .select('*')
-    .order('name')
-    .order('account_id')
+  // The household beside the accounts rather than after them: every metric needs it for the bank
+  // list (#135), and net worth for the home value as well.
+  const [{ data: accountsData, error: accountsError }, householdId] = await Promise.all([
+    supabase.from('accounts').select('*').order('name').order('account_id'),
+    currentHouseholdId(),
+  ])
   // This page exists to explain a net-worth figure. Explaining it from an empty list would be a
   // confident wrong answer (#46).
   if (accountsError) throw new Error(`could not read accounts: ${accountsError.message}`)
@@ -56,18 +59,20 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
     | { rows: BreakdownRow[]; total: NonNullable<typeof total>; count: number }
     | { reason: string }
     | undefined
+  // The household's banks, for the "isn't syncing" banner every metric shows (#135). Each branch
+  // reads them beside its own first read, not after it. A failed read throws, as on the dashboard:
+  // rendered as no banks, every bank would look healthy (#46).
+  let items: ItemSummary[]
 
   if (metric === 'net-worth') {
     // Manual assets (the home) count on the asset side of net worth, netting against the live
     // mortgage. Read here rather than for every metric: only net worth shows them, and a failed read
     // throws (#91), which would otherwise take down Cash, Spent and Saved over a value none of them shows.
-    const { data: membershipRow, error: membershipError } = await supabase
-      .from('memberships')
-      .select('household_id')
-      .limit(1)
-      .single()
-    if (membershipError) throw new Error(`could not read your household: ${membershipError.message}`)
-    const manualAssets = membershipRow ? await listManualAssets(membershipRow.household_id) : []
+    const [banks, manualAssets] = await Promise.all([
+      listItemsForHousehold(householdId),
+      listManualAssets(householdId),
+    ])
+    items = banks
 
     const g = groupAccountsByKind(accounts)
     const accountRows: BreakdownRow[] = [...g.assets, ...g.liabilities].map((a) => ({
@@ -121,6 +126,9 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
       currency,
     }
   } else if (metric === 'cash') {
+    // Cash has no read of its own to pair this with: the bank list needs the household first, so
+    // here it is one wait more than the accounts alone.
+    items = await listItemsForHousehold(householdId)
     // Cash = depository accounts only; reuse cashOnHand() for the total.
     const depository = accounts.filter((a) => a.type === 'depository')
     rows = depository.map((a) => ({
@@ -136,7 +144,8 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
     // spent / saved both need this month's flows
     // Throws on a failed read. Same trap as the dashboard: with no categories a paycheck is counted
     // as negative spending and this breakdown explains a number that never happened (#46).
-    const data = await fetchCategoryContext()
+    const [banks, data] = await Promise.all([listItemsForHousehold(householdId), fetchCategoryContext()])
+    items = banks
 
     // The household's day, not the server's — this month key is also embedded in the outbound
     // /transactions?...&month= links below, so a wrong month here propagates (#73).
@@ -213,6 +222,7 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
 
   return (
     <div className="space-y-6">
+      <NotSyncingBanner items={items} />
       <PageHeader title={header.title} subtitle={header.subtitle} />
       <Card className="p-5">
         <BreakdownList rows={rows} total={total} />

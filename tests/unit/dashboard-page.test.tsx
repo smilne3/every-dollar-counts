@@ -87,8 +87,10 @@ vi.mock('@/lib/category-context', async (importOriginal) => {
     },
   }
 })
-vi.mock('@/lib/household', () => ({
-  DEFAULT_TIMEZONE: 'America/New_York',
+// The real module but for the timezone, so currentHouseholdId reads `results.memberships` as the
+// saved breakdown it is compared with below does.
+vi.mock('@/lib/household', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/household')>()),
   householdTimezone: async () => tz.value,
 }))
 // The real module by default. Under `stampLabel` every label gets a prefix no local expression
@@ -108,10 +110,9 @@ vi.mock('@/lib/transaction-presentation', async (importOriginal) => {
 vi.mock('@/lib/receivable', () => ({ fetchReceivable: async () => 0 }))
 vi.mock('@/lib/history-start', () => ({ historyStart: async () => history.value }))
 
-import type { ReactElement } from 'react'
-import { render as renderDom, cleanup } from '@testing-library/react'
 import { pagedTable } from '../stubs/postgrest-pages'
 import { storedItem, FOREIGN_ITEMS } from '../stubs/plaid-items'
+import { blocks, bannerText } from './helpers/banner'
 import DashboardPage from '@/app/(app)/dashboard/page'
 import BreakdownPage from '@/app/(app)/breakdown/[metric]/page'
 import { BreakdownList } from '@/components/BreakdownList'
@@ -227,25 +228,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs()
-  cleanup()
 })
-
-// The page's top-level blocks in order, leaving out the ones it did not render (false or null).
-function blocks(tree: unknown): { type: unknown; props: Record<string, unknown> }[] {
-  const kids = (tree as { props: { children: unknown } }).props.children
-  return ([] as unknown[]).concat(kids).flat().filter(Boolean) as never
-}
-
-// What the "isn't syncing" banner the page placed actually says, rendered as the browser would get
-// it; empty when it renders nothing.
-function bannerText(tree: unknown): string {
-  const banner = blocks(tree).find((b) => b.type === NotSyncingBanner)
-  if (!banner) throw new Error('the page rendered no NotSyncingBanner')
-  const { container } = renderDom(banner as ReactElement)
-  const text = container.textContent ?? ''
-  cleanup()
-  return text
-}
 
 describe('Dashboard banks (#135)', () => {
   it("warns that a bank isn't syncing, first, above the header", async () => {

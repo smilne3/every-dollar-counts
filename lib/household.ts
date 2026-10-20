@@ -20,3 +20,18 @@ export const householdTimezone = cache(async (): Promise<string> => {
   // one yet. The default is the honest answer.
   return (data?.timezone as string | null | undefined) ?? DEFAULT_TIMEZONE
 })
+
+// The signed-in person's household id, for the reads the service-role client makes on a page's
+// behalf (lib/plaid-items.ts), which RLS does not scope. Throws on a failed read, and on a read with
+// no row and no error: without the household a page cannot ask which banks are syncing, and an empty
+// answer would hide the "isn't syncing" banner (#46, #135).
+export async function currentHouseholdId(): Promise<string> {
+  const supabase = await createClient()
+  const { data, error } = await supabase.from('memberships').select('household_id').limit(1).single()
+  if (error) {
+    const code = error.code ? `${error.code} ` : ''
+    throw new Error(`could not read your household: ${code}${error.message}`)
+  }
+  if (!data) throw new Error('could not read your household: read returned no data and no error')
+  return data.household_id as string
+}
