@@ -57,8 +57,12 @@ export function BudgetEditor({
   // limits back, after a save that did not land, must still refill what was sent but not stored.
   // React's documented way to adjust state when a prop changes.
   const [shown, setShown] = useState(initialLimits)
-  if (shown !== initialLimits) {
+  // Set by a refusal, to refill again from the page as it is: a reload that landed while the save
+  // was in flight held back every field it sent, and nothing reloads after a refusal (#176).
+  const [reapply, setReapply] = useState(false)
+  if (shown !== initialLimits || reapply) {
     setShown(initialLimits)
+    setReapply(false)
     // Only a read made after a save can hold what it wrote (#176). With two quick saves, the reload
     // asked for after the first can read the limits before the second writes them and land after
     // the second is sent (in Next 16.4.2, while it is in flight). Refilled from it, the fields showed
@@ -120,8 +124,10 @@ export function BudgetEditor({
         // Nothing was written, or the message says which part was not. What was typed stays, so
         // trying again is one tap. Its base goes back to what it was before the save, so it counts as
         // typing, which no reload overwrites: nothing reloads after a refusal, so the reload from an
-        // earlier save can still land after it (#176).
+        // earlier save can still land after it (#176). The page is then applied again, so a reload
+        // held back while this save was in flight still reaches the fields nobody typed into.
         setBase((b) => ({ ...b, ...before }))
+        setReapply(true)
         setError(result.error)
       } else {
         // It may have saved, and nothing is reset: with no connection the reload may never come,
