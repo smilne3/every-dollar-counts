@@ -255,6 +255,20 @@ describe('CategoryManager saves', () => {
     expect(refresh).toHaveBeenCalledTimes(1)
   })
 
+  // The Save button beside a rename field is disabled while any save is in flight. Enter in the field
+  // has to wait too (#147), or a second request races the first: a rename sent mid-add, say.
+  it('ignores Enter in a rename field while a save is in flight', () => {
+    const fetchMock = neverSettles()
+    vi.stubGlobal('fetch', fetchMock)
+    render(<CategoryManager {...props} />)
+    addPets()
+    const field = screen.getByLabelText('Rename category Groceries') as HTMLInputElement
+    fireEvent.change(field, { target: { value: 'Food' } })
+    fireEvent.keyDown(field, { key: 'Enter' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({ name: 'Pets' })
+  })
+
   it('deletes, says so and reloads', async () => {
     const fetchMock = answering(saved)
     vi.stubGlobal('fetch', fetchMock)

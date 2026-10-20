@@ -132,8 +132,10 @@ function CategoryRow({
   const [confirmDelete, setConfirmDelete] = useState(false)
   const changed = name.trim().length > 0 && name.trim() !== cat.name
 
+  // `busy` here as well as on the Save button: Enter in the field calls this too, and a rename sent
+  // while another save is in flight would race it (#147).
   function save() {
-    if (changed) onSave(name.trim())
+    if (changed && !busy) onSave(name.trim())
   }
 
   return (
