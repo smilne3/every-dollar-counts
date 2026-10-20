@@ -177,8 +177,8 @@ export default async function SettingsPage() {
           ? unavailable("Couldn't check your accounts.")
           : firstLine && <p className="text-sm text-muted">{firstLine}</p>}
         {/* With the list unreadable, Connect a bank would invite a relink of a bank that is still
-            connected, which spends one of ten lifetime connections (#51), and its own warning
-            points at "the list above". So it waits for the list. */}
+            connected, which spends one of ten lifetime connections (#51), and its own warning says
+            to check the banks here first. So it waits for the list. */}
         {items ? (
           <>
             <BankList items={items} slotsUsed={slotsUsed} lifetimeSlots={LIFETIME_SLOTS} />
