@@ -141,11 +141,13 @@ export function isTemporaryError(err: unknown): boolean {
   return classifyPlaidError(err) === 'temporary'
 }
 
-// Whether Plaid itself answered a failed call. The SDK's axios errors carry `response` only when
-// Plaid replied, with an error body or a status. One without it never heard back (a reset
-// connection, a timeout), so the call may still have taken effect at Plaid.
-export function plaidAnswered(err: unknown): boolean {
-  return (err as { response?: unknown } | null)?.response != null
+// Whether Plaid refused a failed call outright, so it did nothing. Only a 4xx says that. The SDK's
+// axios errors carry `response` whenever something answered, but a 5xx (Plaid's own
+// INTERNAL_SERVER_ERROR, or a gateway's 502 or 504) can come after the call took effect, and so
+// can no answer at all (a reset connection, a timeout).
+export function plaidRefused(err: unknown): boolean {
+  const status = (err as { response?: { status?: unknown } } | null)?.response?.status
+  return typeof status === 'number' && status >= 400 && status < 500
 }
 
 // Swallowed by the disconnect route: the Item is already gone at Plaid, so deleting our row is

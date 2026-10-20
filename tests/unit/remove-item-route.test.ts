@@ -96,8 +96,11 @@ function makeStandIns({
   return calls
 }
 
-// Shaped as the Plaid SDK throws: axios errors carry `response` only when Plaid answered.
-const plaidRefusal = { response: { status: 500, data: { error_type: 'API_ERROR', error_code: 'INTERNAL_SERVER_ERROR' } } }
+// Shaped as the Plaid SDK throws: axios errors carry `response` whenever something answered. Only a
+// 4xx means Plaid did nothing.
+const plaidRefusal = { response: { status: 429, data: { error_type: 'RATE_LIMIT_EXCEEDED', error_code: 'RATE_LIMIT' } } }
+const plaidServerError = { response: { status: 500, data: { error_type: 'API_ERROR', error_code: 'INTERNAL_SERVER_ERROR' } } }
+const gatewayTimeout = { response: { status: 504, data: '<html>Gateway Timeout</html>' } }
 const noAnswer = Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' })
 const alreadyGone = { response: { status: 400, data: { error_type: 'ITEM_ERROR', error_code: 'ITEM_NOT_FOUND' } } }
 
@@ -220,7 +223,7 @@ describe('POST /api/plaid/remove-item: before Plaid is asked, the bank is still 
     expect(calls.deletes).toHaveLength(0)
   })
 
-  it('answers 502 and keeps the row when Plaid refuses: nothing changed there', async () => {
+  it('answers 502 and keeps the row when Plaid refuses with a 4xx: nothing changed there', async () => {
     const calls = makeStandIns()
     itemRemove.mockRejectedValue(plaidRefusal)
     const res = await disconnect()
@@ -231,14 +234,18 @@ describe('POST /api/plaid/remove-item: before Plaid is asked, the bank is still 
 })
 
 describe('POST /api/plaid/remove-item: once Plaid may have removed it', () => {
-  // With no answer the removal may have landed, so "nothing was changed" would be a guess. Trying
-  // again settles it: an Item already gone is swallowed, and the row goes.
-  it('answers 502 and keeps the row when Plaid never answers, and says it may or may not be disconnected', async () => {
+  // After a 5xx, or no answer at all, the removal may have landed, so "nothing was changed" would be
+  // a guess. Trying again settles it: an Item already gone is swallowed, and the row goes.
+  it.each([
+    ["Plaid's own server error", plaidServerError],
+    ["a gateway's timeout", gatewayTimeout],
+    ['no answer at all', noAnswer],
+  ])('answers 502 and keeps the row after %s, and says it may or may not be disconnected', async (_, failure) => {
     const calls = makeStandIns()
-    itemRemove.mockRejectedValue(noAnswer)
+    itemRemove.mockRejectedValue(failure)
     const res = await disconnect()
     expect(res.status).toBe(502)
-    expect(await errorOf(res)).toBe("Plaid didn't answer, so that bank may or may not be disconnected. Try again.")
+    expect(await errorOf(res)).toBe("Plaid didn't confirm it, so that bank may or may not be disconnected. Try again.")
     expect(calls.deletes).toHaveLength(0)
   })
 

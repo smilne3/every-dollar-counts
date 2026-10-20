@@ -83,9 +83,9 @@ describe('BankList Disconnect', () => {
       'Plaid could not disconnect that bank just now. Nothing was changed — try again.',
     ],
     [
-      'Plaid never answered',
-      () => refused(502, "Plaid didn't answer, so that bank may or may not be disconnected. Try again."),
-      "Plaid didn't answer, so that bank may or may not be disconnected. Try again.",
+      'Plaid did not confirm it',
+      () => refused(502, "Plaid didn't confirm it, so that bank may or may not be disconnected. Try again."),
+      "Plaid didn't confirm it, so that bank may or may not be disconnected. Try again.",
     ],
     ['the session ended', redirectedToLogin, 'Your session ended. Sign in again.'],
   ])("after a refusal because %s, shows the route's words and does not reload", async (_, reply, message) => {

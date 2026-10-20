@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { decrypt } from '@/lib/crypto'
 import { plaidClient, plaidEnv } from '@/lib/plaid'
-import { plaidLogSafe, isAlreadyRemoved, plaidAnswered } from '@/lib/plaid-errors'
+import { plaidLogSafe, isAlreadyRemoved, plaidRefused } from '@/lib/plaid-errors'
 
 // Disconnect a bank: remove it at Plaid, THEN delete our record. Deleting the plaid_items row
 // cascades to accounts (002) and, via the FK added in 010, on to its transactions — so nothing is
@@ -97,13 +97,14 @@ export async function POST(req: Request) {
   } catch (e) {
     if (!isAlreadyRemoved(e)) {
       console.error('[plaid] itemRemove failed', item.id, plaidLogSafe(e))
-      // Refused by Plaid, nothing changed there. Unanswered, the removal may have landed. Trying
-      // again settles it either way, since an Item already gone is swallowed above.
+      // Refused by Plaid (a 4xx), nothing changed there. After a 5xx, or no answer at all, the
+      // removal may have landed. Trying again settles it either way, since an Item already gone is
+      // swallowed above.
       return fail(
         502,
-        plaidAnswered(e)
+        plaidRefused(e)
           ? 'Plaid could not disconnect that bank just now. Nothing was changed — try again.'
-          : "Plaid didn't answer, so that bank may or may not be disconnected. Try again."
+          : "Plaid didn't confirm it, so that bank may or may not be disconnected. Try again."
       )
     }
   }
