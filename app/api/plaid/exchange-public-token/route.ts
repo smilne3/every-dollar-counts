@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { isAuthRetryableFetchError } from '@supabase/supabase-js'
 import { plaidClient, plaidEnv } from '@/lib/plaid'
 import { plaidLogSafe } from '@/lib/plaid-errors'
 import { encrypt } from '@/lib/crypto'
@@ -9,6 +10,19 @@ import { recordSlotUsed } from '@/lib/plaid-slots'
 import { shouldSyncTransactions } from '@/lib/sync-policy'
 import { assertEnvMatchesDatabase, envGuardResponse } from '@/lib/app-env'
 
+// The longest this route may run, in seconds (#165). The browser waits longer than this before it
+// says the bank may have connected (EXCHANGE_TIMEOUT_MS, components/plaid-link-context.ts), so by
+// then the exchange has finished or the platform has stopped it, and the reload shows which. Giving
+// up any sooner, and calling it a failure, would invite a second link: a duplicate that spends a
+// second of the ten connections (#51). 300 is Vercel's default and Hobby's ceiling. Set here, it
+// holds whatever the project's dashboard default becomes.
+export const maxDuration = 300
+
+// LinkButton and the OAuth return page show these as they stand, with their own warning that every
+// new attempt spends a connection. Link has already created the Item at Plaid by the time this runs.
+const NOT_FINISHED = "Couldn't finish connecting that bank. Check Settings before trying again."
+const fail = (status: number, error: string) => NextResponse.json({ error }, { status })
+
 // Only the three product strings we support; default to transactions.
 function normalizeProducts(input: unknown): string[] {
   const list = Array.isArray(input) ? input : []
@@ -17,24 +31,39 @@ function normalizeProducts(input: unknown): string[] {
 }
 
 export async function POST(req: Request) {
-  const { public_token, institution_name, products } = await req.json()
-  if (!public_token) {
-    return NextResponse.json({ error: 'public_token required' }, { status: 400 })
-  }
+  const body = (await req.json().catch(() => null)) as
+    | { public_token?: unknown; institution_name?: unknown; products?: unknown }
+    | null
+  const public_token = body?.public_token
+  if (typeof public_token !== 'string' || public_token === '') return fail(400, NOT_FINISHED)
+  const institution_name = typeof body?.institution_name === 'string' ? body.institution_name : null
 
+  // Sign-in and household, as app/api/budgets/route.ts: 503 if Supabase Auth is unreachable, 401;
+  // 500 if the membership read fails, 403.
   const supabase = await createClient()
   const {
     data: { user },
+    error: authError,
   } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  if (isAuthRetryableFetchError(authError)) {
+    console.error('[plaid] exchange auth check failed', { code: authError.code, message: authError.message })
+    return fail(503, NOT_FINISHED)
+  }
+  if (!user) return fail(401, 'Your session ended. Sign in again.')
 
-  const { data: membership } = await supabase
+  const { data: membership, error: mError } = await supabase
     .from('memberships')
     .select('household_id')
     .limit(1)
-    .single()
-  if (!membership) return NextResponse.json({ error: 'no household' }, { status: 403 })
+    .maybeSingle()
+  // A failed read is not "no household" (#46).
+  if (mError) {
+    console.error('[plaid] exchange membership read failed', { code: mError.code, message: mError.message })
+    return fail(500, NOT_FINISHED)
+  }
+  if (!membership) return fail(403, "Your account isn't part of a household.")
   const household_id = membership.household_id
+  const products = body?.products
   const productList = normalizeProducts(products)
 
   // THE ITEM ALREADY EXISTS AT PLAID by the time this route runs — Link created it the moment the
@@ -48,10 +77,7 @@ export async function POST(req: Request) {
     itemId = ex.item_id
   } catch (e) {
     console.error('[plaid] public token exchange failed', plaidLogSafe(e))
-    return NextResponse.json(
-      { error: "Couldn't finish connecting that bank. Check Settings before trying again." },
-      { status: 502 }
-    )
+    return fail(502, NOT_FINISHED)
   }
 
   // Record the spent connection HERE, before anything else can fail. The ten are consumed by Link
@@ -112,17 +138,17 @@ export async function POST(req: Request) {
   // one of ten unrefundable slots. Tear it down at Plaid; log the id either way so it can be
   // removed by hand if that also fails.
   if (itemErr || !item) {
-    console.error('[plaid] failed to store item', itemId, itemErr?.message)
+    console.error('[plaid] failed to store item', { itemId, code: itemErr?.code, message: itemErr?.message })
     try {
       await plaidClient.itemRemove({ access_token: accessToken })
       console.error('[plaid] orphaned item removed at Plaid', itemId)
     } catch (e) {
       console.error('[plaid] ALSO failed to remove orphaned item — remove it by hand', itemId, plaidLogSafe(e))
     }
-    return NextResponse.json(
-      { error: 'Could not save that bank. Nothing was connected — safe to try again.' },
-      { status: 400 }
-    )
+    // Not "safe to try again": Link spent a connection on this Item, and a new attempt spends
+    // another, as the warning beside this message says. Nor "nothing was connected", which is
+    // false if the teardown above failed.
+    return fail(500, 'Could not save that bank.')
   }
 
   // Balances come in for every item type — this is what makes brokerage and loan net worth work.
