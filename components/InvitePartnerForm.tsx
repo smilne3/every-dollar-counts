@@ -5,9 +5,10 @@ import { sendSave } from '@/lib/save-response'
 import { Button } from '@/components/ui/Button'
 import { inputClass, labelClass } from '@/components/ui/styles'
 
-// For an invite whose reply never came back. Not MAY_NOT_HAVE_SAVED's "Showing the latest": nothing on
-// the page lists invites, so a reload would show nothing new. Inviting again is safe, since the
-// allowlist is keyed on the email.
+// For an invite whose outcome is unknown: lost in flight, timed out, or answered with a reply that
+// could not be read. Not MAY_NOT_HAVE_SAVED's "Showing the latest": nothing on the page lists
+// invites, so a reload would show nothing new. Inviting again is safe, since the allowlist is keyed
+// on the email.
 const MAY_NOT_HAVE_INVITED = 'It may not have saved. Invite them again to be sure.'
 
 export function InvitePartnerForm({ householdId }: { householdId: string }) {
@@ -61,7 +62,8 @@ export function InvitePartnerForm({ householdId }: { householdId: string }) {
           aria-label="Partner's email address"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          // Fixed while an invite is in flight, so the address in "… can now sign in" is the one sent.
+          // Fixed while an invite is in flight, so clearing it once the invite is written cannot wipe an
+          // address typed meanwhile.
           disabled={busy}
         />
         <Button type="submit" disabled={busy}>
