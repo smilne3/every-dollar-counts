@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { AccountList } from '@/components/AccountList'
 import { LinkButton } from '@/components/LinkButton'
+import { NotSyncingBanner } from '@/components/NotSyncingBanner'
 import { RefreshButton } from '@/components/RefreshButton'
 import { SpendIncomeChart } from '@/components/SpendIncomeChart'
 import { RecentActivity } from '@/components/RecentActivity'
@@ -69,8 +70,6 @@ export default async function DashboardPage({
   const items = membershipRow ? await listItemsForHousehold(membershipRow.household_id) : []
   const manualAssets = membershipRow ? await listManualAssets(membershipRow.household_id) : []
   const home = manualAssets.find((a) => a.name === 'Home') ?? null
-  const unhealthy = items.filter((i) => i.status !== 'ok')
-  const needsReconnect = unhealthy.some((i) => i.status === 'needs_reconnect')
 
   // Two different questions, two different sources. `now` is an INSTANT, and homeStale below
   // measures elapsed milliseconds between two instants — correct in any zone. `today` and the
@@ -210,19 +209,7 @@ export default async function DashboardPage({
         </div>
       )}
 
-      {unhealthy.length > 0 && (
-        <Link
-          href="/settings"
-          className="block rounded-card border border-coral/40 bg-coral/10 px-4 py-3 text-sm text-coral"
-        >
-          {unhealthy.length === 1
-            ? `${unhealthy[0].institution_name ?? 'A bank'} isn't syncing`
-            : `${unhealthy.length} banks aren't syncing`}
-          {needsReconnect
-            ? ' — reconnect in Settings to resume. These figures may be out of date.'
-            : ' — see Settings. These figures may be out of date.'}
-        </Link>
-      )}
+      <NotSyncingBanner items={items} />
 
       {homeStale && (
         <Link

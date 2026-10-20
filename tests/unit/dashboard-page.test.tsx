@@ -50,8 +50,18 @@ vi.mock('@/lib/supabase/server', () => ({
 }))
 // The service-role client answers from `results` too, so lib/manual-assets.ts and
 // lib/plaid-items.ts run for real and a failed read reaches the page as it would in production
-// (#91). lib/plaid-items.ts needs only plaidEnv from lib/plaid.
-vi.mock('@/lib/supabase/admin', () => ({ supabaseAdmin: { from: (table: string) => chainFor(table) } }))
+// (#91). plaid_items goes through the strict stand-in in tests/stubs/plaid-items.ts, which applies
+// the read's filters to the stored rows, so the banner shows only this household's banks (#135).
+// lib/plaid-items.ts needs only plaidEnv from lib/plaid.
+vi.mock('@/lib/supabase/admin', async () => {
+  const { plaidItemsQuery } = await import('../stubs/plaid-items')
+  return {
+    supabaseAdmin: {
+      from: (table: string) =>
+        table === 'plaid_items' ? plaidItemsQuery(results.plaid_items ?? { data: [], error: null }) : chainFor(table),
+    },
+  }
+})
 vi.mock('@/lib/plaid', () => ({ plaidEnv: 'sandbox' }))
 // Categories and rules come through lib/category-context.ts (#28), whose own test covers paging.
 // Built from `results.categories` / `results.category_rules`, so a failed categories read still
@@ -98,10 +108,15 @@ vi.mock('@/lib/transaction-presentation', async (importOriginal) => {
 vi.mock('@/lib/receivable', () => ({ fetchReceivable: async () => 0 }))
 vi.mock('@/lib/history-start', () => ({ historyStart: async () => history.value }))
 
+import type { ReactElement } from 'react'
+import { render as renderDom, cleanup } from '@testing-library/react'
 import { pagedTable } from '../stubs/postgrest-pages'
+import { storedItem, FOREIGN_ITEMS } from '../stubs/plaid-items'
 import DashboardPage from '@/app/(app)/dashboard/page'
 import BreakdownPage from '@/app/(app)/breakdown/[metric]/page'
 import { BreakdownList } from '@/components/BreakdownList'
+import { NotSyncingBanner } from '@/components/NotSyncingBanner'
+import { PageHeader } from '@/components/ui/PageHeader'
 import { moneyWhole } from '@/lib/format'
 import { catalogFingerprint } from '@/lib/category-rules'
 import { sug } from './helpers/category-context'
@@ -212,6 +227,56 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs()
+  cleanup()
+})
+
+// The page's top-level blocks in order, leaving out the ones it did not render (false or null).
+function blocks(tree: unknown): { type: unknown; props: Record<string, unknown> }[] {
+  const kids = (tree as { props: { children: unknown } }).props.children
+  return ([] as unknown[]).concat(kids).flat().filter(Boolean) as never
+}
+
+// What the "isn't syncing" banner the page placed actually says, rendered as the browser would get
+// it; empty when it renders nothing.
+function bannerText(tree: unknown): string {
+  const banner = blocks(tree).find((b) => b.type === NotSyncingBanner)
+  if (!banner) throw new Error('the page rendered no NotSyncingBanner')
+  const { container } = renderDom(banner as ReactElement)
+  const text = container.textContent ?? ''
+  cleanup()
+  return text
+}
+
+describe('Dashboard banks (#135)', () => {
+  it("warns that a bank isn't syncing, first, above the header", async () => {
+    results.plaid_items = {
+      data: [storedItem({ status: 'needs_reconnect' }), storedItem({ id: 'item-2', institution_name: 'Amex' }), ...FOREIGN_ITEMS],
+      error: null,
+    }
+    const tree = await render()
+    expect(bannerText(tree)).toBe(
+      "Capital One isn't syncing — reconnect in Settings to resume. These figures may be out of date."
+    )
+    const order = blocks(tree).map((b) => b.type)
+    expect(order.indexOf(NotSyncingBanner)).toBe(0)
+    expect(order.indexOf(NotSyncingBanner)).toBeLessThan(order.indexOf(PageHeader))
+  })
+
+  // Another household's broken bank, or this household's from the other Plaid environment, must
+  // not raise the banner here.
+  it('says nothing while every one of the household\'s banks is syncing', async () => {
+    results.plaid_items = { data: [storedItem(), ...FOREIGN_ITEMS], error: null }
+    expect(bannerText(await render())).toBe('')
+  })
+
+  // The OAuth return's one-time note stays first, as it was before the banner moved.
+  it('keeps the OAuth notice above the banner', async () => {
+    results.plaid_items = { data: [storedItem({ status: 'temporarily_unavailable' })], error: null }
+    const tree = await DashboardPage({ searchParams: Promise.resolve({ notice: 'Bank connected.' }) })
+    const order = blocks(tree)
+    expect(textOf(order[0]).trim()).toBe('Bank connected.')
+    expect(order[1].type).toBe(NotSyncingBanner)
+  })
 })
 
 describe('Dashboard average savings (#126)', () => {
