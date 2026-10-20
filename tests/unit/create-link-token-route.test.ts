@@ -172,6 +172,21 @@ describe('POST /api/plaid/create-link-token: a new bank', () => {
 })
 
 describe('POST /api/plaid/create-link-token: Reconnect', () => {
+  // A Reconnect must name its bank. Falling back to a new bank's link token would open the flow that
+  // spends one of the ten connections (#51).
+  it.each([
+    ['no itemId', { mode: 'update' }],
+    ['an itemId that is not a string', { mode: 'update', itemId: 7 }],
+    ['an empty itemId', { mode: 'update', itemId: '' }],
+  ])('answers 400 for update mode with %s, and issues no link token', async (_, body) => {
+    makeStandIns()
+    const res = await post(body)
+    expect(res.status).toBe(400)
+    expect(await errorOf(res)).toBe("Couldn't start the reconnection. Refresh and try again.")
+    expect(linkTokenCreate).not.toHaveBeenCalled()
+    expect(assertEnvMatchesDatabase).not.toHaveBeenCalled()
+  })
+
   it("reads the bank it was given, and opens update mode with that bank's own token", async () => {
     const calls = makeStandIns()
     const res = await reconnect()

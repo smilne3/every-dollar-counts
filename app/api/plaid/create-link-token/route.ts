@@ -64,8 +64,13 @@ export async function POST(req: Request) {
   }
   if (!membership) return fail(403, "Your account isn't part of a household.")
 
-  const body = await req.json().catch(() => ({}) as Record<string, unknown>)
-  const updateMode = body.mode === 'update' && typeof body.itemId === 'string'
+  const body = ((await req.json().catch(() => null)) ?? {}) as Record<string, unknown>
+  // A Reconnect must name its bank. Falling back to a new bank's link token instead would open the
+  // flow that spends one of the ten connections (#51).
+  if (body.mode === 'update' && (typeof body.itemId !== 'string' || body.itemId === '')) {
+    return fail(400, "Couldn't start the reconnection. Refresh and try again.")
+  }
+  const updateMode = body.mode === 'update'
 
   // THE ONLY PLACE A CROSS-ENVIRONMENT LINK CAN BE REFUSED FOR FREE (#23). Completing Link creates
   // the Item at Plaid and spends one of ten unrefundable slots — before exchange-public-token has
