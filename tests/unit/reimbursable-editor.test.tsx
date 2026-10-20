@@ -196,7 +196,10 @@ describe('ReimbursableEditor', () => {
     render(<ReimbursableEditor {...props} onBusyChange={onBusyChange} />)
     saveForty()
     await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
-    expect(screen.queryByRole('dialog')).toBeNull()
+    // Waited for, not read straight after: refresh is called as the save settles, and Dialog closes
+    // the <dialog> in an effect after the render that follows, so under load a plain read can come
+    // first and fail.
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(onBusyChange.mock.calls.map((c) => c[0])).toEqual([true, false])
   })
 
