@@ -111,12 +111,27 @@ describe('POST /api/budgets: validation before the database', () => {
     ['no items', {}],
     ['items that are not a list', { items: { category: 'Groceries', monthly_limit: 400 } }],
     ['an item with no category', { items: [{ monthly_limit: 400 }] }],
+    // NaN and Infinity have no JSON form and arrive as null, which Number() would read as 0: a clear.
+    ['a limit that is not a finite number', { items: [{ category: 'Groceries', monthly_limit: null }] }],
+    ['a limit that is not a number at all', { items: [{ category: 'Groceries', monthly_limit: 'lots' }] }],
+    // A number too big for a double parses to Infinity.
+    ['a limit too large to be finite', '{"items":[{"category":"Groceries","monthly_limit":1e400}]}'],
   ])('answers 400 for %s, in words, without touching the database', async (_, body) => {
     const res = await post(body)
     expect(res.status).toBe(400)
     expect(await errorOf(res)).toBe('That could not be saved. Refresh and try again.')
     expect(createClient).not.toHaveBeenCalled()
   })
+})
+
+// Number('-50') > 0 is false, so a negative limit used to be read as "no limit": the old one was
+// deleted and the editor said "Saved.".
+it('answers 400 for a negative limit, in words, and writes nothing', async () => {
+  const calls = makeSupabase()
+  const res = await post({ items: [{ category: 'Groceries', monthly_limit: -50 }, { category: 'Dining', monthly_limit: 0 }] })
+  expect(res.status).toBe(400)
+  expect(await errorOf(res)).toBe("Limits can't be negative.")
+  expect(writes(calls)).toBe(0)
 })
 
 describe('POST /api/budgets', () => {

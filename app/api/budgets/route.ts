@@ -9,9 +9,18 @@ import { createClient } from '@/lib/supabase/server'
 const TRY_AGAIN = 'That could not be saved. Please try again.'
 const fail = (status: number, error: string) => NextResponse.json({ error }, { status })
 
-type Item = { category: string; monthly_limit: unknown }
-const isItem = (it: unknown): it is Item =>
-  typeof (it as Item | null)?.category === 'string' && (it as Item).category !== ''
+// A category's name and its limit as a finite number. NaN and Infinity have no JSON form and arrive
+// as null, which Number() would read as 0, a clear, so the type is checked, not converted.
+type Item = { category: string; monthly_limit: number }
+const isItem = (it: unknown): it is Item => {
+  const i = it as Partial<Item> | null
+  return (
+    typeof i?.category === 'string' &&
+    i.category !== '' &&
+    typeof i.monthly_limit === 'number' &&
+    Number.isFinite(i.monthly_limit)
+  )
+}
 
 export async function POST(req: Request) {
   // 1. Validate before touching the database. BudgetEditor always sends every category; a request
@@ -21,6 +30,9 @@ export async function POST(req: Request) {
   if (!Array.isArray(items) || !items.every(isItem)) {
     return fail(400, 'That could not be saved. Refresh and try again.')
   }
+  // Below, anything not above zero is a cleared limit, so a negative one would be deleted and
+  // reported as saved. BudgetEditor refuses it too.
+  if (items.some((it) => it.monthly_limit < 0)) return fail(400, "Limits can't be negative.")
 
   // 2. Sign-in and household, as app/api/category-rules/route.ts: 503 if Supabase Auth is
   //    unreachable, 401; 500 if the membership read fails, 403.
@@ -47,8 +59,7 @@ export async function POST(req: Request) {
   const toUpsert: { household_id: string; category: string; monthly_limit: number }[] = []
   const toDelete: string[] = []
   for (const it of items) {
-    const limit = Number(it.monthly_limit)
-    if (limit > 0) toUpsert.push({ household_id, category: it.category, monthly_limit: limit })
+    if (it.monthly_limit > 0) toUpsert.push({ household_id, category: it.category, monthly_limit: it.monthly_limit })
     else toDelete.push(it.category)
   }
 
