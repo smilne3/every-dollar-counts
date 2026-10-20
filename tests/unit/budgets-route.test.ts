@@ -24,6 +24,8 @@ function makeSupabase({
   membership = { data: { household_id: 'hh-1' } as Row | null, error: null as DbError },
   upsertError = null as DbError,
   deleteError = null as DbError,
+  // Called as each write is done, so a test can move the clock on.
+  onWrite = () => {},
 } = {}) {
   const calls = {
     membership: [] as unknown[][],
@@ -51,6 +53,7 @@ function makeSupabase({
         return {
           upsert: (rows: Row[], options: unknown) => {
             calls.upserts.push({ rows, options })
+            onWrite()
             return Promise.resolve({ error: upsertError })
           },
           delete: () => {
@@ -62,6 +65,7 @@ function makeSupabase({
                 return {
                   in: (col2: string, vals: unknown[]) => {
                     entry.filters.push(['in', col2, vals])
+                    onWrite()
                     return Promise.resolve({ error: deleteError })
                   },
                 }
@@ -103,7 +107,10 @@ beforeEach(() => {
   logs = []
   vi.spyOn(console, 'error').mockImplementation((...a) => void logs.push(a))
 })
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.useRealTimers()
+})
 
 describe('POST /api/budgets: validation before the database', () => {
   it.each([
@@ -176,7 +183,7 @@ describe('POST /api/budgets', () => {
     const calls = makeSupabase()
     const res = await save()
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ ok: true })
+    expect(await res.json()).toEqual({ ok: true, savedAt: expect.any(Number) })
     expect(calls.membership).toEqual([['select', 'household_id'], ['limit', 1]])
     expect(calls.upserts).toEqual([
       {
@@ -188,6 +195,16 @@ describe('POST /api/budgets', () => {
       },
     ])
     expect(calls.deletes).toEqual([{ filters: [['eq', 'household_id', 'hh-1'], ['in', 'category', ['Dining']]] }])
+  })
+
+  // #176: BudgetEditor refills what it sent only from a page that read the limits after the save,
+  // so a time taken before either write would let a page read in between pass as newer.
+  it('says when the save was written, by the server clock, once both writes are done', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(1_000)
+    makeSupabase({ onWrite: () => vi.setSystemTime(Date.now() + 1_000) })
+    const res = await save()
+    expect(await res.json()).toEqual({ ok: true, savedAt: 3_000 })
   })
 
   it('answers 500 for a failed upsert, logs the database text, does not show it, and deletes nothing', async () => {

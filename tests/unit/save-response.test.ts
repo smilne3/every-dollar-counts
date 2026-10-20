@@ -9,6 +9,7 @@ import {
   refused,
   replyWith,
   saved,
+  savedAt,
   useFakeSaveClock,
 } from './helpers/save-replies'
 
@@ -30,6 +31,11 @@ describe('readSaveResponse', () => {
   it('accepts only a JSON ok: true', async () => {
     expect(await readSaveResponse(res({ body: { ok: true } }))).toEqual({ ok: true })
     expect(await readSaveResponse(res({ body: {} }))).toEqual({ ok: false, error: SAVE_FAILED, status: 200 })
+  })
+  // #176: when the route says it wrote, by the server's clock. Anything but a number is no time.
+  it('passes on when the route says it wrote, if that is a number', async () => {
+    expect(await readSaveResponse(res({ body: { ok: true, savedAt: 1_234 } }))).toEqual({ ok: true, savedAt: 1_234 })
+    expect(await readSaveResponse(res({ body: { ok: true, savedAt: '1234' } }))).toEqual({ ok: true })
   })
   it('reads a redirect, or an OK reply that is not JSON, as an ended session', async () => {
     expect(await readSaveResponse(res({ redirected: true, body: { ok: true } }))).toEqual({ ok: false, error: SESSION_ENDED, status: 200 })
@@ -71,6 +77,11 @@ describe('sendSave', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0][0]).toBe('/api/category-rules')
     expect(fetchMock.mock.calls[0][1]).toMatchObject(init)
+  })
+
+  it('reports when the route says the save was written', async () => {
+    vi.stubGlobal('fetch', answering(() => savedAt(1_234)))
+    expect(await sendSave('/api/budgets', { method: 'POST' })).toEqual({ outcome: 'saved', savedAt: 1_234 })
   })
 
   it("reports a refusal with the route's message and status", async () => {

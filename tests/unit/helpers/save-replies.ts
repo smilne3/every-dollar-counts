@@ -8,6 +8,9 @@ const json = (status: number, body: unknown) =>
 
 export const saved = () => json(200, { ok: true })
 
+// A save whose route says when it wrote, in the server's clock, as /api/budgets does (#176).
+export const savedAt = (time: number) => json(200, { ok: true, savedAt: time })
+
 // A refusal in the route's own words.
 export const refused = (status: number, error: string) => json(status, { error })
 

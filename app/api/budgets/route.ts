@@ -80,5 +80,7 @@ export async function POST(req: Request) {
       return fail(500, 'The limits you cleared could not be removed. Please try again.')
     }
   }
-  return NextResponse.json({ ok: true })
+  // When both writes were done, by the server's clock: BudgetEditor refills what it sent only from a
+  // page that read the limits after this, so the time is taken after the writes, not before (#176).
+  return NextResponse.json({ ok: true, savedAt: Date.now() })
 }
