@@ -518,6 +518,26 @@ describe('TransactionCard sheet with a save in flight', () => {
     expect(screen.queryByRole('checkbox')).not.toBeNull()
   })
 
+  // #103: the ⋮ editor's own dialog closed on Escape mid-save, though its Cancel was disabled. The
+  // sheet's Done stayed disabled with nothing shown, then re-enabled with no message: the failure
+  // had landed in a closed dialog.
+  it('keeps the partial-amount editor open on Escape mid-save, and shows its failure there', async () => {
+    const req = pendingFetch()
+    openSheet()
+    fireEvent.click(screen.getByRole('button', { name: /partial reimbursable amount/ }))
+    fireEvent.change(screen.getByLabelText(/How much is coming back/), { target: { value: '40' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    const editor = () => screen.getByRole('dialog', { name: 'Reimbursable — Joe S Den' })
+    fireEvent(editor(), new Event('cancel', { bubbles: false, cancelable: true }))
+    expect(editor()).toBeTruthy()
+    expect((done() as HTMLButtonElement).disabled).toBe(true)
+
+    req.refuse()
+
+    expect((await within(editor()).findByRole('alert')).textContent).toBe('nope')
+    expect((done() as HTMLButtonElement).disabled).toBe(false)
+  })
+
   // Holding someone inside a sheet they cannot leave would be a worse bug than the one above, so
   // the state that withholds the exit is tied to the controls that could have set it existing. A
   // refresh turning this row into a card payment removes both of them.

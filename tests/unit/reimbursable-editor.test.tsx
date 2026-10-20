@@ -245,6 +245,25 @@ describe('ReimbursableEditor', () => {
     expect(onBusyChange.mock.calls.map((c) => c[0])).toEqual([true, false])
   })
 
+  // #103: Cancel was disabled mid-save, but Escape and the Android back gesture still closed the
+  // dialog, so the reply's message landed in a closed dialog and reopening cleared it. `cancel` is
+  // what both of them fire on the <dialog>.
+  it('will not close on Escape while a save is in flight, and shows the failure once it settles', async () => {
+    let settle!: (res: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => (settle = resolve))))
+    render(<ReimbursableEditor {...props} />)
+    saveForty()
+    const escape = () => fireEvent(screen.getByRole('dialog'), new Event('cancel', { bubbles: false, cancelable: true }))
+    escape()
+    expect(screen.getByRole('dialog')).toBeTruthy()
+    settle(refused(400, 'Your bank removed that transaction. Refresh and try again.'))
+    expect((await screen.findByRole('alert')).textContent).toBe('Your bank removed that transaction. Refresh and try again.')
+    expect(screen.getByRole('dialog')).toBeTruthy()
+    // Settled, so Escape is the way out again.
+    escape()
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
   it('says the limit rather than leaving a disabled Save unexplained', () => {
     render(<ReimbursableEditor {...props} />)
     openEditor()

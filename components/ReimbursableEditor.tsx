@@ -131,6 +131,9 @@ export function ReimbursableEditor({
         open={open}
         title={`Reimbursable — ${label}`}
         initialFocusRef={amountRef}
+        // Escape and the Android back gesture wait for a save in flight, as Cancel does: closed
+        // mid-save, the reply's message would land in a closed dialog and reopening clears it (#103).
+        busy={busy}
         onCancel={() => setOpen(false)}
         footer={
           <>
