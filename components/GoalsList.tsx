@@ -160,6 +160,15 @@ function GoalCard({
       setBase(String(goal.saved_amount))
     }
   }
+  // Set after a save whose outcome is unknown, and acted on here so the field goes back to the amount
+  // the page holds now, not the one it held when Update was tapped: the reload from an earlier save
+  // can land while this one is in flight.
+  const [resetting, setResetting] = useState(false)
+  if (resetting) {
+    setResetting(false)
+    setSaved(String(goal.saved_amount))
+    setBase(String(goal.saved_amount))
+  }
   const [confirmDelete, setConfirmDelete] = useState(false)
   const ratio = goalProgress(Number(saved || 0), goal.target_amount)
   const pct = Math.round(ratio * 100)
@@ -174,9 +183,9 @@ function GoalCard({
       setBase(sent)
     } else if (outcome === 'unknown') {
       // The bar and the figures follow the field, so an amount left in it would show progress the
-      // server may not have. Back to the amount last read; the reload shows the latest.
-      setSaved(String(goal.saved_amount))
-      setBase(String(goal.saved_amount))
+      // server may not have. Back to the amount last read (see `resetting`); the reload shows the
+      // latest.
+      setResetting(true)
     }
     // A refusal wrote nothing: what was typed stays, for another try.
   }

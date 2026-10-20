@@ -366,6 +366,32 @@ describe('GoalsList saves', () => {
       expect(updateButton(EF).disabled).toBe(true)
     })
 
+    // The reload from one save can land while the next is in flight. If the next one's outcome is
+    // unknown, the field goes back to the amount the page holds by then: going back to the one it
+    // held when Update was tapped put 1200 behind a 1500 the server had confirmed, with Update
+    // enabled to write it.
+    it('after an unknown outcome, goes back to the amount the latest reload brought, not an older one', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      useFakeSaveClock()
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(saved()).mockImplementationOnce(neverSettles()))
+      const { rerender } = render(<GoalsList {...props} />)
+      updateEmergencyFund('1500')
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(refresh).toHaveBeenCalledTimes(1)
+      updateEmergencyFund('1700')
+      // The reload after the first save lands mid-save; what was typed since stays.
+      rerender(<GoalsList initialGoals={reloaded(1500)} />)
+      expect(amount(EF).value).toBe('1700')
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(SAVE_TIMEOUT_MS)
+      })
+      expect(within(card(EF)).getByRole('alert').textContent).toBe('It may not have saved. Showing the latest.')
+      expect(amount(EF).value).toBe('1500')
+      expect(updateButton(EF).disabled).toBe(true)
+    })
+
     // A refusal wrote nothing, so what was typed is still the person's, whatever reloads after.
     it('keeps a refused amount when a later reload arrives', async () => {
       vi.stubGlobal('fetch', answering(() => refused(500, 'That could not be saved. Please try again.')))
