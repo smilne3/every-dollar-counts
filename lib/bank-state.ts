@@ -9,12 +9,31 @@ export function notSyncing<T extends { status: string }>(items: T[]): T[] {
   return items.filter((i) => i.status !== 'ok')
 }
 
+// The banks split by notSyncing(), so no split can use a second definition: those still syncing,
+// and those behind.
+export function bySync<T extends { status: string }>(items: T[]): { syncing: T[]; behind: T[] } {
+  const behind = notSyncing(items)
+  return { syncing: items.filter((i) => !behind.includes(i)), behind }
+}
+
 // What to say about banks that are connected but have no accounts yet (#164). The exchange route
 // keeps a bank whose first balance pull failed, and tells the person to press Refresh; until the
 // balances arrive it has no accounts rows. Read as "no banks", that state invited linking the same
-// bank again, which spends one of ten lifetime connections (#51). For one bank or more.
+// bank again, which spends one of ten lifetime connections (#51). Only for banks that are syncing
+// (bySync), whose balances Refresh pulls. For one bank or more.
 export function balancesPending(items: { institution_name: string | null }[]): string {
   return items.length === 1
     ? `${items[0].institution_name ?? 'Your bank'} is connected, but its balances haven't arrived yet.`
     : `${items.length} banks are connected, but their balances haven't arrived yet.`
+}
+
+// The same for banks with no accounts that aren't syncing, and it promises nothing. Refresh skips a
+// bank whose login broke, and retries the rest without fixing what stopped them, so their balances
+// are not on their way; Settings says what each one needs. `inSettings` says where, for a page
+// other than Settings.
+export function balancesBlocked(items: { institution_name: string | null }[], { inSettings = false } = {}): string {
+  const where = inSettings ? ' in Settings' : ''
+  return items.length === 1
+    ? `${items[0].institution_name ?? 'Your bank'} is connected, but its balances can't arrive until it's sorted out${where}.`
+    : `${items.length} banks are connected, but their balances can't arrive until they're sorted out${where}.`
 }

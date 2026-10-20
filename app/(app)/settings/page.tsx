@@ -3,7 +3,7 @@ import { InvitePartnerForm } from '@/components/InvitePartnerForm'
 import { LinkButton } from '@/components/LinkButton'
 import { BankList } from '@/components/BankList'
 import { listItemsForHousehold, type ItemSummary } from '@/lib/plaid-items'
-import { balancesPending } from '@/lib/bank-state'
+import { balancesBlocked, balancesPending, bySync } from '@/lib/bank-state'
 import { countSlotsUsed, LIFETIME_SLOTS } from '@/lib/plaid-slots'
 import { HomeValueCard } from '@/components/HomeValueCard'
 import { TimezoneCard } from '@/components/TimezoneCard'
@@ -55,12 +55,18 @@ async function countAccounts(supabase: Supabase): Promise<number> {
 
 // The Banks card's first line, from the account count and the bank list. A bank can be connected
 // before its balances arrive, and has no accounts until they do (#164), so a count of zero is not
-// "no banks": when the list has banks, the line comes from it. With the list unreadable, a zero
-// count says nothing about banks either, so there is no line; the card says the list didn't load.
+// "no banks": when the list has banks, the line comes from it. Only those still syncing are said
+// to be on their way; for one that isn't, the line promises nothing, and its own status line in the
+// list below says what it needs. With the list unreadable, a zero count says nothing about banks
+// either, so there is no line; the card says the list didn't load.
 function banksLine(accountCount: number, items: ItemSummary[] | null): string | null {
   if (accountCount) return `${accountCount} account(s) connected.`
   if (!items) return null
-  return items.length ? balancesPending(items) : 'No banks connected yet.'
+  if (!items.length) return 'No banks connected yet.'
+  const { syncing, behind } = bySync(items)
+  return [syncing.length ? balancesPending(syncing) : '', behind.length ? balancesBlocked(behind) : '']
+    .filter(Boolean)
+    .join(' ')
 }
 
 // Everything the Categories and Category rules cards need. Throws if any read fails; the page

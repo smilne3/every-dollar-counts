@@ -275,6 +275,36 @@ describe('Settings: a failed read says so in its own card (#91)', () => {
       )
     })
 
+    // #172: a bank that isn't syncing can't be counted on to send its balances (Refresh skips a
+    // broken login, and retries the rest without fixing what stopped them), so the line promises
+    // nothing for it. Its status line in the list below says what it needs.
+    it.each(['needs_reconnect', 'config_error', 'action_at_bank', 'temporarily_unavailable'])(
+      'promises nothing for a bank that is %s',
+      async (status) => {
+        results.plaid_items = { data: [{ ...capitalOne, status }], error: null }
+        const text = flatText(card(await SettingsPage(), 'Banks'))
+        expect(text).toContain("Capital One is connected, but its balances can't arrive until it's sorted out.")
+        expect(text).not.toContain("haven't arrived")
+      }
+    )
+
+    it('counts several banks that are not syncing', async () => {
+      results.plaid_items = {
+        data: [{ ...capitalOne, status: 'needs_reconnect' }, { ...capitalOne, id: 'item-2', institution_name: 'Amex', status: 'config_error' }],
+        error: null,
+      }
+      expect(flatText(card(await SettingsPage(), 'Banks'))).toContain(
+        "2 banks are connected, but their balances can't arrive until they're sorted out."
+      )
+    })
+
+    it('with one bank syncing and one not, says which is on its way and which is not', async () => {
+      results.plaid_items = { data: [capitalOne, { ...capitalOne, id: 'item-2', institution_name: 'Amex', status: 'needs_reconnect' }], error: null }
+      expect(flatText(card(await SettingsPage(), 'Banks'))).toContain(
+        "Capital One is connected, but its balances haven't arrived yet. Amex is connected, but its balances can't arrive until it's sorted out."
+      )
+    })
+
     // Once any account has arrived the count is true again, and stays the first line.
     it('keeps the account count once there are accounts', async () => {
       results.accounts = { data: null, error: null, count: 3 } as never

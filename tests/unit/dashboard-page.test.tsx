@@ -118,8 +118,10 @@ import DashboardPage from '@/app/(app)/dashboard/page'
 import BreakdownPage from '@/app/(app)/breakdown/[metric]/page'
 import { BreakdownList } from '@/components/BreakdownList'
 import { NotSyncingBanner } from '@/components/NotSyncingBanner'
+import Link from 'next/link'
 import { RefreshButton } from '@/components/RefreshButton'
 import { LinkButton } from '@/components/LinkButton'
+import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { moneyWhole } from '@/lib/format'
 import { catalogFingerprint } from '@/lib/category-rules'
@@ -267,10 +269,29 @@ describe('Dashboard banks (#135)', () => {
 
 // Whether `type` is rendered anywhere in the tree the page returned.
 function renders(node: unknown, type: unknown): boolean {
-  if (node == null || typeof node !== 'object') return false
-  if (Array.isArray(node)) return node.some((n) => renders(n, type))
-  const el = node as { type?: unknown; props?: { children?: unknown } }
-  return el.type === type || (el.props ? renders(el.props.children, type) : false)
+  return findElement(node, type) !== null
+}
+
+// The first element of `type` in the tree, with the props the page gave it.
+function findElement(node: unknown, type: unknown): { props: Record<string, unknown> } | null {
+  if (node == null || typeof node !== 'object') return null
+  if (Array.isArray(node)) {
+    for (const n of node) {
+      const found = findElement(n, type)
+      if (found) return found
+    }
+    return null
+  }
+  const el = node as { type?: unknown; props?: Record<string, unknown> }
+  if (el.type === type) return el as { props: Record<string, unknown> }
+  return el.props ? findElement(el.props.children, type) : null
+}
+
+// What the empty-state card says, its heading, line and button label in order, and the card.
+function emptyCard(tree: unknown): { text: string; card: unknown } {
+  const card = blocks(tree).find((b) => b.type === Card)
+  if (!card) throw new Error('the page rendered no card')
+  return { text: textOf(card).replace(/\s+/g, ' ').trim(), card }
 }
 
 // #164: the exchange route keeps a bank whose first balance pull failed, and says to press Refresh.
@@ -317,6 +338,51 @@ describe('Dashboard before a bank\'s balances arrive (#164)', () => {
     const order = blocks(tree).map((b) => b.type)
     expect(order.indexOf(NotSyncingBanner)).toBe(0)
     expect(order.indexOf(PageHeader)).toBe(1)
+  })
+
+  // #172: a bank that isn't syncing can't be counted on to send its balances. Refresh skips a broken
+  // login and retries the rest without fixing what stopped them, so "on their way" and "Press
+  // Refresh" would be a promise it can't keep. The card promises nothing and points to Settings,
+  // and still never offers Connect.
+  it.each(['needs_reconnect', 'config_error', 'action_at_bank', 'temporarily_unavailable'])(
+    'promises nothing for a bank that is %s, and points to Settings instead of Refresh',
+    async (status) => {
+      results.plaid_items = { data: [storedItem({ status })], error: null }
+      const tree = await render()
+      const { text, card } = emptyCard(tree)
+      expect(text).toBe(
+        "Your bank needs attention Capital One is connected, but its balances can't arrive until it's sorted out in Settings. Go to Settings"
+      )
+      expect(findElement(card, Link)?.props.href).toBe('/settings')
+      expect(renders(tree, RefreshButton)).toBe(false)
+      expect(renders(tree, LinkButton)).toBe(false)
+    }
+  )
+
+  it('says how many banks need attention when none of them is syncing', async () => {
+    results.plaid_items = {
+      data: [storedItem({ status: 'needs_reconnect' }), storedItem({ id: 'item-2', institution_name: 'Amex', status: 'config_error' })],
+      error: null,
+    }
+    expect(emptyCard(await render()).text).toBe(
+      "Your banks need attention 2 banks are connected, but their balances can't arrive until they're sorted out in Settings. Go to Settings"
+    )
+  })
+
+  // With both kinds, the card speaks only for the bank that is syncing; the banner, first, for the
+  // one that isn't.
+  it('with one bank syncing and one not, promises balances only for the one syncing', async () => {
+    results.plaid_items = {
+      data: [storedItem(), storedItem({ id: 'item-2', institution_name: 'Amex', status: 'needs_reconnect', created_at: '2026-07-15T09:00:00Z' })],
+      error: null,
+    }
+    const tree = await render()
+    expect(emptyCard(tree).text).toBe(
+      "Your balances are on their way Capital One is connected, but its balances haven't arrived yet. Press Refresh to fetch them."
+    )
+    expect(renders(tree, RefreshButton)).toBe(true)
+    expect(renders(tree, LinkButton)).toBe(false)
+    expect(bannerText(tree)).toBe("Amex isn't syncing — reconnect in Settings to resume. These figures may be out of date.")
   })
 
   it('still offers Connect to a household with no banks at all', async () => {

@@ -7,6 +7,7 @@ import { RefreshButton } from '@/components/RefreshButton'
 import { SpendIncomeChart } from '@/components/SpendIncomeChart'
 import { RecentActivity } from '@/components/RecentActivity'
 import { Card } from '@/components/ui/Card'
+import { buttonClass } from '@/components/ui/Button'
 import { StatCard } from '@/components/ui/StatCard'
 import { StatRows } from '@/components/ui/StatRows'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -23,7 +24,7 @@ import {
   sumManualAssets,
 } from '@/lib/dashboard'
 import { listItemsForHousehold } from '@/lib/plaid-items'
-import { balancesPending } from '@/lib/bank-state'
+import { balancesBlocked, balancesPending, bySync } from '@/lib/bank-state'
 import { listManualAssets } from '@/lib/manual-assets'
 import { budgetedSpend, spendByCategory, monthKey } from '@/lib/budget'
 import { buildSpendContext } from '@/lib/spend-context'
@@ -82,21 +83,44 @@ export default async function DashboardPage({
     // Banks with no accounts yet are not "no banks" (#164). A bank whose first balance pull failed
     // is kept, with a note to press Refresh, and Refresh pulls its balances: the sync route stores
     // accounts for every bank it does not skip. Connect here would invite linking the same bank
-    // again, which spends one of ten lifetime connections (#51). The banner still comes first, for
-    // the bank Refresh does skip, one whose login broke.
+    // again, which spends one of ten lifetime connections (#51), so it is never offered.
+    //
+    // Only a bank that is syncing is promised its balances, with Refresh. One that isn't can't be
+    // counted on to send them (Refresh skips a broken login, and retries the rest without fixing
+    // what stopped them), so the card points to Settings for it instead. With both kinds, the card
+    // speaks for the syncing ones and the banner, first as always, for the rest.
     if (items.length > 0) {
+      const { syncing, behind } = bySync(items)
       return (
         <div className="space-y-6">
           <NotSyncingBanner items={items} />
           <PageHeader title={greeting(hourIn(tz))} subtitle={dateStr} />
           <Card className="p-8 text-center">
-            <h2 className="text-lg font-semibold text-ink">Your balances are on their way</h2>
-            <p className="mx-auto mt-1 max-w-sm text-sm text-muted">
-              {balancesPending(items)} Press Refresh to fetch them.
-            </p>
-            <div className="mt-5 flex justify-center">
-              <RefreshButton />
-            </div>
+            {syncing.length > 0 ? (
+              <>
+                <h2 className="text-lg font-semibold text-ink">Your balances are on their way</h2>
+                <p className="mx-auto mt-1 max-w-sm text-sm text-muted">
+                  {balancesPending(syncing)} Press Refresh to fetch them.
+                </p>
+                <div className="mt-5 flex justify-center">
+                  <RefreshButton />
+                </div>
+              </>
+            ) : (
+              <>
+                <h2 className="text-lg font-semibold text-ink">
+                  {behind.length === 1 ? 'Your bank needs attention' : 'Your banks need attention'}
+                </h2>
+                <p className="mx-auto mt-1 max-w-sm text-sm text-muted">
+                  {balancesBlocked(behind, { inSettings: true })}
+                </p>
+                <div className="mt-5 flex justify-center">
+                  <Link href="/settings" className={buttonClass('secondary', 'md')}>
+                    Go to Settings
+                  </Link>
+                </div>
+              </>
+            )}
           </Card>
         </div>
       )
