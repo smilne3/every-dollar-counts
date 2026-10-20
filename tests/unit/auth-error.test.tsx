@@ -40,6 +40,16 @@ describe('AuthCodeError page', () => {
     expect(screen.queryByText(/invalid or expired/i)).toBeNull()
   })
 
+  // #149: someone in the household who signed in with their other Google account lands here. The
+  // page had no way back to sign in, and the installed app has no address bar to get there.
+  it('offers a way back to sign in, where Google asks which account, when the fragment says signup_disabled', async () => {
+    window.location.hash =
+      '#error=access_denied&error_code=signup_disabled&error_description=Signups+not+allowed+for+this+instance&sb='
+    render(<AuthCodeError />)
+    const back = await screen.findByRole('link', { name: 'Sign in with a different account' })
+    expect(back.getAttribute('href')).toBe('/login')
+  })
+
   it('keeps the expired-link copy when there is no error fragment', () => {
     render(<AuthCodeError />)
     expect(screen.getByText(/invalid or expired/i)).toBeTruthy()

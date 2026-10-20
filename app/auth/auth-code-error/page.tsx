@@ -29,12 +29,20 @@ export default function AuthCodeError() {
               The code is open source, though — you can run your own copy with your own bank
               connections.
             </p>
-            <a
-              href="https://github.com/smilne3/every-dollar-counts#running-it-locally"
-              className="mt-4 inline-block text-sm font-medium text-emerald hover:text-emerald-600"
-            >
-              How to run your own copy
-            </a>
+            {/* Someone in the household who signed in with their other Google account lands here.
+                Sign-in now asks which account (#149), so this is their way back, and in the
+                installed app there is no address bar to get back any other way. */}
+            <div className="mt-4 flex flex-col items-center gap-2">
+              <Link href="/login" className="text-sm font-medium text-emerald hover:text-emerald-600">
+                Sign in with a different account
+              </Link>
+              <a
+                href="https://github.com/smilne3/every-dollar-counts#running-it-locally"
+                className="text-sm font-medium text-emerald hover:text-emerald-600"
+              >
+                How to run your own copy
+              </a>
+            </div>
           </>
         ) : (
           <>

@@ -21,7 +21,9 @@ export default function LoginPage() {
     const supabase = createClient()
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: `${location.origin}/auth/confirm` },
+      // Google asks which account every time (#149). Left to choose, on a phone signed into two
+      // accounts it can pick one outside the household, and it picks that one again on every retry.
+      options: { redirectTo: `${location.origin}/auth/confirm`, queryParams: { prompt: 'select_account' } },
     })
     if (error) setErr(error.message)
   }
