@@ -111,13 +111,30 @@ describe('HomeValueCard saves', () => {
     expect(refresh).toHaveBeenCalledTimes(1)
   })
 
-  it('refuses a value it cannot read, and sends nothing', () => {
+  // A blank field used to go out as 0 (Number('') is 0) and set the home to $0: net worth fell by
+  // the whole house, and the fresh updated_at turned off the reminder to update it.
+  it.each([
+    ['a value it cannot read', 'about 750k'],
+    ['a negative value', '-$5,000'],
+    ['an empty field', ''],
+    ['a field of spaces', '   '],
+    ['a field with only a dollar sign', '$'],
+  ])('refuses %s, and sends nothing', (_, typed) => {
     const fetchMock = answering(saved)
     vi.stubGlobal('fetch', fetchMock)
     render(<HomeValueCard {...props} />)
-    typeAndSave('about 750k')
+    typeAndSave(typed)
     expect(screen.getByRole('alert').textContent).toBe('Enter your home value, e.g. 750000 or $750,000.')
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('still saves a home value of zero, typed as 0', async () => {
+    const fetchMock = answering(saved)
+    vi.stubGlobal('fetch', fetchMock)
+    render(<HomeValueCard {...props} />)
+    typeAndSave('0')
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({ value: 0 })
   })
 
   it('clears an earlier error once a save succeeds', async () => {

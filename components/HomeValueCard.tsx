@@ -26,8 +26,10 @@ export function HomeValueCard({
     // As on the button: Enter in the field submits the form too.
     if (busy) return
     // Accept what Zillow shows verbatim — "$750,000" — by stripping $, commas, and spaces. The
-    // card tells the user to copy from Zillow, so this must parse the way Zillow formats it.
-    const v = Number(value.replace(/[$,\s]/g, ''))
+    // card tells the user to copy from Zillow, so this must parse the way Zillow formats it. A blank
+    // field is no value, as in the route: Number('') is 0, which would set the home to $0.
+    const text = value.replace(/[$,\s]/g, '')
+    const v = text === '' ? NaN : Number(text)
     if (!Number.isFinite(v) || v < 0) {
       setError('Enter your home value, e.g. 750000 or $750,000.')
       return
