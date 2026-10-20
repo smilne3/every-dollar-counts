@@ -86,7 +86,8 @@ export default async function DashboardPage({
     // Banks with no accounts yet are not "no banks" (#164). A bank whose first balance pull failed
     // is kept, with a note to press Refresh, and Refresh pulls its balances: the sync route stores
     // accounts for every bank it does not skip. Connect here would invite linking the same bank
-    // again, which spends one of ten lifetime connections (#51).
+    // again, which spends one of ten lifetime connections (#51). The banner still comes first, for
+    // the bank Refresh does skip, one whose login broke.
     if (items.length > 0) {
       return (
         <div className="space-y-6">
