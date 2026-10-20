@@ -90,6 +90,7 @@ export function BudgetEditor({
     // What is sent becomes each field's base, so the reload refills it unless it is edited after.
     // The inputs are disabled while saving, so what is sent is what stays on screen.
     const sent = { ...limits }
+    const before = base
     setBase(sent)
     let reload = false
     try {
@@ -109,7 +110,10 @@ export function BudgetEditor({
         reload = true
       } else if (result.outcome === 'refused') {
         // Nothing was written, or the message says which part was not. What was typed stays, so
-        // trying again is one tap.
+        // trying again is one tap. Its base goes back to what it was before the save, so it counts as
+        // typing, which no reload overwrites: nothing reloads after a refusal, so the reload from an
+        // earlier save can still land after it (#176).
+        setBase((b) => ({ ...b, ...before }))
         setError(result.error)
       } else {
         // It may have saved, and nothing is reset: with no connection the reload may never come,
