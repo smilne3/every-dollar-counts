@@ -42,7 +42,7 @@ vi.mock('@/lib/supabase/server', () => ({
     auth: { getUser: async () => ({ data: { user: { id: 'user-1' } } }) },
     from: () => ({
       select: () => ({
-        limit: () => ({ single: async () => ({ data: { household_id: 'hh-1' } }) }),
+        limit: () => ({ maybeSingle: async () => ({ data: { household_id: 'hh-1' } }) }),
       }),
     }),
   }),

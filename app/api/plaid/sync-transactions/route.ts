@@ -1,4 +1,5 @@
 import { NextResponse, after } from 'next/server'
+import { isAuthRetryableFetchError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { decrypt } from '@/lib/crypto'
@@ -17,6 +18,10 @@ const STATUS_FOR = {
   config: 'config_error',
 } as const
 
+// RefreshButton shows the refusals below as they stand, so none carries the database's words.
+const TRY_AGAIN = "Couldn't refresh. Please try again."
+const fail = (status: number, error: string) => NextResponse.json({ error }, { status })
+
 // Refresh: re-fetch balances and pull new transactions for every linked bank in the caller's
 // household. Triggered by the "Refresh" button (and by the webhook route when Plaid says new
 // data is ready).
@@ -24,28 +29,46 @@ export async function POST() {
   // after() shares this route's max duration, which starts now: the suggestion job's deadline
   // counts from here (lib/category-suggest.ts RUN_DEADLINE_MS).
   const startedAt = Date.now()
+  // Sign-in and household, as app/api/budgets/route.ts: 503 if Supabase Auth is unreachable, 401;
+  // 500 if the membership read fails, 403.
   const supabase = await createClient()
   const {
     data: { user },
+    error: authError,
   } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  if (isAuthRetryableFetchError(authError)) {
+    console.error('[plaid] sync auth check failed', { code: authError.code, message: authError.message })
+    return fail(503, TRY_AGAIN)
+  }
+  if (!user) return fail(401, 'Your session ended. Sign in again.')
 
-  const { data: membership } = await supabase
+  const { data: membership, error: mError } = await supabase
     .from('memberships')
     .select('household_id')
     .limit(1)
-    .single()
-  if (!membership) return NextResponse.json({ error: 'no household' }, { status: 403 })
+    .maybeSingle()
+  // A failed read is not "no household" (#46).
+  if (mError) {
+    console.error('[plaid] sync membership read failed', { code: mError.code, message: mError.message })
+    return fail(500, TRY_AGAIN)
+  }
+  if (!membership) return fail(403, "Your account isn't part of a household.")
   const household_id = membership.household_id
 
   // Only items belonging to THIS Plaid environment. All environments share one database, so a
   // sandbox item linked from a laptop after go-live would otherwise be looped here, fail with
   // INVALID_ACCESS_TOKEN, and (before the catch-all below) take every real bank down with it.
-  const { data: items } = await supabaseAdmin
+  const { data: items, error: itemsError } = await supabaseAdmin
     .from('plaid_items')
     .select('id, household_id, access_token_encrypted, cursor, products, status, institution_name')
     .eq('household_id', household_id)
     .eq('plaid_env', plaidEnv)
+  // Nor is a failed read "no banks": every count would be 0, which Refresh would report as nothing
+  // new (#46, #119).
+  if (itemsError) {
+    console.error('[plaid] sync bank read failed', { household_id, code: itemsError.code, message: itemsError.message })
+    return fail(500, TRY_AGAIN)
+  }
 
   let added = 0,
     modified = 0,
@@ -78,10 +101,13 @@ export async function POST() {
       }
       // Recovered on its own (the bank came back up, the lock cleared, and so on).
       if (item.status !== 'ok') {
-        await supabaseAdmin
+        const { error } = await supabaseAdmin
           .from('plaid_items')
           .update({ status: 'ok', status_detail: null })
           .eq('id', item.id)
+        // Its data did sync, so this bank is not counted as a problem; its flag stays stale until
+        // the next Refresh.
+        if (error) console.error('[plaid] sync status write failed', { itemId: item.id, code: error.code, message: error.message })
       }
     } catch (e) {
       // NOTHING rethrows. One sick bank must never stop the others — that is the entire point of
@@ -100,10 +126,11 @@ export async function POST() {
       else failed++
       problems.push({ bank: item.institution_name ?? 'A bank', status, code })
       console.error('[plaid] sync failed for item', item.id, code)
-      await supabaseAdmin
+      const { error } = await supabaseAdmin
         .from('plaid_items')
         .update({ status, status_detail: code })
         .eq('id', item.id)
+      if (error) console.error('[plaid] sync status write failed', { itemId: item.id, code: error.code, message: error.message })
       continue
     }
   }
