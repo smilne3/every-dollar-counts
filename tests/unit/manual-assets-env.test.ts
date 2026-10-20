@@ -15,7 +15,7 @@ vi.mock('@/lib/supabase/server', () => ({
       table === 'memberships'
         ? {
             select: () => ({
-              limit: () => ({ single: async () => ({ data: { household_id: 'hh-1' } }) }),
+              limit: () => ({ maybeSingle: async () => ({ data: { household_id: 'hh-1' }, error: null }) }),
             }),
           }
         : { upsert },
