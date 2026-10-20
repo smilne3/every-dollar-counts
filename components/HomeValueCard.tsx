@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/Button'
 import { inputClass } from '@/components/ui/styles'
 import { money } from '@/lib/format'
+import { MAY_NOT_HAVE_SAVED, sendSave } from '@/lib/save-response'
 
 // Edits the household's home value. Enter what Zillow shows; the app subtracts the live mortgage
 // automatically (it's already a liability), so net worth reflects home equity.
@@ -22,6 +23,8 @@ export function HomeValueCard({
 
   async function save(e: React.FormEvent) {
     e.preventDefault()
+    // As on the button: Enter in the field submits the form too.
+    if (busy) return
     // Accept what Zillow shows verbatim — "$750,000" — by stripping $, commas, and spaces. The
     // card tells the user to copy from Zillow, so this must parse the way Zillow formats it.
     const v = Number(value.replace(/[$,\s]/g, ''))
@@ -31,21 +34,35 @@ export function HomeValueCard({
     }
     setBusy(true)
     setError(null)
-    const res = await fetch('/api/manual-assets', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ value: v }),
-    }).catch(() => null)
-    setBusy(false)
-    if (!res || !res.ok) {
-      // Prefer the server's own words when it has any — the environment guard's 409 is a
-      // misconfiguration, and "please try again" is advice that can never succeed. Same pattern as
-      // components/plaid-link-context.ts.
-      const body = res ? ((await res.json().catch(() => ({}))) as { error?: string }) : {}
-      setError(body.error ?? "Couldn't save that. Please try again.")
-      return
+    let reload = false
+    try {
+      // The shared rule (lib/save-response.ts): only the route's own { ok: true } is a save. Checking
+      // res.ok alone read a save made after the session ended as saved: the request is redirected to
+      // the login page, which answers 200.
+      const result = await sendSave('/api/manual-assets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: v }),
+      })
+      if (result.outcome === 'saved') {
+        reload = true
+      } else if (result.outcome === 'refused') {
+        // The route's own words: the environment guard's 409 is a misconfiguration, and "please try
+        // again" is advice that can never succeed. What was typed stays, so trying again is one tap.
+        setError(result.error)
+      } else {
+        // It may have saved. What was typed stays, since saving again sets the same value; the
+        // reload's "Currently" line shows what is stored.
+        console.error('[HomeValueCard] save failed', result.cause)
+        setError(MAY_NOT_HAVE_SAVED)
+        reload = true
+      }
+    } finally {
+      // Never left on "Saving…".
+      setBusy(false)
     }
-    router.refresh()
+    // Outside the try: a throw from refresh is not a failed save.
+    if (reload) router.refresh()
   }
 
   return (
@@ -62,6 +79,8 @@ export function HomeValueCard({
           value={value}
           onChange={(e) => setValue(e.target.value)}
           placeholder="e.g. 750000"
+          // Fixed while a save is in flight, so what was sent is what stays on screen.
+          disabled={busy}
           className={inputClass}
           aria-label="Home value"
         />
@@ -72,7 +91,11 @@ export function HomeValueCard({
       <p className="text-xs text-faint">
         Check Zillow for your estimate and enter it here. Your mortgage is subtracted automatically.
       </p>
-      {error && <p className="text-sm text-coral">{error}</p>}
+      {error && (
+        <p role="alert" className="text-sm text-coral">
+          {error}
+        </p>
+      )}
     </form>
   )
 }
