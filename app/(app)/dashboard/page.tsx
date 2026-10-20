@@ -29,7 +29,7 @@ import { budgetedSpend, spendByCategory, monthKey } from '@/lib/budget'
 import { buildSpendContext } from '@/lib/spend-context'
 import { fetchReceivable } from '@/lib/receivable'
 import { todayIn, hourIn } from '@/lib/clock'
-import { householdTimezone } from '@/lib/household'
+import { currentHouseholdId, householdTimezone } from '@/lib/household'
 import { readAllRows } from '@/lib/read-all'
 import { historyStart } from '@/lib/history-start'
 
@@ -60,16 +60,12 @@ export default async function DashboardPage({
 
   // Any bank that isn't syncing has to be visible on the main screen. Stale numbers that look
   // fine are the failure this whole migration exists to prevent.
-  const { data: membershipRow, error: membershipError } = await supabase
-    .from('memberships')
-    .select('household_id')
-    .limit(1)
-    .single()
-  // Without this, the banks list and the home value both silently vanish, and net worth quietly
-  // drops by the value of the house.
-  if (membershipError) throw new Error(`could not read your household: ${membershipError.message}`)
-  const items = membershipRow ? await listItemsForHousehold(membershipRow.household_id) : []
-  const manualAssets = membershipRow ? await listManualAssets(membershipRow.household_id) : []
+  // The household read throws when it fails: otherwise the banks list and the home value both
+  // silently vanish, and net worth quietly drops by the value of the house. Null is an account with
+  // no household, which has neither.
+  const householdId = await currentHouseholdId()
+  const items = householdId ? await listItemsForHousehold(householdId) : []
+  const manualAssets = householdId ? await listManualAssets(householdId) : []
   const home = manualAssets.find((a) => a.name === 'Home') ?? null
 
   // Two different questions, two different sources. `now` is an INSTANT, and homeStale below

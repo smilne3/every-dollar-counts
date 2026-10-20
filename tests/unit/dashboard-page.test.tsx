@@ -33,7 +33,8 @@ const chainFor = (table: string) => {
     afterCursor = true
     return chain
   }
-  chain.single = async () => results[table] ?? { data: null, error: null }
+  // maybeSingle only. Null data and no error is its answer for no row; .single() makes no row an
+  // error (PGRST116), which a stand-in answering null would hide (#172).
   chain.maybeSingle = async () => results[table] ?? { data: null, error: null }
   chain.then = (resolve: (v: unknown) => unknown) =>
     Promise.resolve(
@@ -630,6 +631,17 @@ describe('Dashboard reads', () => {
   it('fails loudly when the household read fails, rather than dropping the home value from net worth', async () => {
     results.memberships = { data: null, error: { message: 'permission denied' } }
     await expect(render()).rejects.toThrow(/could not read your household: permission denied/)
+  })
+
+  // #172: an account with no membership, which sign-in lets through when it cannot check
+  // (lib/access.ts), has no household, so no banks and no home value. It renders, and reads neither:
+  // both reads are set to fail here, so reading one would throw.
+  it('renders for an account with no household, reading no banks and no home value', async () => {
+    results.memberships = { data: null, error: null }
+    results.accounts = { data: [], error: null }
+    results.plaid_items = { data: null, error: { message: 'read for no household' } }
+    results.manual_assets = { data: null, error: { message: 'read for no household' } }
+    expect(textOf(await render())).toContain('Connect your first account')
   })
 
   // #91: the read one step below the household's. Rendered as no assets, net worth dropped by the
