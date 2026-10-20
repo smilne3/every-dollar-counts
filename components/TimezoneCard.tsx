@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { selectClass } from '@/components/ui/styles'
+import { MAY_NOT_HAVE_SAVED, sendSave } from '@/lib/save-response'
 
 // The zone every date in the app is derived from (#73). Saved on change, like CategoryPicker —
 // there is one field and nothing to confirm.
@@ -32,30 +33,55 @@ function zones(current: string): string[] {
 
 export function TimezoneCard({ current }: { current: string }) {
   const router = useRouter()
-  const [value, setValue] = useState(current)
+  // As CategoryRulesCard: the zone being saved shows until the save settles. On anything but a save
+  // it is dropped and the select falls back to the stored zone, so it never shows a zone that was
+  // not saved.
+  const [pending, setPending] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Follow the server: the reload after "It may not have saved" can bring the new zone, and one set
+  // on the other phone arrives the same way. Seeded once, the select would go on showing the zone it
+  // rolled back to. React's documented way to adjust state when a prop changes.
+  const [seen, setSeen] = useState(current)
+  if (seen !== current) {
+    setSeen(current)
+    setPending(null)
+  }
+  const value = pending ?? current
 
   async function change(e: React.ChangeEvent<HTMLSelectElement>) {
     const next = e.target.value
-    const previous = value
-    setValue(next)
+    setPending(next)
     setBusy(true)
     setError(null)
-    const res = await fetch('/api/household/timezone', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ timezone: next }),
-    }).catch(() => null)
-    setBusy(false)
-    if (!res || !res.ok) {
-      // Roll the control back, so it never shows a zone that was not saved.
-      setValue(previous)
-      const body = res ? ((await res.json().catch(() => ({}))) as { error?: string }) : {}
-      setError(body.error ?? "That couldn't be saved. Please try again.")
-      return
+    let reload = false
+    try {
+      // The shared rule (lib/save-response.ts): only the route's own { ok: true } is a save. Checking
+      // res.ok alone read a change made after the session ended as saved: the request is redirected
+      // to the login page, which answers 200.
+      const result = await sendSave('/api/household/timezone', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timezone: next }),
+      })
+      if (result.outcome === 'saved') {
+        reload = true
+      } else if (result.outcome === 'refused') {
+        setPending(null)
+        setError(result.error)
+      } else {
+        // It may have saved: back to the stored zone, and the reload shows which it is.
+        console.error('[TimezoneCard] save failed', result.cause)
+        setPending(null)
+        setError(MAY_NOT_HAVE_SAVED)
+        reload = true
+      }
+    } finally {
+      // Never left disabled.
+      setBusy(false)
     }
-    router.refresh()
+    // Outside the try: a throw from refresh is not a failed save.
+    if (reload) router.refresh()
   }
 
   return (
