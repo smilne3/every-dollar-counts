@@ -16,14 +16,14 @@ const { linkTokenCreate, itemSingle, getUser, decrypt, assertEnvMatchesDatabase 
 vi.mock('@/lib/plaid', () => ({ plaidEnv: 'sandbox', plaidClient: { linkTokenCreate } }))
 vi.mock('@/lib/crypto', () => ({ decrypt }))
 vi.mock('@/lib/supabase/admin', () => ({
-  supabaseAdmin: { from: () => ({ select: () => ({ eq: () => ({ single: itemSingle }) }) }) },
+  supabaseAdmin: { from: () => ({ select: () => ({ eq: () => ({ maybeSingle: itemSingle }) }) }) },
 }))
 vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({
     auth: { getUser },
     from: () => ({
       select: () => ({
-        limit: () => ({ single: async () => ({ data: { household_id: 'hh-1' } }) }),
+        limit: () => ({ maybeSingle: async () => ({ data: { household_id: 'hh-1' } }) }),
       }),
     }),
   }),

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { isAuthRetryableFetchError } from '@supabase/supabase-js'
 import { CountryCode, Products } from 'plaid'
 import { plaidClient, plaidEnv } from '@/lib/plaid'
 import { plaidLogSafe, isOutOfItemSlots } from '@/lib/plaid-errors'
@@ -32,19 +33,36 @@ function toProducts(input: unknown): Products[] {
 // dashboard charts six months. 730 costs nothing and is the one number we cannot revisit.
 const DAYS_REQUESTED = 730
 
+// LinkButton and ReconnectButton show these as they stand. Link has not opened yet, so nothing is
+// connected and no slot is spent: every failure here is free to retry.
+const NOT_STARTED = "Couldn't start the bank connection. Nothing was connected — safe to try again."
+const fail = (status: number, error: string) => NextResponse.json({ error }, { status })
+
 export async function POST(req: Request) {
+  // Sign-in and household, as app/api/budgets/route.ts: 503 if Supabase Auth is unreachable, 401;
+  // 500 if the membership read fails, 403.
   const supabase = await createClient()
   const {
     data: { user },
+    error: authError,
   } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  if (isAuthRetryableFetchError(authError)) {
+    console.error('[plaid] link token auth check failed', { code: authError.code, message: authError.message })
+    return fail(503, NOT_STARTED)
+  }
+  if (!user) return fail(401, 'Your session ended. Sign in again.')
 
-  const { data: membership } = await supabase
+  const { data: membership, error: mError } = await supabase
     .from('memberships')
     .select('household_id')
     .limit(1)
-    .single()
-  if (!membership) return NextResponse.json({ error: 'no household' }, { status: 403 })
+    .maybeSingle()
+  // A failed read is not "no household" (#46).
+  if (mError) {
+    console.error('[plaid] link token membership read failed', { code: mError.code, message: mError.message })
+    return fail(500, NOT_STARTED)
+  }
+  if (!membership) return fail(403, "Your account isn't part of a household.")
 
   const body = await req.json().catch(() => ({}) as Record<string, unknown>)
   const updateMode = body.mode === 'update' && typeof body.itemId === 'string'
@@ -93,13 +111,22 @@ export async function POST(req: Request) {
     // Update mode: reopen an existing item's login (reconnect). No products; uses access_token.
     // This does NOT create a new Item, so it costs no Item slot.
     if (updateMode) {
-      const { data: item } = await supabaseAdmin
+      const { data: item, error: itemError } = await supabaseAdmin
         .from('plaid_items')
         .select('access_token_encrypted, household_id, plaid_env')
         .eq('id', body.itemId)
-        .single()
+        .maybeSingle()
+      // Nor is it a bank that has gone.
+      if (itemError) {
+        console.error('[plaid] link token item read failed', {
+          itemId: body.itemId,
+          code: itemError.code,
+          message: itemError.message,
+        })
+        return fail(500, NOT_STARTED)
+      }
       if (!item || item.household_id !== membership.household_id) {
-        return NextResponse.json({ error: 'not found' }, { status: 403 })
+        return fail(404, "That bank isn't connected any more.")
       }
       // Refuse to reconnect an item from a different Plaid environment: its token is meaningless
       // here and the resulting failure would be opaque.
@@ -144,9 +171,6 @@ export async function POST(req: Request) {
       )
     }
     console.error('[plaid] linkTokenCreate failed', plaidLogSafe(e))
-    return NextResponse.json(
-      { error: "Couldn't start the bank connection. Nothing was connected — safe to try again." },
-      { status: 502 }
-    )
+    return fail(502, NOT_STARTED)
   }
 }
