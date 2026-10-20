@@ -70,8 +70,8 @@ describe('completePendingLink: a new bank', () => {
   it.each([
     [
       "the route's refusal",
-      () => refused(502, "Couldn't finish connecting that bank. Check Settings before trying again."),
-      "Couldn't finish connecting that bank. Check Settings before trying again.",
+      () => refused(502, "Couldn't finish connecting that bank."),
+      "Couldn't finish connecting that bank.",
     ],
     ['a redirect to the login page', redirectedToLogin, SESSION_ENDED],
   ])('after %s, reports it failed in those words and keeps the pending link', async (_, reply, words) => {

@@ -18,9 +18,10 @@ import { assertEnvMatchesDatabase, envGuardResponse } from '@/lib/app-env'
 // holds whatever the project's dashboard default becomes.
 export const maxDuration = 300
 
-// LinkButton and the OAuth return page show these as they stand, with their own warning that every
-// new attempt spends a connection. Link has already created the Item at Plaid by the time this runs.
-const NOT_FINISHED = "Couldn't finish connecting that bank. Check Settings before trying again."
+// LinkButton and the OAuth return page show these as they stand, each followed by its own advice to
+// check Settings first, since every new attempt spends a connection. Link has already created the
+// Item at Plaid by the time this runs.
+const NOT_FINISHED = "Couldn't finish connecting that bank."
 const fail = (status: number, error: string) => NextResponse.json({ error }, { status })
 
 // Only the three product strings we support; default to transactions.

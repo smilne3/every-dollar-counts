@@ -149,7 +149,7 @@ export function LinkButton() {
         <p className="text-sm text-coral">
           {error.message}
           {error.slotAtRisk &&
-            ' Check the list above before trying again — every new attempt uses one of your ten bank connections permanently.'}
+            ' Check your banks in Settings before trying again — every new attempt uses one of your ten bank connections permanently.'}
         </p>
       )}
       {notice && <p className="text-sm text-muted">{notice}</p>}

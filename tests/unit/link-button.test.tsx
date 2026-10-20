@@ -115,8 +115,9 @@ describe('LinkButton: starting a connection', () => {
 // Link fires onSuccess once the bank is linked at Plaid: the Item exists and a connection is spent
 // (#51). What the person is told next decides whether they link it a second time.
 describe('LinkButton: finishing a connection', () => {
+  // True wherever the button is: the dashboard has no bank list above it.
   const SLOT_SUFFIX =
-    ' Check the list above before trying again — every new attempt uses one of your ten bank connections permanently.'
+    ' Check your banks in Settings before trying again — every new attempt uses one of your ten bank connections permanently.'
   const MAY_HAVE_CONNECTED = 'That bank may have connected. Showing the latest.'
   const errorLine = () => document.querySelector('p.text-coral')?.textContent ?? null
   const connectButton = () => screen.getByRole('button', { name: /Connect a bank|Connecting…/ }) as HTMLButtonElement
@@ -151,8 +152,8 @@ describe('LinkButton: finishing a connection', () => {
   it.each([
     [
       "the route's refusal",
-      () => refused(502, "Couldn't finish connecting that bank. Check Settings before trying again."),
-      "Couldn't finish connecting that bank. Check Settings before trying again.",
+      () => refused(502, "Couldn't finish connecting that bank."),
+      "Couldn't finish connecting that bank.",
     ],
     ['a redirect to the login page', redirectedToLogin, 'Your session ended. Sign in again.'],
   ])('after %s, says why with the slot warning, and does not reload', async (_, reply, words) => {

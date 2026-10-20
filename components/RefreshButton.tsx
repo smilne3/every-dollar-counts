@@ -16,6 +16,8 @@ export const REFRESH_TIMEOUT_MS = 60_000
 // the server, so neither success nor failure is known.
 const MAY_NOT_HAVE_FINISHED = 'It may not have finished. Showing the latest.'
 
+const bankCount = (n: number) => `${n} bank${n === 1 ? '' : 's'}`
+
 // The counts the route answers with (app/api/plaid/sync-transactions/route.ts).
 type SyncCounts = { banks: number; added: number; brokenNow: number; failed: number; skipped: number }
 const COUNTS = ['banks', 'added', 'brokenNow', 'failed', 'skipped'] as const
@@ -48,14 +50,14 @@ export function RefreshButton() {
         if (bad > 0) {
           setIsProblem(true)
           setMessage(
-            `Updated ${ok} of ${counts.banks} banks — ${bad} need${bad === 1 ? 's' : ''} attention. See Settings.`
+            `Updated ${ok} of ${bankCount(counts.banks)} — ${bad} need${bad === 1 ? 's' : ''} attention. See Settings.`
           )
         } else {
           setIsProblem(false)
           // Only what is known: Plaid had nothing new. When Plaid is behind the bank, "Everything up
           // to date" told someone looking for a missing deposit that nothing was missing (#119).
           setMessage(
-            counts.added ? `Updated ${counts.banks} banks · ${counts.added} new` : 'No new transactions from Plaid yet'
+            counts.added ? `Updated ${bankCount(counts.banks)} · ${counts.added} new` : 'No new transactions from Plaid yet'
           )
         }
         reload = true

@@ -77,6 +77,16 @@ describe('RefreshButton', () => {
     expect(refresh).toHaveBeenCalledTimes(1)
   })
 
+  it.each([
+    [{ banks: 1, added: 3 }, 'Updated 1 bank · 3 new'],
+    [{ banks: 1, brokenNow: 1 }, 'Updated 0 of 1 bank — 1 needs attention. See Settings.'],
+  ])('says "bank" for one bank', async (counts, words) => {
+    vi.stubGlobal('fetch', answering(() => synced(counts)))
+    render(<RefreshButton />)
+    await press()
+    expect(message()?.textContent).toBe(words)
+  })
+
   // The route's refusal, or the login page: nothing was synced, so nothing is reloaded.
   it.each([
     ["the route's refusal", () => refused(500, "Couldn't refresh. Please try again."), "Couldn't refresh. Please try again."],

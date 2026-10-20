@@ -69,8 +69,8 @@ describe('Plaid OAuth return page', () => {
   it.each([
     [
       "the route's refusal",
-      () => refused(502, "Couldn't finish connecting that bank. Check Settings before trying again."),
-      "Couldn't finish connecting that bank. Check Settings before trying again.",
+      () => refused(502, "Couldn't finish connecting that bank."),
+      "Couldn't finish connecting that bank.",
     ],
     ['a redirect to the login page', redirectedToLogin, 'Your session ended. Sign in again.'],
   ])('after %s, says it could not finish, and why', async (_, reply, words) => {

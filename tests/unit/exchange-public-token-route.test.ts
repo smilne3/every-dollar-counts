@@ -89,7 +89,7 @@ const link = (over: Record<string, unknown> = {}) =>
   post({ public_token: 'public-sandbox-1', institution_name: 'Test Bank', products: ['transactions'], ...over })
 const errorOf = async (res: Response) => (await res.json()).error
 
-const NOT_FINISHED = "Couldn't finish connecting that bank. Check Settings before trying again."
+const NOT_FINISHED = "Couldn't finish connecting that bank."
 
 let logs: unknown[][]
 beforeEach(() => {
