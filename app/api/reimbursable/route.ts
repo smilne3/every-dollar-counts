@@ -61,9 +61,16 @@ export async function PATCH(req: Request) {
   // what you are owed. Refuse at the source rather than relying on every reader to filter it out.
   if (isCreditCardPayment(txn)) return fail(400, 'A credit-card payment is already kept out of spending and income.')
 
+  // The guards above ran on the row as it was read. The write checks them again: it applies only
+  // while the row is still not removed and still has the pfc_detailed and user_category that were
+  // read, so a Plaid sync that removes or re-tags it, or a pick made or cleared on the other phone,
+  // in between matches nothing, as in the categorize route. A null is matched with .is: .eq with
+  // null is not "is null" in PostgREST. The amount needs no filter, since the database's own CHECK
+  // refuses a mark above the charge (db/migrations/015_reimbursable_amount.sql).
+  //
   // `count` is what tells "wrote it" from "matched nothing". Without it a write that matched no row
-  // (the row changed underneath us, or the update policy went missing, as in #73) read as saved.
-  const { error, count } = await supabase
+  // (the row changed in between, or the update policy went missing, as in #73) read as saved.
+  let write = supabase
     .from('transactions')
     .update(
       {
@@ -73,6 +80,10 @@ export async function PATCH(req: Request) {
       { count: 'exact' }
     )
     .eq('id', transactionId)
+    .eq('removed', false)
+  write = txn.pfc_detailed === null ? write.is('pfc_detailed', null) : write.eq('pfc_detailed', txn.pfc_detailed)
+  write = txn.user_category === null ? write.is('user_category', null) : write.eq('user_category', txn.user_category)
+  const { error, count } = await write
   if (error) {
     console.error('[reimbursable] update failed', { id: transactionId, code: error.code, message: error.message })
     return fail(500, TRY_AGAIN)

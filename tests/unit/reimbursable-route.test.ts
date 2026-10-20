@@ -11,7 +11,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 // suite green. This one, like tests/unit/categorize-route.test.ts:
 // - projects the fixture to the columns the read asks for, so a narrowed read starves the guards;
 // - matches rows the way the database would, on the column and value it is given;
-// - makes update() reachable only through .eq(), so an unscoped update cannot produce a result;
+// - records every filter on the update, which runs only when awaited after the whole chain, against
+//   the row as it is at WRITE time (`rowAtWrite`), so a row that changed after the read writes
+//   nothing unless a filter was dropped;
 // - returns a count only when { count: 'exact' } is asked for, as PostgREST does.
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 
@@ -44,6 +46,8 @@ function makeSupabase({
   user = { id: 'user-1' } as { id: string } | null,
   authError = null as AuthError | null,
   row = TXN as Row | null,
+  // The row when the update runs: a Plaid sync or the other phone can change it after the read.
+  rowAtWrite = undefined as Row | null | undefined,
   readError = null as DbError,
   update = { error: null as DbError, count: 1 as number | null },
 } = {}) {
@@ -51,7 +55,11 @@ function makeSupabase({
     reads: [] as unknown[][],
     updates: [] as { payload: Row; options: unknown; filters: unknown[][] }[],
   }
+  const atWrite = rowAtWrite === undefined ? row : rowAtWrite
   const matches = (col: string, val: unknown) => row !== null && col in row && row[col] === val
+  // eq and is(null) both hold only when the row has that exact value.
+  const writeMatches = (filters: unknown[][]) =>
+    atWrite !== null && filters.every(([, col, val]) => (col as string) in atWrite && atWrite[col as string] === val)
   const client = {
     // getUser answers { user: null, error } on ANY auth failure, a dropped connection included.
     auth: { getUser: vi.fn().mockResolvedValue({ data: { user }, error: authError }) },
@@ -73,13 +81,17 @@ function makeSupabase({
         update: (payload: Row, options?: { count?: string }) => {
           const entry = { payload, options, filters: [] as unknown[][] }
           calls.updates.push(entry)
-          return {
-            eq: (col: string, val: unknown) => {
-              entry.filters.push(['eq', col, val])
-              const result = update.error ? update : matches(col, val) ? update : { error: null, count: 0 }
-              return Promise.resolve(options?.count === 'exact' ? result : { ...result, count: null })
+          // Like PostgREST's builder: each filter is recorded and returns the builder, and awaiting
+          // it runs the write with every filter applied.
+          const builder = {
+            eq: (col: string, val: unknown) => (entry.filters.push(['eq', col, val]), builder),
+            is: (col: string, val: null) => (entry.filters.push(['is', col, val]), builder),
+            then: (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) => {
+              const result = update.error ? update : writeMatches(entry.filters) ? update : { error: null, count: 0 }
+              return Promise.resolve(options?.count === 'exact' ? result : { ...result, count: null }).then(resolve, reject)
             },
           }
+          return builder
         },
       }
     }),
@@ -190,26 +202,68 @@ describe('PATCH /api/reimbursable', () => {
   })
 
   // A card payment someone filed under a category counts as that category, so it can be marked
-  // (isCreditCardPayment). This also fails if the read stops asking for user_category.
-  it('marks a credit-card payment that carries a pick', async () => {
+  // (isCreditCardPayment). This also fails if the read stops asking for user_category. Its update
+  // carries the values that were read, so it is refused if either has changed by then.
+  it('marks a credit-card payment that carries a pick, only while it still does', async () => {
     const calls = makeSupabase({ row: { ...TXN, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', user_category: 'Shopping' } })
     const res = await mark()
     expect(res.status).toBe(200)
     expect(calls.updates).toHaveLength(1)
+    const { filters } = calls.updates[0]
+    expect(filters).toHaveLength(4)
+    expect(filters).toEqual(
+      expect.arrayContaining([
+        ['eq', 'id', 'txn-1'],
+        ['eq', 'removed', false],
+        ['eq', 'pfc_detailed', 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT'],
+        ['eq', 'user_category', 'Shopping'],
+      ])
+    )
   })
 
-  it('writes the clamped amount and the trimmed note, counted and filtered on the id', async () => {
+  // Every guard is checked again inside the write, so the row it marks is the row that passed them.
+  // A null is matched with .is: .eq('col', null) is not "is null" in PostgREST.
+  it('writes the clamped amount and the trimmed note, counted, and only to the row that passed the guards', async () => {
     const calls = makeSupabase()
     // $5,000 requested on a $900 transaction: clamped to 900, never stored raw.
     const res = await mark({ amount: 5000, note: '  Dave ' })
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ ok: true })
-    expect(calls.updates).toEqual([
-      {
-        payload: { reimbursable_amount: 900, reimbursable_note: 'Dave' },
-        options: { count: 'exact' },
-        filters: [['eq', 'id', 'txn-1']],
-      },
+    expect(calls.updates).toHaveLength(1)
+    const [u] = calls.updates
+    expect(u.payload).toEqual({ reimbursable_amount: 900, reimbursable_note: 'Dave' })
+    expect(u.options).toEqual({ count: 'exact' })
+    expect(u.filters).toHaveLength(4)
+    expect(u.filters).toEqual(
+      expect.arrayContaining([
+        ['eq', 'id', 'txn-1'],
+        ['eq', 'removed', false],
+        ['is', 'pfc_detailed', null],
+        ['is', 'user_category', null],
+      ])
+    )
+  })
+
+  // Plaid can remove or re-tag the row (lib/ingest.ts), or the other phone can pick or clear its
+  // category, between the read and the write. The mark must not land on a row the guards would now
+  // refuse, or on a picked card payment whose pick has gone (deleting a category clears its picks).
+  it.each([
+    ['removed by the bank', TXN, { ...TXN, removed: true }],
+    ['re-tagged as a card payment', TXN, { ...TXN, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' }],
+    ['picked', TXN, { ...TXN, user_category: 'Shopping' }],
+    [
+      'a picked card payment whose pick was cleared',
+      { ...TXN, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', user_category: 'Shopping' },
+      { ...TXN, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', user_category: null },
+    ],
+  ])('answers 409, and logs it, when the row was %s between the read and the write', async (_, row, rowAtWrite) => {
+    makeSupabase({ row, rowAtWrite })
+    const res = await mark()
+    expect(res.status).toBe(409)
+    expect(await errorOf(res)).toBe('This transaction just changed. Refresh and try again.')
+    expect(logs).toContainEqual([
+      '[reimbursable] update matched no rows (row changed, or the update policy is missing)',
+      { id: 'txn-1' },
     ])
   })
 
