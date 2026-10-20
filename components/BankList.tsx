@@ -63,10 +63,15 @@ export function BankList({
   const [pendingRemove, setPendingRemove] = useState<ItemSummary | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // A reconnect's warning that its transactions have not arrived yet, shown as LinkButton shows its
+  // notice. Held here: the ReconnectButton that hears it is gone once the reload shows the bank
+  // healthy (#165).
+  const [notice, setNotice] = useState<string | null>(null)
 
   async function disconnect(item: ItemSummary) {
     setBusy(true)
     setError(null)
+    setNotice(null)
     let reload = false
     try {
       // The shared rule (lib/save-response.ts): only the route's own { ok: true } is a disconnect.
@@ -106,6 +111,7 @@ export function BankList({
           {error}
         </p>
       )}
+      {notice && <p className="pb-2 text-sm text-muted">{notice}</p>}
       {/* "N of 10 used" was deliberately NOT printed here for a long time, and the reason was
           sound: the only number available was the count of LIVE banks, which falls on a disconnect
           — the opposite of the truth, since the slot stays spent. plaid_slot_ledger now survives
@@ -142,7 +148,7 @@ export function BankList({
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
-                  {item.status === 'needs_reconnect' && <ReconnectButton itemId={item.id} />}
+                  {item.status === 'needs_reconnect' && <ReconnectButton itemId={item.id} onNotice={setNotice} />}
                   <button
                     onClick={() => setPendingRemove(item)}
                     className={buttonClass('secondary', 'sm')}

@@ -99,6 +99,23 @@ describe('ReconnectButton: starting a reconnection', () => {
     expect(screen.getByText(NOT_STARTED)).toBeTruthy()
     expect(plaid.open).not.toHaveBeenCalled()
   })
+
+  // Held while the link token is requested, so a double tap cannot open the flow twice.
+  it('sends one request for a double tap, and is usable again once the reply comes', async () => {
+    let settle!: (res: Response) => void
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => (settle = resolve)))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<ReconnectButton itemId="item-1" />)
+    const button = () => screen.getByRole('button', { name: /Reconnect/ }) as HTMLButtonElement
+    fireEvent.click(button())
+    fireEvent.click(button())
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(button().disabled).toBe(true)
+    expect(button().textContent).toBe('Reconnecting…')
+    await act(async () => settle(refused(404, "That bank isn't connected any more.")))
+    expect(await screen.findByText("That bank isn't connected any more.")).toBeTruthy()
+    expect(button().disabled).toBe(false)
+  })
 })
 
 // Link fires onSuccess once update mode has fixed the login at Plaid. The reconnect route then
@@ -109,20 +126,34 @@ describe('ReconnectButton: finishing a reconnection', () => {
   const reconnectButton = () => screen.getByRole('button', { name: /Reconnect/ }) as HTMLButtonElement
 
   // Renders, keeps what start() would before Link opens, and returns what Link does on success.
-  function fixedAtPlaid() {
-    render(<ReconnectButton itemId="item-1" />)
+  function fixedAtPlaid(onNotice?: (notice: string | null) => void) {
+    render(<ReconnectButton itemId="item-1" onNotice={onNotice} />)
     savePendingLink({ token: 'link-sandbox-update', mode: 'update', itemId: 'item-1' })
     return () => plaid.config!.onSuccess()
   }
 
-  it('reloads the list once the reconnect is recorded', async () => {
+  it('reloads the list once the reconnect is recorded, with no notice', async () => {
     const fetchMock = answering(() => replyWith({ ok: true }))
     vi.stubGlobal('fetch', fetchMock)
-    await act(fixedAtPlaid())
+    const onNotice = vi.fn()
+    await act(fixedAtPlaid(onNotice))
     expect(fetchMock.mock.calls[0][0]).toBe('/api/plaid/reconnect')
     expect(errorLine()).toBeNull()
+    expect(onNotice).toHaveBeenCalledExactlyOnceWith(null)
     expect(refresh).toHaveBeenCalledTimes(1)
     expect(reconnectButton().disabled).toBe(false)
+  })
+
+  // The reload shows the bank healthy and the list stops rendering this button, so the warning goes
+  // up to the list rather than beside the button.
+  it('hands the route’s warning up when the catch-up has not arrived', async () => {
+    const warning = 'Reconnected. New transactions have not arrived yet — press Refresh in a moment.'
+    vi.stubGlobal('fetch', answering(() => replyWith({ ok: true, warning })))
+    const onNotice = vi.fn()
+    await act(fixedAtPlaid(onNotice))
+    expect(onNotice).toHaveBeenCalledExactlyOnceWith(warning)
+    expect(errorLine()).toBeNull()
+    expect(refresh).toHaveBeenCalledTimes(1)
   })
 
   it.each([

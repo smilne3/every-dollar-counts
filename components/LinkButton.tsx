@@ -12,7 +12,7 @@ import {
   type CompleteResult,
 } from '@/components/plaid-link-context'
 import { useIsStandalone } from '@/lib/useIsStandalone'
-import { SAVE_TIMEOUT_MS, sendRequest } from '@/lib/save-response'
+import { SAVE_TIMEOUT_MS, sendRequest, type RequestOutcome } from '@/lib/save-response'
 
 // Two paths, because Plaid Link only lists institutions supporting EVERY requested product:
 // asking for transactions + investments at once would hide most banks AND most brokerages.
@@ -97,16 +97,23 @@ export function LinkButton() {
     setError(null)
     setNotice(null)
     // The shared reply rules (lib/save-response.ts), and a save's timeout: a link token is free and
-    // an unused one expires, so giving up on a slow one costs nothing (#165).
-    const result = await sendRequest(
-      '/api/plaid/create-link-token',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'add', products }),
-      },
-      SAVE_TIMEOUT_MS
-    )
+    // an unused one expires, so giving up on a slow one costs nothing (#165). Busy while it is in
+    // flight, so a double tap sends one request.
+    setBusy(true)
+    let result: RequestOutcome
+    try {
+      result = await sendRequest(
+        '/api/plaid/create-link-token',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: 'add', products }),
+        },
+        SAVE_TIMEOUT_MS
+      )
+    } finally {
+      setBusy(false)
+    }
     const linkToken = result.outcome === 'answered' ? result.body.link_token : undefined
     if (typeof linkToken !== 'string' || linkToken === '') {
       // No link token means Link never opened, so no Item exists and no slot is at risk —

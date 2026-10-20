@@ -110,6 +110,27 @@ describe('LinkButton: starting a connection', () => {
     expect(screen.queryByText(SLOT_WARNING)).toBeNull()
     expect(plaid.open).not.toHaveBeenCalled()
   })
+
+  // Held while the link token is requested, so a double tap cannot open Link twice.
+  it('sends one request for a double tap, and is usable again once the reply comes', async () => {
+    let settle!: (res: Response) => void
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => (settle = resolve)))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<LinkButton />)
+    const connect = () => screen.getByRole('button', { name: /Connect a bank|Connecting…/ }) as HTMLButtonElement
+    const investments = () => screen.getByRole('button', { name: 'Add investment account' }) as HTMLButtonElement
+    fireEvent.click(connect())
+    fireEvent.click(connect())
+    fireEvent.click(investments())
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(connect().disabled).toBe(true)
+    expect(connect().textContent).toContain('Connecting…')
+    expect(investments().disabled).toBe(true)
+    await act(async () => settle(refused(502, "Couldn't start the bank connection. Nothing was connected — safe to try again.")))
+    expect(await screen.findByText("Couldn't start the bank connection. Nothing was connected — safe to try again.")).toBeTruthy()
+    expect(connect().disabled).toBe(false)
+    expect(investments().disabled).toBe(false)
+  })
 })
 
 // Link fires onSuccess once the bank is linked at Plaid: the Item exists and a connection is spent
