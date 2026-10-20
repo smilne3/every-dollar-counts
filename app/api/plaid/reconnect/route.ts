@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { isAuthRetryableFetchError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/supabase/admin'
 import { decrypt } from '@/lib/crypto'
@@ -8,33 +9,57 @@ import { storeAccounts, syncAndStore } from '@/lib/ingest'
 import { shouldSyncTransactions } from '@/lib/sync-policy'
 import { assertEnvMatchesDatabase, envGuardResponse } from '@/lib/app-env'
 
+// ReconnectButton and the OAuth return page show these as they stand. By the time this runs, Link's
+// update mode has fixed the login at Plaid; a failure here means this app did not record it, and
+// pressing Reconnect again costs nothing.
+const NOT_FINISHED = "Couldn't finish reconnecting that bank. Please try again."
+const fail = (status: number, error: string) => NextResponse.json({ error }, { status })
+
 // Called after Link's update mode succeeds: the item's login is fixed and its access token is
 // unchanged, so clear the broken flag and pull whatever we missed while it was down.
 // Update mode creates no new Item, so nothing here spends an Item slot.
 export async function POST(req: Request) {
-  const { itemId } = await req.json().catch(() => ({}) as { itemId?: string })
-  if (!itemId) return NextResponse.json({ error: 'itemId required' }, { status: 400 })
+  const body = (await req.json().catch(() => null)) as { itemId?: unknown } | null
+  const itemId = body?.itemId
+  if (typeof itemId !== 'string' || itemId === '') return fail(400, NOT_FINISHED)
 
+  // Sign-in and household, as app/api/budgets/route.ts: 503 if Supabase Auth is unreachable, 401;
+  // 500 if the membership read fails, 403.
   const supabase = await createClient()
   const {
     data: { user },
+    error: authError,
   } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  if (isAuthRetryableFetchError(authError)) {
+    console.error('[plaid] reconnect auth check failed', { code: authError.code, message: authError.message })
+    return fail(503, NOT_FINISHED)
+  }
+  if (!user) return fail(401, 'Your session ended. Sign in again.')
 
-  const { data: membership } = await supabase
+  const { data: membership, error: mError } = await supabase
     .from('memberships')
     .select('household_id')
     .limit(1)
-    .single()
-  if (!membership) return NextResponse.json({ error: 'no household' }, { status: 403 })
+    .maybeSingle()
+  // A failed read is not "no household" (#46).
+  if (mError) {
+    console.error('[plaid] reconnect membership read failed', { code: mError.code, message: mError.message })
+    return fail(500, NOT_FINISHED)
+  }
+  if (!membership) return fail(403, "Your account isn't part of a household.")
 
-  const { data: item } = await supabaseAdmin
+  const { data: item, error: itemError } = await supabaseAdmin
     .from('plaid_items')
     .select('id, household_id, access_token_encrypted, cursor, products, plaid_env')
     .eq('id', itemId)
-    .single()
+    .maybeSingle()
+  // Nor is it a bank that has gone.
+  if (itemError) {
+    console.error('[plaid] reconnect read failed', { itemId, code: itemError.code, message: itemError.message })
+    return fail(500, NOT_FINISHED)
+  }
   if (!item || item.household_id !== membership.household_id) {
-    return NextResponse.json({ error: 'not found' }, { status: 403 })
+    return fail(404, "That bank isn't connected any more.")
   }
   if (item.plaid_env !== plaidEnv) {
     return NextResponse.json(
@@ -59,10 +84,20 @@ export async function POST(req: Request) {
   }
 
   // Clear the flag first so the item is eligible for the sync below.
-  await supabaseAdmin
+  const { error: statusError } = await supabaseAdmin
     .from('plaid_items')
     .update({ status: 'ok', status_detail: null })
     .eq('id', item.id)
+  // Not recorded, the bank still shows as needing a reconnect, and Refresh skips it. Saying it
+  // reconnected would leave it that way.
+  if (statusError) {
+    console.error('[plaid] reconnect status write failed', {
+      itemId: item.id,
+      code: statusError.code,
+      message: statusError.message,
+    })
+    return fail(500, NOT_FINISHED)
+  }
 
   try {
     const token = decrypt(item.access_token_encrypted)
