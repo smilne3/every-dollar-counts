@@ -31,8 +31,12 @@ export default async function BudgetsPage() {
   const nextMonthStart = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-01`
 
   // Both throw on a failed read: with no categories the page would render as though the household
-  // had never set any up, and with no banks every bank would look healthy (#46).
-  const [data, items] = await Promise.all([fetchCategoryContext(), listItemsForHousehold(householdId)])
+  // had never set any up, and with no banks every bank would look healthy (#46). An account with no
+  // household has no banks, and none is read.
+  const [data, items] = await Promise.all([
+    fetchCategoryContext(),
+    householdId ? listItemsForHousehold(householdId) : [],
+  ])
   const categoryNames = spendingCategoryNames(data.categories)
 
   // Paged, so the month cannot silently pass the 1,000-row cap (#69).

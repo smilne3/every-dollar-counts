@@ -61,7 +61,9 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
     | undefined
   // The household's banks, for the "isn't syncing" banner every metric shows (#135). Each branch
   // reads them beside its own first read, not after it. A failed read throws, as on the dashboard:
-  // rendered as no banks, every bank would look healthy (#46).
+  // rendered as no banks, every bank would look healthy (#46). An account with no household has no
+  // banks, and none is read.
+  const readBanks = async () => (householdId ? listItemsForHousehold(householdId) : [])
   let items: ItemSummary[]
 
   if (metric === 'net-worth') {
@@ -69,8 +71,8 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
     // mortgage. Read here rather than for every metric: only net worth shows them, and a failed read
     // throws (#91), which would otherwise take down Cash, Spent and Saved over a value none of them shows.
     const [banks, manualAssets] = await Promise.all([
-      listItemsForHousehold(householdId),
-      listManualAssets(householdId),
+      readBanks(),
+      householdId ? listManualAssets(householdId) : [],
     ])
     items = banks
 
@@ -128,7 +130,7 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
   } else if (metric === 'cash') {
     // Cash has no read of its own to pair this with: the bank list needs the household first, so
     // here it is one wait more than the accounts alone.
-    items = await listItemsForHousehold(householdId)
+    items = await readBanks()
     // Cash = depository accounts only; reuse cashOnHand() for the total.
     const depository = accounts.filter((a) => a.type === 'depository')
     rows = depository.map((a) => ({
@@ -144,7 +146,7 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
     // spent / saved both need this month's flows
     // Throws on a failed read. Same trap as the dashboard: with no categories a paycheck is counted
     // as negative spending and this breakdown explains a number that never happened (#46).
-    const [banks, data] = await Promise.all([listItemsForHousehold(householdId), fetchCategoryContext()])
+    const [banks, data] = await Promise.all([readBanks(), fetchCategoryContext()])
     items = banks
 
     // The household's day, not the server's — this month key is also embedded in the outbound

@@ -32,8 +32,12 @@ export default async function TrendsPage() {
 
   // Both throw on a failed read: with no categories a paycheck is charted as negative spending
   // under "Uncategorized", and with no banks every bank would look healthy. A failed read must not
-  // become a plausible number, or a missing warning (#46).
-  const [data, items] = await Promise.all([fetchCategoryContext(), listItemsForHousehold(householdId)])
+  // become a plausible number, or a missing warning (#46). An account with no household has no
+  // banks, and none is read.
+  const [data, items] = await Promise.all([
+    fetchCategoryContext(),
+    householdId ? listItemsForHousehold(householdId) : [],
+  ])
 
   // Date-bounded at both ends. `previous.from` is the earliest date either card reads; the upper bound
   // is what stops a row dated beyond the window being fetched at all. `inRange` is what actually

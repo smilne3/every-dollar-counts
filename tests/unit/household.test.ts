@@ -8,13 +8,26 @@ const { result, asked } = vi.hoisted(() => ({
   asked: [] as string[],
 }))
 
+// `result` is what the table answers. .maybeSingle() gives it back as is, null data and no error
+// for no row. .single() asks PostgREST for exactly one row, so no row comes back as postgrest-js
+// returns it: a 406 with PGRST116, never null data and no error. A stand-in that answered .single()
+// with null data hid that a "no row" guard behind it could never run (#172).
 vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({
     from: (table: string) => ({
       select: (columns: string) => ({
         limit: () => {
           asked.push(`${table}.${columns}`)
-          return { maybeSingle: async () => result, single: async () => result }
+          return {
+            maybeSingle: async () => result,
+            single: async () =>
+              result.error || result.data != null
+                ? result
+                : {
+                    data: null,
+                    error: { code: 'PGRST116', message: 'JSON object requested, multiple (or no) rows returned' },
+                  },
+          }
         },
       }),
     }),
@@ -76,11 +89,13 @@ describe('currentHouseholdId', () => {
     await expect(currentHouseholdId()).rejects.toThrow(new Error(message))
   })
 
-  it('throws when the read returns no data and no error', async () => {
+  // #172: sign-in lets an account with no membership through when it cannot check (lib/access.ts).
+  // That account has no household, so no banks: a true answer, not a failed read, and the pages
+  // render for it. As an error it put them on the error page on every visit.
+  it('returns null for an account with no household, rather than failing', async () => {
     result.data = null
     result.error = null
-    await expect(currentHouseholdId()).rejects.toThrow(
-      new Error('could not read your household: read returned no data and no error')
-    )
+    await expect(currentHouseholdId()).resolves.toBeNull()
+    expect(asked).toEqual(['memberships.household_id'])
   })
 })

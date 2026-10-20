@@ -33,7 +33,8 @@ const chainFor = (table: string) => {
     calls.gte.push(v)
     return chain
   }
-  chain.single = async () => results[table] ?? { data: null, error: null }
+  // maybeSingle only. Null data and no error is its answer for no row; .single() makes no row an
+  // error (PGRST116), which a stand-in answering null would hide (#172).
   chain.maybeSingle = async () => results[table] ?? { data: null, error: null }
   chain.then = (resolve: (v: unknown) => unknown) =>
     Promise.resolve(
@@ -157,6 +158,17 @@ describe('Breakdown reads', () => {
     vi.setSystemTime(new Date('2026-09-15T16:00:00Z'))
     results.plaid_items = { data: null, error: { message: 'statement timeout' } }
     await expect(render(metric)).rejects.toThrow(/could not read linked banks: statement timeout/)
+  })
+
+  // #172: an account with no membership, which sign-in lets through when it cannot check
+  // (lib/access.ts), has no household, so no banks, and on net worth no home value. Every metric
+  // renders, and reads neither: both reads are set to fail here, so reading one would throw.
+  it.each(METRICS)('renders %s for an account with no household, reading no banks', async (metric) => {
+    vi.setSystemTime(new Date('2026-09-15T16:00:00Z'))
+    results.memberships = { data: null, error: null }
+    results.plaid_items = { data: null, error: { message: 'read for no household' } }
+    results.manual_assets = { data: null, error: { message: 'read for no household' } }
+    expect(bannerText(await render(metric))).toBe('')
   })
 })
 

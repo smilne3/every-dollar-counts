@@ -33,7 +33,9 @@ const chainFor = (table: string) => {
     calls.lt.push(v)
     return chain
   }
-  chain.single = async () => results[table] ?? { data: null, error: null }
+  // maybeSingle only. Null data and no error is its answer for no row; .single() makes no row an
+  // error (PGRST116), which a stand-in answering null would hide (#172).
+  chain.maybeSingle = async () => results[table] ?? { data: null, error: null }
   chain.then = (resolve: (v: unknown) => unknown) =>
     Promise.resolve(
       afterCursor ? { data: [], error: null } : (results[table] ?? { data: [], error: null })
@@ -171,6 +173,15 @@ describe('Budgets banks (#135)', () => {
   it('fails loudly when the household read fails, rather than hiding the banner', async () => {
     results.memberships = { data: null, error: { message: 'permission denied' } }
     await expect(BudgetsPage()).rejects.toThrow(/could not read your household: permission denied/)
+  })
+
+  // #172: an account with no membership, which sign-in lets through when it cannot check
+  // (lib/access.ts), has no household, so no banks. The page renders, as it did before it read
+  // banks, and reads none: the read is set to fail here, so reading it would throw.
+  it('renders for an account with no household, reading no banks', async () => {
+    results.memberships = { data: null, error: null }
+    results.plaid_items = { data: null, error: { message: 'read for no household' } }
+    expect(bannerText(await BudgetsPage())).toBe('')
   })
 })
 

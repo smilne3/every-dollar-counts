@@ -27,7 +27,8 @@ const chainFor = (table: string) => {
     afterCursor = true
     return chain
   }
-  chain.single = async () => results[table] ?? { data: null, error: null }
+  // maybeSingle only. Null data and no error is its answer for no row; .single() makes no row an
+  // error (PGRST116), which a stand-in answering null would hide (#172).
   chain.maybeSingle = async () => results[table] ?? { data: null, error: null }
   chain.then = (resolve: (v: unknown) => unknown) => {
     const reply = afterCursor ? { data: [], error: null } : (results[table] ?? { data: [], error: null })
