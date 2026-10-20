@@ -8,6 +8,7 @@ import {
   isTemporaryError,
   isAlreadyRemoved,
   isOutOfItemSlots,
+  plaidAnswered,
   type PlaidErrorCategory,
 } from '@/lib/plaid-errors'
 
@@ -112,6 +113,19 @@ describe('isReconnectError / isTemporaryError', () => {
   })
   it('is false for a bank-side action — a Reconnect button there just fails again', () => {
     expect(isReconnectError(plaidError('ITEM_LOCKED'))).toBe(false)
+  })
+})
+
+// The disconnect route's "nothing was changed" holds only when Plaid refused (#165).
+describe('plaidAnswered', () => {
+  it('is true for an error Plaid replied with', () => {
+    expect(plaidAnswered({ response: { status: 500, data: { error_code: 'INTERNAL_SERVER_ERROR' } } })).toBe(true)
+    expect(plaidAnswered(plaidError('ITEM_LOGIN_REQUIRED'))).toBe(true)
+  })
+  it('is false when Plaid never answered, so the call may have landed', () => {
+    expect(plaidAnswered({ message: 'socket hang up', code: 'ECONNRESET' })).toBe(false)
+    expect(plaidAnswered(new Error('timeout of 0ms exceeded'))).toBe(false)
+    expect(plaidAnswered(null)).toBe(false)
   })
 })
 

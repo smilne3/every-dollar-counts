@@ -141,6 +141,13 @@ export function isTemporaryError(err: unknown): boolean {
   return classifyPlaidError(err) === 'temporary'
 }
 
+// Whether Plaid itself answered a failed call. The SDK's axios errors carry `response` only when
+// Plaid replied, with an error body or a status. One without it never heard back (a reset
+// connection, a timeout), so the call may still have taken effect at Plaid.
+export function plaidAnswered(err: unknown): boolean {
+  return (err as { response?: unknown } | null)?.response != null
+}
+
 // Swallowed by the disconnect route: the Item is already gone at Plaid, so deleting our row is
 // the correct outcome rather than an error.
 export function isAlreadyRemoved(err: unknown): boolean {
