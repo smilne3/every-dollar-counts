@@ -45,7 +45,9 @@ export function TimezoneCard({ current }: { current: string }) {
   const [seen, setSeen] = useState(current)
   if (seen !== current) {
     setSeen(current)
-    setPending(null)
+    // Not while a save is in flight: the reload from an earlier change can land meanwhile, and the
+    // zone being saved must still show, and stay once it saves.
+    if (!busy) setPending(null)
   }
   const value = pending ?? current
 

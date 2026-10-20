@@ -154,6 +154,30 @@ describe('TimezoneCard saves', () => {
     expect(select().value).toBe('America/Denver')
   })
 
+  // The reload after one change can land while the next is saving. Clearing the choice then showed
+  // the earlier zone while the next one saved, and went on showing it once it had saved.
+  it('keeps showing the zone being saved when the reload after an earlier change lands mid-save', async () => {
+    let settle!: (res: Response) => void
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(saved())
+        .mockImplementationOnce(() => new Promise<Response>((resolve) => (settle = resolve)))
+    )
+    const { rerender } = render(<TimezoneCard current="America/New_York" />)
+    choose('America/Chicago')
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+    choose('America/Denver')
+    rerender(<TimezoneCard current="America/Chicago" />)
+    expect(select().value).toBe('America/Denver')
+    settle(saved())
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2))
+    expect(select().value).toBe('America/Denver')
+    rerender(<TimezoneCard current="America/Denver" />)
+    expect(select().value).toBe('America/Denver')
+  })
+
   it('clears an earlier error once the next change saves', async () => {
     vi.stubGlobal(
       'fetch',
