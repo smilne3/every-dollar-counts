@@ -353,6 +353,8 @@ describe('BudgetEditor and a reload that read before the last save', () => {
   // The first save's reload: read at 2,500, after the first save (written at 2,000) and before the
   // second (written at 3,000).
   const firstReload = { readAt: 2_500, initialLimits: { Groceries: 500, Dining: 150 } }
+  // A third category, Travel, with a limit of 300.
+  const travel = { categoryNames: ['Groceries', 'Dining', 'Travel'], initialLimits: { Groceries: 400, Dining: 150, Travel: 300 } }
 
   it("keeps the second save's limit when the first save's reload lands after it", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(savedAt(2_000)).mockResolvedValueOnce(savedAt(3_000)).mockResolvedValueOnce(savedAt(4_000))
@@ -449,6 +451,7 @@ describe('BudgetEditor and a reload that read before the last save', () => {
     expect(limit('Groceries').value).toBe('500')
   })
 
+
   it("shows a change from the other phone once a reload read after the save, and drops Saved. beside it", async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(savedAt(2_000)))
     const { rerender } = render(<BudgetEditor {...props} />)
@@ -520,5 +523,39 @@ describe('BudgetEditor and a reload that read before the last save', () => {
     fireEvent.click(button())
     await screen.findByText('Saved.')
     expect(sent(fetchMock, 1)).toContainEqual({ category: 'Travel', monthly_limit: 300 })
+  })
+
+  // A category deleted on the other phone leaves no field behind. Kept, its field counted as sent when
+  // the category was added again during a save, and showed the deleted limit beside "Saved.", which
+  // the next Save would have put back.
+  it('forgets a category deleted on the other phone, so it comes back empty during a save', async () => {
+    let settle!: (res: Response) => void
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => (settle = resolve)))
+      .mockResolvedValueOnce(savedAt(3_000))
+    vi.stubGlobal('fetch', fetchMock)
+    const { rerender } = render(<BudgetEditor {...props} {...travel} />)
+    // Travel deleted on the other phone, and its limit with it.
+    rerender(<BudgetEditor {...props} readAt={1_500} initialLimits={{ Groceries: 400, Dining: 150 }} />)
+    fireEvent.change(limit('Groceries'), { target: { value: '500' } })
+    fireEvent.click(button())
+    // Added again with no limit, arriving while the save is in flight.
+    rerender(<BudgetEditor {...props} {...travel} readAt={1_800} initialLimits={{ Groceries: 400, Dining: 150 }} />)
+    expect(limit('Travel').value).toBe('')
+    settle(savedAt(2_000))
+    await waitFor(() => expect(button().disabled).toBe(false))
+    expect(limit('Travel').value).toBe('')
+    fireEvent.click(button())
+    await screen.findByText('Saved.')
+    expect(sent(fetchMock, 1)).toContainEqual({ category: 'Travel', monthly_limit: 0 })
+  })
+
+  it('takes the limit of a category deleted and added again on the other phone', () => {
+    const { rerender } = render(<BudgetEditor {...props} {...travel} />)
+    rerender(<BudgetEditor {...props} readAt={1_500} initialLimits={{ Groceries: 400, Dining: 150 }} />)
+    // Added again, with a limit of 250.
+    rerender(<BudgetEditor {...props} {...travel} readAt={2_000} initialLimits={{ Groceries: 400, Dining: 150, Travel: 250 }} />)
+    expect(limit('Travel').value).toBe('250')
   })
 })

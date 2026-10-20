@@ -19,6 +19,14 @@ function limitsText(categoryNames: string[], limits: Record<string, number>) {
 // The same limit however it is written: '' and '0' are both no limit, '150.50' and '150.5' one amount.
 const sameLimit = (a: string | undefined, b: string | undefined) => Number(a || 0) === Number(b || 0)
 
+// The fields of the categories the page lists, and no others. A field kept for a category deleted
+// on the other phone would count as sent, with its old limit, if the category were added again.
+function listedOnly(categoryNames: string[], fields: Record<string, string>) {
+  const o: Record<string, string> = {}
+  for (const c of categoryNames) if (Object.hasOwn(fields, c)) o[c] = fields[c]
+  return o
+}
+
 export function BudgetEditor({
   categoryNames,
   initialLimits,
@@ -59,8 +67,8 @@ export function BudgetEditor({
     // the write is not known yet, nor from a read made by then.
     const current = !saving && readAt > savedAt
     const server = limitsText(categoryNames, initialLimits)
-    const nextLimits = { ...limits }
-    const nextBase = { ...base }
+    const nextLimits = listedOnly(categoryNames, limits)
+    const nextBase = listedOnly(categoryNames, base)
     let differs = false
     for (const c of categoryNames) {
       if (limits[c] !== base[c]) continue
