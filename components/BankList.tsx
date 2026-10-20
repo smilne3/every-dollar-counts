@@ -6,6 +6,12 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { ReconnectButton } from '@/components/ReconnectButton'
 import { buttonClass } from '@/components/ui/Button'
 import type { ItemSummary } from '@/lib/plaid-items'
+import { sendSave } from '@/lib/save-response'
+
+// For a Disconnect whose reply was lost, timed out or could not be read (#165). Plaid may have
+// revoked the bank and its row may be gone, so "still connected" would be a guess. The reload shows
+// whether it is still listed.
+const MAY_HAVE_DISCONNECTED = 'That bank may or may not have been disconnected. Showing the latest.'
 
 // Plaid's own wording for the codes that need action at the bank. A Reconnect button for these
 // would just fail again and push the user toward a relink, which spends an unrefundable slot.
@@ -60,27 +66,46 @@ export function BankList({
 
   async function disconnect(item: ItemSummary) {
     setBusy(true)
-    const res = await fetch('/api/plaid/remove-item', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ itemId: item.id }),
-    }).catch(() => null)
-    setBusy(false)
-    setPendingRemove(null)
-    // A failed disconnect means the bank is STILL connected at Plaid. Saying nothing would let the
-    // user believe a real credential had been revoked when it hadn't.
-    if (!res || !res.ok) {
-      const body = res ? await res.json().catch(() => ({}) as { error?: string }) : {}
-      setError(body.error ?? 'That bank was NOT disconnected. It is still connected at Plaid.')
-      return
-    }
     setError(null)
-    router.refresh()
+    let reload = false
+    try {
+      // The shared rule (lib/save-response.ts): only the route's own { ok: true } is a disconnect.
+      const result = await sendSave('/api/plaid/remove-item', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ itemId: item.id }),
+      })
+      if (result.outcome === 'saved') {
+        reload = true
+      } else if (result.outcome === 'refused') {
+        // Shown as it stands: the route's words say what is true of the bank at Plaid on each path,
+        // including whether it is still connected. A 404 means it is already gone, so the list is
+        // stale.
+        setError(result.error)
+        reload = result.status === 404
+      } else {
+        // Saying it failed would be a guess either way: a person told a bank is still connected
+        // when it is not, or the reverse, acts on the wrong one.
+        console.error('[BankList] disconnect failed', result.cause)
+        setError(MAY_HAVE_DISCONNECTED)
+        reload = true
+      }
+    } finally {
+      // Never left with the dialog's buttons disabled.
+      setBusy(false)
+      setPendingRemove(null)
+    }
+    // Outside the try: a throw from refresh is not a failed disconnect.
+    if (reload) router.refresh()
   }
 
   return (
     <>
-      {error && <p className="pb-2 text-sm text-coral">{error}</p>}
+      {error && (
+        <p role="alert" className="pb-2 text-sm text-coral">
+          {error}
+        </p>
+      )}
       {/* "N of 10 used" was deliberately NOT printed here for a long time, and the reason was
           sound: the only number available was the count of LIVE banks, which falls on a disconnect
           — the opposite of the truth, since the slot stays spent. plaid_slot_ledger now survives
