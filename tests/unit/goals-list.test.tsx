@@ -418,7 +418,7 @@ describe('GoalsList saves', () => {
       ['a refusal', () => answering(() => refused(500, 'That goal could not be deleted. Please try again.')), 'That goal could not be deleted. Please try again.', 0],
       ['a redirect to the login page', () => answering(redirectedToLogin), 'Your session ended. Sign in again.', 0],
       // Already deleted on the other phone: the list is stale.
-      ['a refusal because the goal is gone', () => answering(() => refused(404, 'That goal no longer exists. Refresh and try again.')), 'That goal no longer exists. Refresh and try again.', 1],
+      ['a refusal because the goal is gone', () => answering(() => refused(404, 'That goal was already deleted.')), 'That goal was already deleted.', 1],
       ['a gateway error page', () => answering(badGateway), 'It may not have saved. Showing the latest.', 1],
       ['a request that fails in flight', () => offline(), 'It may not have saved. Showing the latest.', 1],
     ])('after %s, says why on that goal and re-enables', async (_, fetchMock, message, reloads) => {

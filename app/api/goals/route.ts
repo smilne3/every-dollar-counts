@@ -118,8 +118,10 @@ export async function DELETE(req: Request) {
     return fail(500, 'That goal could not be deleted. Please try again.')
   }
   if (!count) {
+    // Gone already, most likely deleted on the other phone: what was asked for is done, so there is
+    // nothing to try again. GoalsList reloads on a 404.
     console.error('[goals] delete matched no rows (goal already deleted, or the delete policy is missing)', { id })
-    return fail(404, GONE)
+    return fail(404, 'That goal was already deleted.')
   }
   return NextResponse.json({ ok: true })
 }

@@ -289,11 +289,13 @@ describe('DELETE /api/goals', () => {
     expect(calls.writes).toEqual([{ op: 'delete', options: { count: 'exact' }, filters: [['eq', 'id', 'g-1']] }])
   })
 
+  // Most likely deleted on the other phone: what was asked for is done, so the words say so rather
+  // than "try again".
   it('answers 404 in words, and logs it, when the delete matched no goal', async () => {
     makeSupabase()
     const res = await remove({ id: 'g-gone' })
     expect(res.status).toBe(404)
-    expect(await errorOf(res)).toBe(GONE)
+    expect(await errorOf(res)).toBe('That goal was already deleted.')
     expect(logs).toContainEqual([
       '[goals] delete matched no rows (goal already deleted, or the delete policy is missing)',
       { id: 'g-gone' },
