@@ -10,6 +10,7 @@ import {
   redirectedToLogin,
   refused,
   saved,
+  savedAt,
   useFakeSaveClock,
 } from './helpers/save-replies'
 
@@ -36,12 +37,13 @@ beforeAll(() => {
 })
 
 // Two goals so a row renders, one of them complete, and one with a name long enough to lean on
-// the row's truncation.
+// the row's truncation. readAt is when the page read them, by the server's clock.
 const props = {
   initialGoals: [
     { id: '1', name: 'Emergency fund', target_amount: 3000, saved_amount: 1200 },
     { id: '2', name: 'New roof and gutters replacement fund', target_amount: 500, saved_amount: 500 },
   ],
+  readAt: 1_000,
 }
 
 describe('GoalsList', () => {
@@ -353,7 +355,7 @@ describe('GoalsList saves', () => {
       const { rerender } = render(<GoalsList {...props} />)
       updateEmergencyFund('1500.50')
       await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
-      rerender(<GoalsList initialGoals={reloaded(1500.5)} />)
+      rerender(<GoalsList {...props} initialGoals={reloaded(1500.5)} />)
       expect(amount(EF).value).toBe('1500.5')
       expect(updateButton(EF).disabled).toBe(true)
     })
@@ -368,7 +370,7 @@ describe('GoalsList saves', () => {
       const { rerender } = render(<GoalsList {...props} />)
       updateEmergencyFund()
       await screen.findByRole('alert')
-      rerender(<GoalsList initialGoals={reloaded(latest)} />)
+      rerender(<GoalsList {...props} initialGoals={reloaded(latest)} />)
       expect(amount(EF).value).toBe(shown)
     })
 
@@ -379,7 +381,7 @@ describe('GoalsList saves', () => {
       const { rerender } = render(<GoalsList {...props} />)
       updateEmergencyFund()
       await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
-      rerender(<GoalsList initialGoals={reloaded(1200)} />)
+      rerender(<GoalsList {...props} initialGoals={reloaded(1200)} />)
       expect(amount(EF).value).toBe('1200')
     })
 
@@ -389,14 +391,14 @@ describe('GoalsList saves', () => {
       fireEvent.change(amount(ROOF), { target: { value: '450' } })
       updateEmergencyFund()
       await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
-      rerender(<GoalsList initialGoals={reloaded(1500)} />)
+      rerender(<GoalsList {...props} initialGoals={reloaded(1500)} />)
       expect(amount(EF).value).toBe('1500')
       expect(amount(ROOF).value).toBe('450')
     })
 
     it('follows an amount changed on the other phone in a goal nobody has typed into', () => {
       const { rerender } = render(<GoalsList {...props} />)
-      rerender(<GoalsList initialGoals={reloaded(1800)} />)
+      rerender(<GoalsList {...props} initialGoals={reloaded(1800)} />)
       expect(amount(EF).value).toBe('1800')
       expect(updateButton(EF).disabled).toBe(true)
     })
@@ -417,7 +419,7 @@ describe('GoalsList saves', () => {
       expect(refresh).toHaveBeenCalledTimes(1)
       updateEmergencyFund('1700')
       // The reload after the first save lands mid-save; what was typed since stays.
-      rerender(<GoalsList initialGoals={reloaded(1500)} />)
+      rerender(<GoalsList {...props} initialGoals={reloaded(1500)} />)
       expect(amount(EF).value).toBe('1700')
       await act(async () => {
         await vi.advanceTimersByTimeAsync(SAVE_TIMEOUT_MS)
@@ -433,8 +435,131 @@ describe('GoalsList saves', () => {
       const { rerender } = render(<GoalsList {...props} />)
       updateEmergencyFund()
       await screen.findByRole('alert')
-      rerender(<GoalsList initialGoals={reloaded(1200)} />)
+      rerender(<GoalsList {...props} initialGoals={reloaded(1200)} />)
       expect(amount(EF).value).toBe('1500')
+    })
+
+    // #182: two quick updates, and the reload asked for after the first read the goals before the
+    // second was written. Refilled from it, the field went back to the first amount, with Update
+    // disabled beside it, until the next reload. Times are the server's clock: the route says when it
+    // wrote (savedAt), and the page when it read (readAt). The Emergency fund starts at 1,200, read
+    // at 1,000.
+    describe('and a reload that read before the last update (#182)', () => {
+      const TRY_AGAIN = 'That could not be saved. Please try again.'
+      // An update of the Emergency fund, to `value` or to what the field holds, and the render after
+      // it settles: every goal control is disabled until then.
+      async function updateAndSettle(value?: string) {
+        if (value !== undefined) fireEvent.change(amount(EF), { target: { value } })
+        fireEvent.click(updateButton(EF))
+        await waitFor(() => expect(amount(EF).disabled).toBe(false))
+      }
+      // A first update that lands, written at 2,000, then a second whose reply waits for the test.
+      function firstSavedThenHeld() {
+        let settle!: (res: Response) => void
+        vi.stubGlobal(
+          'fetch',
+          vi
+            .fn()
+            .mockResolvedValueOnce(savedAt(2_000))
+            .mockImplementationOnce(() => new Promise<Response>((resolve) => (settle = resolve)))
+        )
+        return (res: Response) => settle(res)
+      }
+
+      it("keeps the second update's amount when the first update's reload lands after it", async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(savedAt(2_000)).mockResolvedValueOnce(savedAt(3_000)))
+        const { rerender } = render(<GoalsList {...props} />)
+        await updateAndSettle('1500')
+        await updateAndSettle('1700')
+        // The first update's reload, read at 2,500: after it was written and before the second was.
+        rerender(<GoalsList readAt={2_500} initialGoals={reloaded(1500)} />)
+        expect(amount(EF).value).toBe('1700')
+        expect(within(card(EF)).getByText(/\$1,700\.00 of \$3,000\.00/)).toBeTruthy()
+        // The second's, read at 3,500.
+        rerender(<GoalsList readAt={3_500} initialGoals={reloaded(1700)} />)
+        expect(amount(EF).value).toBe('1700')
+        expect(updateButton(EF).disabled).toBe(true)
+      })
+
+      // The page takes its time before reading and the route after writing, so a read stamped in the
+      // same millisecond as the write may still have read before it. The next reload brings anything
+      // newer, the other phone's amounts with it.
+      it('does not refill from a read stamped at the time of the update, and does from one after it', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(savedAt(2_000)))
+        const { rerender } = render(<GoalsList {...props} />)
+        await updateAndSettle('1500')
+        rerender(<GoalsList readAt={2_000} initialGoals={reloaded(1200)} />)
+        expect(amount(EF).value).toBe('1500')
+        // Read just after: the other phone has set it to 1,600 since.
+        rerender(<GoalsList readAt={2_001} initialGoals={reloaded(1600)} />)
+        expect(amount(EF).value).toBe('1600')
+      })
+
+      // Tapped again before the first update's reload lands, Update sends the same amount, so the
+      // field holds what it sent while the second update is in flight, and that reload, read before
+      // the second was written, can land meanwhile. Refilled from it, the field took the other
+      // phone's 1,600 and, once the second update was confirmed, kept it as typing: the reload after
+      // never refilled the 1,500 the server held, and Update would have written 1,600 back.
+      it('refills nothing while its update is in flight', async () => {
+        const settle = firstSavedThenHeld()
+        const { rerender } = render(<GoalsList {...props} />)
+        await updateAndSettle('1500')
+        fireEvent.click(updateButton(EF))
+        // The first update's reload, read at 2,500: the other phone has set it to 1,600 since.
+        rerender(<GoalsList readAt={2_500} initialGoals={reloaded(1600)} />)
+        expect(amount(EF).value).toBe('1500')
+        settle(savedAt(3_000))
+        await waitFor(() => expect(amount(EF).disabled).toBe(false))
+        rerender(<GoalsList readAt={3_500} initialGoals={reloaded(1500)} />)
+        expect(amount(EF).value).toBe('1500')
+        expect(updateButton(EF).disabled).toBe(true)
+      })
+
+      // Nothing reloads after a refusal, so a reload held back while the update was in flight is
+      // applied once it is refused. Left unapplied, the field kept 1,500 beside the other phone's
+      // 1,600, with Update enabled to write it back.
+      it('applies a reload that landed during a refused update once it is refused', async () => {
+        const settle = firstSavedThenHeld()
+        const { rerender } = render(<GoalsList {...props} />)
+        await updateAndSettle('1500')
+        fireEvent.click(updateButton(EF))
+        rerender(<GoalsList readAt={2_500} initialGoals={reloaded(1600)} />)
+        settle(refused(500, TRY_AGAIN))
+        await within(card(EF)).findByRole('alert')
+        expect(amount(EF).value).toBe('1600')
+        expect(updateButton(EF).disabled).toBe(true)
+      })
+
+      // Applied again after a refusal, the page is still only as new as its read: one made before the
+      // last confirmed update refills nothing it sent.
+      it('does not apply a reload older than the last update once a later one is refused', async () => {
+        const settle = firstSavedThenHeld()
+        const { rerender } = render(<GoalsList {...props} />)
+        await updateAndSettle('1500')
+        fireEvent.click(updateButton(EF))
+        // Read at 1,500, before the first update was written.
+        rerender(<GoalsList readAt={1_500} initialGoals={reloaded(1200)} />)
+        settle(refused(500, TRY_AGAIN))
+        await within(card(EF)).findByRole('alert')
+        expect(amount(EF).value).toBe('1500')
+      })
+
+      // A card holds back only what its own update sent. Held back too, another goal's change from
+      // the other phone was lost when the update was refused, since nothing reloads after one, and
+      // that goal's Update was left enabled to write its old amount back.
+      it("follows another goal's change from the other phone while an update is in flight, and after it is refused", async () => {
+        let settle!: (res: Response) => void
+        vi.stubGlobal('fetch', vi.fn().mockImplementationOnce(() => new Promise<Response>((resolve) => (settle = resolve))))
+        const { rerender } = render(<GoalsList {...props} />)
+        updateEmergencyFund('1500')
+        // Read at 1,500: the other phone has set the roof fund to 450.
+        rerender(<GoalsList readAt={1_500} initialGoals={[{ ...props.initialGoals[0] }, { ...props.initialGoals[1], saved_amount: 450 }]} />)
+        expect(amount(ROOF).value).toBe('450')
+        settle(refused(500, TRY_AGAIN))
+        await within(card(EF)).findByRole('alert')
+        expect(amount(ROOF).value).toBe('450')
+        expect(amount(EF).value).toBe('1500')
+      })
     })
   })
 
@@ -507,7 +632,7 @@ describe('GoalsList saves', () => {
       addVacation()
       await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2))
       // The reload after both saves: the server still holds $1,200.
-      rerender(<GoalsList initialGoals={[{ ...props.initialGoals[0] }, { ...props.initialGoals[1], saved_amount: 450 }]} />)
+      rerender(<GoalsList {...props} initialGoals={[{ ...props.initialGoals[0] }, { ...props.initialGoals[1], saved_amount: 450 }]} />)
       expect(within(card(EF)).getByRole('alert').textContent).toBe(TRY_AGAIN)
       expect(screen.getAllByRole('alert')).toHaveLength(1)
       expect(amount(EF).value).toBe('1500')
@@ -568,7 +693,7 @@ describe('GoalsList saves', () => {
       const { rerender } = render(<GoalsList {...props} />)
       updateEmergencyFund()
       await within(card(EF)).findByRole('alert')
-      rerender(<GoalsList initialGoals={withoutEmergencyFund()} />)
+      rerender(<GoalsList {...props} initialGoals={withoutEmergencyFund()} />)
       expect(screen.queryByLabelText(`Amount saved for ${EF}`)).toBeNull()
       expect(goneLine().textContent).toBe('That goal no longer exists.')
       expectAtTopOfList(goneLine())
@@ -579,7 +704,7 @@ describe('GoalsList saves', () => {
       const { rerender } = render(<GoalsList {...props} />)
       deleteEmergencyFund()
       await within(card(EF)).findByRole('alert')
-      rerender(<GoalsList initialGoals={withoutEmergencyFund()} />)
+      rerender(<GoalsList {...props} initialGoals={withoutEmergencyFund()} />)
       expect(goneLine().textContent).toBe('That goal was already deleted.')
       expectAtTopOfList(goneLine())
     })
@@ -592,7 +717,7 @@ describe('GoalsList saves', () => {
       const { rerender } = render(<GoalsList {...props} />)
       deleteEmergencyFund()
       expect((await within(card(EF)).findByRole('alert')).textContent).toBe('It may not have saved. Showing the latest.')
-      rerender(<GoalsList initialGoals={withoutEmergencyFund()} />)
+      rerender(<GoalsList {...props} initialGoals={withoutEmergencyFund()} />)
       expect(goneLine().textContent).toBe('That goal no longer exists.')
     })
 
@@ -601,13 +726,13 @@ describe('GoalsList saves', () => {
       const { rerender } = render(<GoalsList {...props} />)
       updateEmergencyFund()
       await within(card(EF)).findByRole('alert')
-      rerender(<GoalsList initialGoals={withoutEmergencyFund()} />)
+      rerender(<GoalsList {...props} initialGoals={withoutEmergencyFund()} />)
       expect(goneLine().textContent).toBe('That goal no longer exists.')
       fireEvent.change(amount(ROOF), { target: { value: '450' } })
       fireEvent.click(updateButton(ROOF))
       expect(screen.queryByRole('alert')).toBeNull()
       await waitFor(() => expect(refresh).toHaveBeenCalledTimes(2))
-      rerender(<GoalsList initialGoals={withoutEmergencyFund()} />)
+      rerender(<GoalsList {...props} initialGoals={withoutEmergencyFund()} />)
       expect(screen.queryByRole('alert')).toBeNull()
     })
 
@@ -616,7 +741,7 @@ describe('GoalsList saves', () => {
       const { rerender } = render(<GoalsList {...props} />)
       deleteEmergencyFund()
       await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
-      rerender(<GoalsList initialGoals={withoutEmergencyFund()} />)
+      rerender(<GoalsList {...props} initialGoals={withoutEmergencyFund()} />)
       expect(screen.queryByRole('alert')).toBeNull()
     })
   })
