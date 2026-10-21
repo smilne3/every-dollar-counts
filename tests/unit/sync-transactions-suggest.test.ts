@@ -28,10 +28,12 @@ vi.mock('@/lib/supabase/admin', () => ({
   supabaseAdmin: {
     from: () => ({
       select: () => ({ eq: () => ({ eq: async () => ({ data: items.rows }) }) }),
+      // A recovered bank's reset goes on to .neq(), which leaves a broken login alone.
       update: (values: unknown) => ({
-        eq: async (_col: string, id: unknown) => {
+        eq: (_col: string, id: unknown) => {
           updates.push({ values, id })
-          return { error: null }
+          const reply = Promise.resolve({ error: null })
+          return Object.assign(reply, { neq: () => reply })
         },
       }),
     }),

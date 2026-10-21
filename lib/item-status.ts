@@ -10,7 +10,9 @@ import { supabaseAdmin } from '@/lib/supabase/admin'
 // Never a broken login: only Reconnect clears needs_reconnect (app/api/plaid/reconnect/route.ts).
 // Refresh skips such a bank, but the webhook still stores its accounts, and a login Plaid has said
 // will expire (PENDING_EXPIRATION, PENDING_DISCONNECT) works until it does. Cleared here, that
-// warning would go with the next routine webhook.
+// warning would go with the next routine webhook. Nor one marked broken while this sync ran, by an
+// ITEM webhook for the same bank: the status read before the sync can't show it, so the write
+// itself leaves needs_reconnect alone. Plaid sends PENDING_DISCONNECT once.
 //
 // Answers the write's error, or null. The bank's data did sync, so each caller only logs it, and
 // the flag is set again by the next sync that succeeds.
@@ -20,5 +22,6 @@ export async function markRecovered(item: { id: string; status: string }) {
     .from('plaid_items')
     .update({ status: 'ok', status_detail: null })
     .eq('id', item.id)
+    .neq('status', 'needs_reconnect')
   return error
 }

@@ -99,10 +99,20 @@ function makeStandIns({
           },
         }
       },
+      // A write lands when awaited. A recovered bank's goes on to .neq(), which leaves a login
+      // marked broken during the sync alone (lib/item-status.ts), and is recorded with it.
       update: (values: Row) => ({
         eq: (col: string, val: unknown) => {
-          calls.writes.push({ values, filter: ['eq', col, val] })
-          return Promise.resolve(noAnswer ? NO_ANSWER : { error: writeError })
+          const write = { values, filter: ['eq', col, val] as unknown[] }
+          calls.writes.push(write)
+          const reply = () => Promise.resolve(noAnswer ? NO_ANSWER : { error: writeError })
+          return {
+            neq: (c: string, v: unknown) => {
+              write.filter.push('neq', c, v)
+              return reply()
+            },
+            then: (resolve: (r: unknown) => unknown, reject?: (e: unknown) => unknown) => reply().then(resolve, reject),
+          }
         },
       }),
     }
@@ -226,7 +236,9 @@ describe('POST /api/plaid/sync-transactions: the banks', () => {
     })
     const res = await refresh()
     expect(await res.json()).toMatchObject({ ok: true, banks: 1, added: 3, failed: 0 })
-    expect(calls.writes).toEqual([{ values: { status: 'ok', status_detail: null }, filter: ['eq', 'id', 'item-1'] }])
+    expect(calls.writes).toEqual([
+      { values: { status: 'ok', status_detail: null }, filter: ['eq', 'id', 'item-1', 'neq', 'status', 'needs_reconnect'] },
+    ])
     expect(logs).toContainEqual([
       '[plaid] sync status write failed',
       { itemId: 'item-1', code: '42501', message: 'permission denied for table plaid_items' },

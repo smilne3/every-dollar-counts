@@ -6,9 +6,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 //
 // The stand-in is strict, and holds the stored rows as Postgres would: the read resolves only
 // through .from('plaid_items').select(…).eq(…).maybeSingle() and returns only the columns asked
-// for; a write resolves only through .update(…).eq(…), is recorded, and changes only the rows that
-// filter matches. A write can be refused, or go unanswered as postgrest-js reports a request lost in
-// flight (#173), and then changes nothing. So each test reads the bank as it ends up.
+// for. A write lands when it is awaited: it is recorded then, with its filters, and changes only
+// the rows they all match at that moment, so a row changed during the sync is judged as it is by
+// then. A write can be refused, or go unanswered as postgrest-js reports a request lost in flight
+// (#173), and then changes nothing. So each test reads the bank as it ends up.
 //
 // vi.hoisted for the same reason as tests/unit/webhook-suggest.test.ts.
 const { stored, writes, writeReply, storeAccounts, syncAndStore } = vi.hoisted(() => ({
@@ -22,6 +23,12 @@ const { stored, writes, writeReply, storeAccounts, syncAndStore } = vi.hoisted((
 
 const project = (row: Record<string, unknown>, cols: string) =>
   Object.fromEntries(cols.split(',').map((c) => c.trim()).filter((c) => c in row).map((c) => [c, row[c]]))
+
+// A write as the stand-in takes it: narrowed by .eq() and .neq(), and landing when awaited.
+type Write = PromiseLike<unknown> & {
+  eq: (col: string, value: unknown) => Write
+  neq: (col: string, value: unknown) => Write
+}
 
 vi.mock('next/server', async (orig) => ({
   ...(await orig<typeof import('next/server')>()),
@@ -44,14 +51,28 @@ vi.mock('@/lib/supabase/admin', () => ({
             },
           }),
         }),
-        update: (values: Record<string, unknown>) => ({
-          eq: async (col: string, value: unknown) => {
-            writes.push(['update', values, 'eq', col, value])
-            const reply = writeReply.value ?? { data: null, error: null, status: 204 }
-            if (!reply.error) for (const r of stored.rows) if (r[col] === value) Object.assign(r, values)
-            return reply
-          },
-        }),
+        update: (values: Record<string, unknown>) => {
+          const filters: [string, string, unknown][] = []
+          const hit = (r: Record<string, unknown>) =>
+            filters.every(([op, col, value]) => (op === 'eq' ? r[col] === value : r[col] !== value))
+          const write: Write = {
+            eq: (col, value) => {
+              filters.push(['eq', col, value])
+              return write
+            },
+            neq: (col, value) => {
+              filters.push(['neq', col, value])
+              return write
+            },
+            then: (resolve, reject) => {
+              writes.push(['update', values, ...filters.flat()])
+              const reply = writeReply.value ?? { data: null, error: null, status: 204 }
+              if (!reply.error) for (const r of stored.rows) if (hit(r)) Object.assign(r, values)
+              return Promise.resolve(reply).then(resolve, reject)
+            },
+          }
+          return write
+        },
       }
     },
   },
@@ -78,7 +99,7 @@ const bank = (over: Record<string, unknown> = {}) => ({
 const CHASE = bank({ id: 'item-2', item_id: 'plaid-item-2', institution_name: 'Chase' })
 
 const DATA_READY = { webhook_type: 'TRANSACTIONS', webhook_code: 'SYNC_UPDATES_AVAILABLE' }
-const RECOVERED = ['update', { status: 'ok', status_detail: null }, 'eq', 'id', 'item-1']
+const RECOVERED = ['update', { status: 'ok', status_detail: null }, 'eq', 'id', 'item-1', 'neq', 'status', 'needs_reconnect']
 
 function hook(body: Record<string, unknown>) {
   return new Request('http://localhost/api/plaid/webhook?key=s3cret', {
@@ -144,6 +165,20 @@ describe('POST /api/plaid/webhook: a bank that recovers (#191)', () => {
     expect(storeAccounts).toHaveBeenCalledExactlyOnceWith('hh-7', 'item-1', 'access-token')
     expect(stored.rows).toEqual([bank({ status: 'needs_reconnect', status_detail }), CHASE])
     expect(writes).toEqual([])
+  })
+
+  // An ITEM webhook for the same bank can land while this delivery's sync runs, and Plaid sends
+  // PENDING_DISCONNECT once. The bank was read as only behind, and its data came in, but the
+  // warning stands.
+  it('leaves a login marked broken while its sync ran, rather than marking it ok', async () => {
+    syncAndStore.mockImplementation(async () => {
+      Object.assign(stored.rows[0], { status: 'needs_reconnect', status_detail: 'PENDING_DISCONNECT' })
+      return { added: 2, modified: 0, removed: 0 }
+    })
+    const res = await POST(hook(DATA_READY))
+    expect(await res.json()).toEqual({ ok: true })
+    expect(stored.rows).toEqual([bank({ status: 'needs_reconnect', status_detail: 'PENDING_DISCONNECT' }), CHASE])
+    expect(console.error).not.toHaveBeenCalled()
   })
 
   // The usual delivery. Nothing to record, so nothing is written.
