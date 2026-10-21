@@ -27,7 +27,7 @@ vi.mock('@/lib/crypto', () => ({ decrypt }))
 
 import { AuthRetryableFetchError, type AuthError } from '@supabase/supabase-js'
 import { POST } from '@/app/api/plaid/remove-item/route'
-import { NO_ANSWER, REFUSED_5XX } from '../stubs/no-answer'
+import { GATEWAY_502, NO_ANSWER, REFUSED_5XX } from '../stubs/no-answer'
 import { answerOf, UNKNOWN_ANSWER } from './helpers/route-answers'
 
 type Row = Record<string, unknown>
@@ -287,23 +287,58 @@ describe('POST /api/plaid/remove-item: once Plaid may have removed it', () => {
     ])
   })
 
-  // #173: Plaid has removed it, and the delete may have taken the row, and the accounts and
-  // transactions under it, or not. "Still in your list" would be a guess: BankList says it may or
-  // may not have been disconnected and reloads to show which.
-  it('answers that it may not have saved when the database never answers the delete, and logs it', async () => {
-    const calls = makeStandIns({ deleteReplies: [NO_ANSWER] })
-    const res = await disconnect()
-    expect(await answerOf(res)).toEqual(UNKNOWN_ANSWER)
-    expect(itemRemove).toHaveBeenCalledExactlyOnceWith({ access_token: 'access-sandbox-1' })
-    expect(calls.deletes).toEqual([['eq', 'id', 'item-1']])
-    expect(logs).toContainEqual(['[plaid] remove-item delete failed', { itemId: 'item-1', code: '', message: 'TypeError: fetch failed' }])
-  })
-
-  // A refusal carries a code, 5xx or not: the row is still there, as the words say.
+  // A refusal carries a code, 5xx or not: the row is still there, as the words say. Nothing of it
+  // was written, so it is not tried again.
   it('answers 500 for a refused delete whose status is a 5xx, since it carries a code, and says the bank is still listed', async () => {
-    makeStandIns({ deleteReplies: [REFUSED_5XX] })
+    const calls = makeStandIns({ deleteReplies: [REFUSED_5XX] })
     const res = await disconnect()
     expect(res.status).toBe(500)
     expect(await errorOf(res)).toBe('That bank was disconnected at Plaid but is still in your list. Please try again.')
+    expect(calls.deletes).toHaveLength(1)
+  })
+})
+
+// #173: Plaid has removed the bank, and a delete whose reply was lost may or may not have taken the
+// row, and the accounts and transactions under it. Deleting a row already gone is no error, so the
+// delete is tried once more, and a second one that is answered settles it.
+describe('POST /api/plaid/remove-item: a delete whose reply was lost', () => {
+  it.each([
+    ['no reply at all', NO_ANSWER],
+    ["a gateway's 502", GATEWAY_502],
+  ])('tries the delete once more after %s, and answers ok when that one is answered', async (_, lost) => {
+    const calls = makeStandIns({ deleteReplies: [lost] })
+    const res = await disconnect()
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
+    expect(calls.deletes).toEqual([['eq', 'id', 'item-1'], ['eq', 'id', 'item-1']])
+    expect(itemRemove).toHaveBeenCalledExactlyOnceWith({ access_token: 'access-sandbox-1' })
+  })
+
+  // postgrest-js puts the cause in `details`: the connection refused, reset or timed out.
+  it('logs the lost reply with its details, which name the cause', async () => {
+    makeStandIns({ deleteReplies: [NO_ANSWER] })
+    await disconnect()
+    expect(logs).toContainEqual([
+      '[plaid] remove-item delete got no answer; trying once more',
+      { itemId: 'item-1', code: '', message: 'TypeError: fetch failed', details: NO_ANSWER.error.details },
+    ])
+  })
+
+  // Lost twice, whether the row is gone is not known, so "still in your list" would be a guess:
+  // BankList says it may or may not have been disconnected and reloads to show which.
+  it('answers that it may not have saved when the second delete gets no answer either, and logs it', async () => {
+    const calls = makeStandIns({ deleteReplies: [NO_ANSWER, NO_ANSWER] })
+    const res = await disconnect()
+    expect(await answerOf(res)).toEqual(UNKNOWN_ANSWER)
+    expect(calls.deletes).toHaveLength(2)
+    expect(logs).toContainEqual(['[plaid] remove-item delete failed', { itemId: 'item-1', code: '', message: 'TypeError: fetch failed' }])
+  })
+
+  it('says the bank is still listed when the second delete is refused', async () => {
+    const calls = makeStandIns({ deleteReplies: [NO_ANSWER, REFUSED_5XX] })
+    const res = await disconnect()
+    expect(res.status).toBe(500)
+    expect(await errorOf(res)).toBe('That bank was disconnected at Plaid but is still in your list. Please try again.')
+    expect(calls.deletes).toHaveLength(2)
   })
 })

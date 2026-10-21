@@ -5,7 +5,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin'
 import { decrypt } from '@/lib/crypto'
 import { plaidClient, plaidEnv } from '@/lib/plaid'
 import { plaidLogSafe, isAlreadyRemoved, plaidRefused } from '@/lib/plaid-errors'
-import { unknownIfLost } from '@/lib/lost-reply'
+import { replyWasLost, unknownIfLost } from '@/lib/lost-reply'
 
 // Disconnect a bank: remove it at Plaid, THEN delete our record. Deleting the plaid_items row
 // cascades to accounts (002) and, via the FK added in 010, on to its transactions — so nothing is
@@ -110,11 +110,20 @@ export async function POST(req: Request) {
     }
   }
 
-  const { error, status } = await supabaseAdmin.from('plaid_items').delete().eq('id', item.id)
-  // Plaid has removed it, so it is disconnected. Refused, the delete leaves it showing. Never
-  // answered, it may have taken the row, and the accounts and transactions it cascades to, or not:
-  // unknown (lib/lost-reply.ts), and BankList reloads to show which. Either way, trying again
-  // finishes it: itemRemove then finds it gone, which is swallowed above.
+  // Plaid has removed it, so it is disconnected, and the row goes, with the accounts and transactions
+  // it cascades to. A delete whose reply was lost (lib/lost-reply.ts) may or may not have taken it,
+  // so it is tried once more: deleting a row already gone is no error, so a second delete that is
+  // answered settles it. Lost twice, the outcome is unknown, and BankList reloads to show which.
+  // Refused, the delete leaves it showing. Either way, trying again finishes it: itemRemove then finds
+  // the Item gone, which is swallowed above.
+  const deleteRow = () => supabaseAdmin.from('plaid_items').delete().eq('id', item.id)
+  let deleted = await deleteRow()
+  if (deleted.error && replyWasLost(deleted.status, deleted.error)) {
+    const { code, message, details } = deleted.error
+    console.error('[plaid] remove-item delete got no answer; trying once more', { itemId: item.id, code, message, details })
+    deleted = await deleteRow()
+  }
+  const { error, status } = deleted
   if (error) {
     console.error('[plaid] remove-item delete failed', { itemId: item.id, code: error.code, message: error.message })
     return unknownIfLost(status, error) ?? fail(500, 'That bank was disconnected at Plaid but is still in your list. Please try again.')
