@@ -5,6 +5,12 @@ import { fileURLToPath } from 'node:url'
 
 const emptyStub = fileURLToPath(new URL('./tests/stubs/empty.ts', import.meta.url))
 
+// Node 25 turned on Web Storage by default. Its localStorage global has no methods without
+// --localstorage-file, shadows jsdom's, and makes every worker warn "`--localstorage-file` was
+// provided without a valid path" (#141). Off in the test workers, so the suite sees jsdom's storage
+// as it does on Node 22 in CI. Node 22 and 24 have no such global, so they get no flag.
+const nodeMajor = Number(process.versions.node.split('.')[0])
+
 export default defineConfig({
   plugins: [tsconfigPaths(), react()],
   resolve: {
@@ -28,5 +34,6 @@ export default defineConfig({
     // it. At UTC neither shows at all. So the default is east, and CI runs the suite a second
     // time with VITEST_TZ set west — see .github/workflows/ci.yml.
     env: { PLAID_ENV: 'sandbox', TZ: process.env.VITEST_TZ ?? 'Asia/Tokyo' },
+    execArgv: nodeMajor >= 25 ? ['--no-experimental-webstorage'] : [],
   },
 })

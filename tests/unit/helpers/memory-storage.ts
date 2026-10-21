@@ -1,9 +1,10 @@
 import { vi } from 'vitest'
 
-// Node 25 defines a localStorage global of its own, which has no methods without
-// --localstorage-file and shadows jsdom's in this suite (the same trap components/plaid-link-context.ts
-// guards against at build time). Anything that keeps the pending Plaid link needs a working one, so
-// this stands in for it. Undo with vi.unstubAllGlobals().
+// A fresh, in-memory localStorage for one test, for anything that keeps the pending Plaid link, so
+// one test's pending link never reaches the next. Node 25's own localStorage global, which has no
+// methods without --localstorage-file and used to shadow jsdom's here (the same trap
+// components/plaid-link-context.ts guards against at build time), is now off in the test workers
+// (vitest.config.mts, #141). Undo with vi.unstubAllGlobals().
 export function useMemoryStorage(): Storage {
   const data = new Map<string, string>()
   const storage: Storage = {
