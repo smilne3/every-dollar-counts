@@ -30,7 +30,8 @@ import { proxy } from '@/proxy'
 
 const AUTH_UNCHECKED = "Couldn't check your sign-in, so that didn't go through. Please try again."
 
-const request = (path: string, method = 'GET') => new NextRequest(`http://localhost${path}`, { method })
+const request = (path: string, method = 'GET', headers: Record<string, string> = {}) =>
+  new NextRequest(`http://localhost${path}`, { method, headers })
 const answers = (user: { id: string } | null, error: AuthError | null) =>
   getUser.mockResolvedValue({ data: { user }, error })
 
@@ -39,7 +40,22 @@ async function outcome(res: NextResponse) {
   if (res.headers.get('x-middleware-next') === '1') return 'through'
   const to = getRedirectUrl(res)
   if (to) return `redirect ${new URL(to).pathname}`
-  return { status: res.status, type: res.headers.get('content-type'), body: await res.json() }
+  const type = res.headers.get('content-type')
+  return { status: res.status, type, body: type?.includes('json') ? await res.json() : await res.text() }
+}
+
+// The page a page request gets when Supabase Auth cannot be asked: a 503 in HTML, never cached, in
+// the words app/error.tsx uses, whose Try again reloads the page.
+async function expectUncheckedPage(res: NextResponse) {
+  expect(res.status).toBe(503)
+  expect(res.headers.get('content-type')).toBe('text/html; charset=utf-8')
+  expect(res.headers.get('cache-control')).toBe('no-store')
+  const html = await res.text()
+  expect(html).toContain("<h1>Couldn't check your sign-in</h1>")
+  expect(html).toContain('<p>Something went wrong reaching the sign-in service. Try again, or come back in a moment.</p>')
+  expect(html).toContain('<a href="">Try again</a>')
+  expect(html).toContain('<meta name="viewport" content="width=device-width, initial-scale=1">')
+  return html
 }
 
 const PAGES = ['/dashboard', '/settings', '/transactions?account=acct-1']
@@ -62,8 +78,23 @@ describe('proxy: Supabase Auth could not be asked (#143)', () => {
     answers(null, new AuthRetryableFetchError('fetch failed', 0))
   })
 
-  it.each(PAGES)('lets %s through for the layout to check again, rather than sending it to /login', async (path) => {
-    expect(await outcome(await proxy(request(path)))).toBe('through')
+  // Let through, the page would render with no sign-in check: the layout's check does not stop the
+  // page under it from running, and a session that can't be refreshed reads as no one, which gets
+  // empty lists back (#143 review: "No banks connected yet." beside Connect a bank).
+  it.each(PAGES)('answers %s with a 503 page that says sign-in could not be checked, rather than rendering it or sending it to /login', async (path) => {
+    await expectUncheckedPage(await proxy(request(path)))
+  })
+
+  // Next's router fetches a page's payload with an RSC header; given any other reply, it loads the
+  // page in full, which gets the same page.
+  it('answers a client-side navigation the same way', async () => {
+    await expectUncheckedPage(await proxy(request('/goals?_rsc=abc12', 'GET', { RSC: '1' })))
+  })
+
+  it('writes nothing from the address into the page', async () => {
+    const html = await expectUncheckedPage(await proxy(request('/settings?x=%3Cscript%3Ealert(1)%3C/script%3E')))
+    expect(html).toBe(await (await proxy(request('/settings'))).text())
+    expect(html).not.toContain('<script')
   })
 
   it.each(APIS)('answers %s with a 503 in JSON, in words its control shows as they stand', async (path) => {
@@ -85,23 +116,24 @@ describe('proxy: Supabase Auth could not be asked (#143)', () => {
 
   it('treats a 5xx from Supabase Auth the same way', async () => {
     answers(null, new AuthRetryableFetchError('HTTP 503', 503))
-    expect(await outcome(await proxy(request('/dashboard')))).toBe('through')
+    await expectUncheckedPage(await proxy(request('/dashboard')))
     expect((await proxy(request('/api/budgets', 'POST'))).status).toBe(503)
   })
 
   // Supabase rotated the refresh token before the user read failed. Kept, the old one is refused
   // as already used on the next refresh, which ends the session the 503 was meant to spare.
-  it('keeps a cookie the check refreshed before it failed, on the 503 and on a page it lets through', async () => {
+  it('keeps a cookie the check refreshed before it failed, on the /api 503 and on the page', async () => {
     getUser.mockImplementation(async () => {
       setAll.current([{ name: 'sb-test-auth-token', value: 'rotated', options: { path: '/', maxAge: 34560000, sameSite: 'lax' } }])
       return { data: { user: null }, error: new AuthRetryableFetchError('fetch failed', 0) }
     })
+    const rotated = { value: 'rotated', path: '/', maxAge: 34560000, sameSite: 'lax' }
     const api = await proxy(request('/api/budgets', 'POST'))
     expect(api.status).toBe(503)
-    expect(api.cookies.get('sb-test-auth-token')).toMatchObject({ value: 'rotated', path: '/', maxAge: 34560000, sameSite: 'lax' })
+    expect(api.cookies.get('sb-test-auth-token')).toMatchObject(rotated)
     const page = await proxy(request('/dashboard'))
-    expect(await outcome(page)).toBe('through')
-    expect(page.cookies.get('sb-test-auth-token')?.value).toBe('rotated')
+    await expectUncheckedPage(page)
+    expect(page.cookies.get('sb-test-auth-token')).toMatchObject(rotated)
   })
 })
 
