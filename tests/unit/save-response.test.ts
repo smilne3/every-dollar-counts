@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { readSaveResponse, sendRequest, sendSave, SAVE_TIMEOUT_MS, SESSION_ENDED, SAVE_FAILED } from '@/lib/save-response'
+import {
+  readSaveResponse,
+  sendRequest,
+  sendSave,
+  MAY_NOT_HAVE_SAVED,
+  SAVE_TIMEOUT_MS,
+  SESSION_ENDED,
+  SAVE_FAILED,
+} from '@/lib/save-response'
 import {
   answering,
   badGateway,
@@ -10,6 +18,7 @@ import {
   replyWith,
   saved,
   savedAt,
+  unanswered,
   useFakeSaveClock,
 } from './helpers/save-replies'
 
@@ -57,6 +66,12 @@ describe('readSaveResponse', () => {
   it("throws when the route's own OK reply cannot be read, because it may have saved", async () => {
     await expect(readSaveResponse(res({ bad: true }))).rejects.toThrow('bad json')
   })
+  // #173: the route's own JSON, in words, but saying the database never answered its write, which
+  // may have committed. Read as a refusal, the control would keep what was typed for another try.
+  it("throws on the route's word that the database never answered, because it may have saved", async () => {
+    const reply = res({ ok: false, status: 502, body: { error: MAY_NOT_HAVE_SAVED, unknown: true } })
+    await expect(readSaveResponse(reply)).rejects.toThrow('the database did not answer')
+  })
 })
 
 // The one way the browser sends a save (#103): readSaveResponse's rule, a timeout, and no throw. A
@@ -101,6 +116,8 @@ describe('sendSave', () => {
   it.each([
     ['a gateway error page', badGateway],
     ['an OK reply whose JSON is cut off', () => new Response('{"ok":tr', { headers: { 'content-type': 'application/json' } })],
+    // In the route's words, but saying the database never answered its write (#173).
+    ["the route's word that the database never answered", unanswered],
   ])('reports %s as unknown, because the write may have landed', async (_, reply) => {
     vi.stubGlobal('fetch', answering(reply))
     const result = await sendSave('/api/budgets', { method: 'POST' })
@@ -198,6 +215,8 @@ describe('sendRequest', () => {
     ['an OK reply that is JSON null', () => replyWith(null)],
     ['an OK reply that is a JSON number', () => replyWith(42)],
     ['an OK reply that is a JSON list', () => replyWith([1, 2])],
+    // In the route's words, but saying the database never answered its write (#173).
+    ["the route's word that the database never answered", unanswered],
   ])('reports %s as unknown, because the work may have been done', async (_, reply) => {
     vi.stubGlobal('fetch', answering(reply))
     const result = await sendRequest('/api/plaid/exchange-public-token', { method: 'POST' }, 20_000)

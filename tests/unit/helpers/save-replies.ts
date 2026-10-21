@@ -1,4 +1,5 @@
 import { vi } from 'vitest'
+import { unknownIfLost } from '@/lib/lost-reply'
 
 // The replies a save can get, for tests of anything that saves through lib/save-response.ts. Real
 // Response objects, so what readSaveResponse reads (ok, status, redirected, the content type and
@@ -28,6 +29,10 @@ export function redirectedToLogin() {
   Object.defineProperty(res, 'redirected', { value: true })
   return res
 }
+
+// The route's word that the database never answered its write, which may have committed (#173).
+// Made by the routes' own helper, so it is the reply they give.
+export const unanswered = () => unknownIfLost(0)!
 
 // A gateway's error page from in front of the route. It can arrive after the write committed.
 export const badGateway = () =>
