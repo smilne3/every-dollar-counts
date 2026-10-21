@@ -5,6 +5,7 @@ import { plaidEnv } from '@/lib/plaid'
 import { plaidLogSafe } from '@/lib/plaid-errors'
 import { storeAccounts, syncAndStore } from '@/lib/ingest'
 import { shouldSyncTransactions } from '@/lib/sync-policy'
+import { markRecovered } from '@/lib/item-status'
 import { suggestCategories } from '@/lib/category-suggest'
 
 // Plaid calls this — there is no user session. Two jobs:
@@ -112,6 +113,18 @@ export async function POST(req: Request) {
           household_id: item.household_id,
           access_token: token,
           cursor: item.cursor,
+        })
+      }
+      // Recovered on its own, as on Refresh (#191). A failed write is only logged, as there: the
+      // data is in, and the next sync that succeeds writes it again.
+      const writeError = await markRecovered(item)
+      if (writeError) {
+        console.error('[plaid] webhook status write failed', {
+          item_id,
+          webhook_type,
+          webhook_code,
+          code: writeError.code,
+          message: writeError.message,
         })
       }
     } catch (e) {

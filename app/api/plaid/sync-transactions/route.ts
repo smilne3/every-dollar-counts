@@ -6,6 +6,7 @@ import { decrypt } from '@/lib/crypto'
 import { plaidEnv } from '@/lib/plaid'
 import { storeAccounts, syncAndStore } from '@/lib/ingest'
 import { shouldSyncTransactions } from '@/lib/sync-policy'
+import { markRecovered } from '@/lib/item-status'
 import { classifyPlaidError, fromPlaid, plaidErrorCode, plaidLogSafe } from '@/lib/plaid-errors'
 import { EnvMismatchError } from '@/lib/app-env'
 import { suggestCategories } from '@/lib/category-suggest'
@@ -99,16 +100,11 @@ export async function POST() {
         modified += c.modified
         removed += c.removed
       }
-      // Recovered on its own (the bank came back up, the lock cleared, and so on).
-      if (item.status !== 'ok') {
-        const { error } = await supabaseAdmin
-          .from('plaid_items')
-          .update({ status: 'ok', status_detail: null })
-          .eq('id', item.id)
-        // Its data did sync, so this bank is not counted as a problem; its flag stays stale until
-        // the next Refresh.
-        if (error) console.error('[plaid] sync status write failed', { itemId: item.id, code: error.code, message: error.message })
-      }
+      // Recovered on its own (the bank came back up, the lock cleared, and so on), which the webhook
+      // records too (#191). Its data did sync, so a failed write doesn't count this bank as a
+      // problem; its flag stays stale until the next sync that succeeds.
+      const error = await markRecovered(item)
+      if (error) console.error('[plaid] sync status write failed', { itemId: item.id, code: error.code, message: error.message })
     } catch (e) {
       // NOTHING rethrows. One sick bank must never stop the others — that is the entire point of
       // this loop, and sandbox never produced the errors that make it matter. Production does:
