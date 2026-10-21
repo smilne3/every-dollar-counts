@@ -28,6 +28,23 @@ type CategorySettings = {
 
 type Supabase = Awaited<ReturnType<typeof createClient>>
 
+// The household, and when the page began reading, by the server's clock, for the cards that follow
+// the server to tell this page from one read before their last save was written (#182). One time for
+// the page, taken before its first read, so it is never later than any read on it: a reload that
+// began before a save was written never passes as newer, however late in the page its read comes.
+async function readHousehold(supabase: Supabase) {
+  const readAt = Date.now()
+  const { data: households, error: householdsError } = await supabase
+    .from('households')
+    .select('id, name, timezone')
+    .limit(1)
+  if (householdsError) throw new Error(`could not read your household: ${householdsError.message}`)
+  // No data and no error is not "no household" either (#46): every card below would render as if
+  // nothing were connected.
+  if (!households) throw new Error('could not read your household: read returned no data and no error')
+  return { household: households[0], readAt }
+}
+
 async function readBudgetNames(supabase: Supabase): Promise<Set<string>> {
   const { data: budgetRows, error: budgetsError } = await supabase.from('budgets').select('category')
   // Checked (#91): unchecked, a failed read showed every budget as absent in the delete dialog.
@@ -130,15 +147,7 @@ function unavailable(message: string) {
 
 export default async function SettingsPage() {
   const supabase = await createClient()
-  const { data: households, error: householdsError } = await supabase
-    .from('households')
-    .select('id, name, timezone')
-    .limit(1)
-  if (householdsError) throw new Error(`could not read your household: ${householdsError.message}`)
-  // No data and no error is not "no household" either (#46): every card below would render as if
-  // nothing were connected.
-  if (!households) throw new Error('could not read your household: read returned no data and no error')
-  const household = households[0]
+  const { household, readAt } = await readHousehold(supabase)
   const accountCount = await readOrNull('the account count', () => countAccounts(supabase))
   const items = household ? await readOrNull('the banks', () => listItemsForHousehold(household.id)) : []
   // Null when it cannot be established — BankList falls back to the old wording rather than
@@ -164,7 +173,7 @@ export default async function SettingsPage() {
               You&apos;re in <strong className="font-medium text-ink">{household.name}</strong>.
             </p>
             <InvitePartnerForm householdId={household.id} />
-            <TimezoneCard current={(household.timezone as string) ?? DEFAULT_TIMEZONE} />
+            <TimezoneCard current={(household.timezone as string) ?? DEFAULT_TIMEZONE} readAt={readAt} />
           </>
         ) : (
           <p className="text-sm text-muted">No household found for your account.</p>

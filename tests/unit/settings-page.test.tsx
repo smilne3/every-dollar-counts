@@ -2,9 +2,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 // vi.hoisted for the same reason as tests/unit/dashboard-page.test.tsx: the static page import
 // below is linked before this file's body runs, firing the mock factory.
-const { results, switchState } = vi.hoisted(() => ({
+const { results, switchState, onRead } = vi.hoisted(() => ({
   results: {} as Record<string, { data: unknown; error: { message: string } | null }>,
   switchState: { suggestionsOn: true },
+  // Run as a table's read is awaited, so a test can move the clock on during it.
+  onRead: {} as Record<string, () => void>,
 }))
 
 // A supabase query is a builder awaited at the end, so the stub returns itself for every chained
@@ -31,6 +33,7 @@ const chainFor = (table: string) => {
   // error (PGRST116), which a stand-in answering null would hide (#172).
   chain.maybeSingle = async () => results[table] ?? { data: null, error: null }
   chain.then = (resolve: (v: unknown) => unknown) => {
+    onRead[table]?.()
     const reply = afterCursor ? { data: [], error: null } : (results[table] ?? { data: [], error: null })
     return Promise.resolve('count' in reply && !countAsked ? { ...reply, count: null } : reply).then(resolve)
   }
@@ -164,11 +167,13 @@ beforeEach(() => {
   results.manual_assets = { data: [], error: null }
   results.plaid_items = { data: [], error: null }
   switchState.suggestionsOn = true
+  for (const k of Object.keys(onRead)) delete onRead[k]
 })
 
 // A console.error spy left behind by a failing test would hand its calls to the next test's spy.
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.useRealTimers()
 })
 
 // Settings is the only place a bank can be reconnected (spec §7.3), so it catches a failed read per
@@ -343,6 +348,20 @@ describe('Settings timezone control', () => {
     const props = findProps(tree, TimezoneCard)
     expect(props).not.toBeNull()
     expect(props?.current).toBe('America/Los_Angeles')
+  })
+
+  // #182: TimezoneCard follows the server only from a read made after its last save was written, so
+  // the page tells it when it began reading, timed from before its first read, the household's that
+  // brings the zone. Taken after, a read that began before a save was written and returned after it
+  // would pass as newer.
+  it('tells the control when the page began reading, timed from before its first read', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-20T12:00:00Z'))
+    const before = Date.now()
+    onRead.households = () => vi.setSystemTime(before + 5_000)
+    const props = findProps(await SettingsPage(), TimezoneCard)
+    expect(props?.current).toBe('America/Los_Angeles')
+    expect(props?.readAt).toBe(before)
   })
 })
 
