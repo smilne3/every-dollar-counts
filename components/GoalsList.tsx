@@ -40,11 +40,15 @@ export function GoalsList({
   // Failures of goals a reload no longer lists: their cards are gone and the messages with them, so
   // each is said once at the top of the list, until the next save.
   const [goneMessages, setGoneMessages] = useState<string[]>([])
-  // React's documented way to adjust state when a prop changes. The goals change only on a reload.
+  // React's documented way to adjust state when a prop changes. The goals change only on a reload. A
+  // failure can also come after the reload that dropped its goal: deleted on the other phone while
+  // its update was in flight, the goal had no card for the refusal to be said on, and nothing reloads
+  // after a refusal. Kept, it was said nowhere, until another goal's save reloaded the page and the
+  // list said it beside that save. So any failure of a goal not listed is said here too.
   const [listed, setListed] = useState(initialGoals)
-  if (listed !== initialGoals) {
+  const ids = new Set(initialGoals.map((g) => g.id))
+  if (listed !== initialGoals || Object.keys(goalErrors).some((id) => !ids.has(id))) {
     setListed(initialGoals)
-    const ids = new Set(initialGoals.map((g) => g.id))
     const gone = Object.keys(goalErrors).filter((id) => !ids.has(id))
     if (gone.length > 0) {
       setGoneMessages((said) => [...new Set([...said, ...gone.map((id) => goalErrors[id].gone)])])

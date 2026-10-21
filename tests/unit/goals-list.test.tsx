@@ -755,6 +755,35 @@ describe('GoalsList saves', () => {
       expect(screen.queryByRole('alert')).toBeNull()
     })
 
+    // Deleted on the other phone while its update was in flight: the reload that drops its card lands
+    // first, and the refusal after it has no card to be said on. Kept under a goal no longer listed,
+    // the failure was said nowhere, and nothing reloads after a refusal; it surfaced only when another
+    // goal's save reloaded the page, as "That goal no longer exists." beside that save.
+    it("says so at the top of the list when an update is refused after a reload has dropped the goal's card", async () => {
+      let settle!: (res: Response) => void
+      vi.stubGlobal(
+        'fetch',
+        vi
+          .fn()
+          .mockImplementationOnce(() => new Promise<Response>((resolve) => (settle = resolve)))
+          .mockResolvedValueOnce(saved())
+      )
+      const { rerender } = render(<GoalsList {...props} />)
+      updateEmergencyFund()
+      // Read at 1,500: the other phone has deleted the Emergency fund.
+      rerender(<GoalsList readAt={1_500} initialGoals={withoutEmergencyFund()} />)
+      settle(refused(500, 'That could not be saved. Please try again.'))
+      expect((await screen.findByRole('alert')).textContent).toBe('That goal no longer exists.')
+      expectAtTopOfList(goneLine())
+      // The roof fund's next save clears it, and the reload after that save does not bring it back.
+      fireEvent.change(amount(ROOF), { target: { value: '450' } })
+      fireEvent.click(updateButton(ROOF))
+      expect(screen.queryByRole('alert')).toBeNull()
+      await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+      rerender(<GoalsList readAt={2_500} initialGoals={[{ ...props.initialGoals[1], saved_amount: 450 }]} />)
+      expect(screen.queryByRole('alert')).toBeNull()
+    })
+
     it('says nothing for a goal deleted without a failure', async () => {
       vi.stubGlobal('fetch', answering(saved))
       const { rerender } = render(<GoalsList {...props} />)
