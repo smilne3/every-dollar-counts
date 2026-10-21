@@ -195,10 +195,18 @@ export default async function TransactionsPage({
 
       {list.length === 0 ? (
         <Card className="p-8 text-center">
+          {/* Unfiltered and empty is either a household with no bank, or one whose bank hasn't
+              sent any yet, which can take hours after it is linked (#185). Only the first is told
+              to connect one: telling the second invites linking the same bank again, which spends
+              one of ten lifetime connections (#51). */}
           <p className="text-sm text-muted">
             {account || category || month || flow || safe || page > 1
               ? 'No transactions to show for this view. (Balances-only accounts like a mortgage have none.)'
-              : 'No transactions yet. Connect a bank on the Dashboard.'}
+              : items.length === 0
+                ? 'No transactions yet. Connect a bank on the Dashboard.'
+                : items.length === 1
+                  ? "Your bank is connected, but its transactions haven't arrived yet. They can take a few hours on a new connection."
+                  : "Your banks are connected, but their transactions haven't arrived yet. They can take a few hours on a new connection."}
           </p>
         </Card>
       ) : (

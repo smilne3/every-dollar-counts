@@ -116,6 +116,7 @@ import { MissingBalancesNote } from '@/components/MissingBalancesNote'
 import { NotSyncingBanner } from '@/components/NotSyncingBanner'
 import { TransactionCard } from '@/components/TransactionCard'
 import { TransactionRow } from '@/components/TransactionRow'
+import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { catalogFingerprint } from '@/lib/category-rules'
 import { sug } from './helpers/category-context'
@@ -546,5 +547,52 @@ describe("Transactions before a bank's balances arrive (#170)", () => {
   it("says nothing while every one of the household's banks has its accounts", async () => {
     results.plaid_items = { data: [storedItem(), ...FOREIGN_ITEMS], error: null }
     expect(balancesNote(await render())).toBeNull()
+  })
+})
+
+// #185: an unfiltered empty list said "Connect a bank" even with a bank linked, whose first
+// transactions can take hours to arrive. Linking it again spends one of ten lifetime connections
+// (#51), so only a household with no bank is told to connect one.
+describe('Transactions with none yet (#185)', () => {
+  beforeEach(() => {
+    results.transactions = { data: [], count: 0, error: null }
+  })
+  // What the empty list's card says.
+  const emptyText = (tree: unknown) => {
+    const card = walk(tree).find((d) => d.el.type === Card && d.el.props?.className === 'p-8 text-center')
+    return walk(card?.el.props?.children).find((d) => d.el.type === 'p')?.el.props?.children
+  }
+
+  it('says to connect a bank when the household has none', async () => {
+    expect(emptyText(await render())).toBe('No transactions yet. Connect a bank on the Dashboard.')
+  })
+
+  it("says a linked bank's transactions haven't arrived, and doesn't offer to connect one", async () => {
+    results.plaid_items = { data: [storedItem()], error: null }
+    expect(emptyText(await render())).toBe(
+      "Your bank is connected, but its transactions haven't arrived yet. They can take a few hours on a new connection."
+    )
+  })
+
+  it('says the same of several banks', async () => {
+    results.plaid_items = { data: [storedItem(), storedItem({ id: 'item-2', institution_name: 'Amex' })], error: null }
+    expect(emptyText(await render())).toBe(
+      "Your banks are connected, but their transactions haven't arrived yet. They can take a few hours on a new connection."
+    )
+  })
+
+  // Another household's bank, or this household's from the other Plaid environment, is not one of
+  // this household's.
+  it("still says to connect a bank when the only banks are another household's or the other environment's", async () => {
+    results.plaid_items = { data: FOREIGN_ITEMS, error: null }
+    expect(emptyText(await render())).toBe('No transactions yet. Connect a bank on the Dashboard.')
+  })
+
+  // A filtered view's empty list is about the filter, whatever banks there are.
+  it("keeps a filtered view's wording", async () => {
+    results.plaid_items = { data: [storedItem()], error: null }
+    expect(emptyText(await render({ month: '2026-08' }))).toBe(
+      'No transactions to show for this view. (Balances-only accounts like a mortgage have none.)'
+    )
   })
 })
