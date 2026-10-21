@@ -234,13 +234,17 @@ function GoalCard({
     }
   }
   // Set after a save whose outcome is unknown, and acted on here so the field goes back to the amount
-  // the page holds now, not the one it held when Update was tapped: the reload from an earlier save
-  // can land while this one is in flight.
+  // stored as far as this card knows now, not when Update was tapped: the reload from an earlier save
+  // can land while this one is in flight. That is the page's amount, unless the page read it before
+  // the last update confirmed here was written; then it is the base, which holds that update's amount
+  // or a newer one read since (#182). Back to the page's then, the field showed the amount from
+  // before that update, with Update disabled, as if the update had been undone.
   const [resetting, setResetting] = useState(false)
   if (resetting) {
     setResetting(false)
-    setSaved(String(goal.saved_amount))
-    setBase(String(goal.saved_amount))
+    const back = readAt > savedAt ? String(goal.saved_amount) : base
+    setSaved(back)
+    setBase(back)
   }
   const [confirmDelete, setConfirmDelete] = useState(false)
   const ratio = goalProgress(Number(saved || 0), goal.target_amount)
@@ -260,8 +264,8 @@ function GoalCard({
         if (result.savedAt !== undefined) setSavedAt(result.savedAt)
       } else if (result.outcome === 'unknown') {
         // The bar and the figures follow the field, so an amount left in it would show progress the
-        // server may not have. Back to the amount last read (see `resetting`); the reload shows the
-        // latest.
+        // server may not have. Back to the amount stored as far as this card knows (see `resetting`);
+        // the reload shows the latest.
         setResetting(true)
       } else {
         // A refusal wrote nothing: what was typed stays, for another try. The page is applied again,

@@ -544,6 +544,25 @@ describe('GoalsList saves', () => {
         expect(amount(EF).value).toBe('1500')
       })
 
+      // It may have saved, and the reload after it shows which. Until that lands, the field goes back
+      // to the amount stored as far as this card knows. Back to the page's, read before the first
+      // update was written at 2,000, it showed the 1,200 from before that update with Update disabled,
+      // as if the update had been undone.
+      it.each([
+        ['before it', undefined],
+        ['at the instant it was written', 2_000],
+      ])('after an unknown outcome, goes back to the last confirmed amount when the page read %s', async (_, reloadReadAt) => {
+        vi.spyOn(console, 'error').mockImplementation(() => {})
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(savedAt(2_000)).mockResolvedValueOnce(badGateway()))
+        const { rerender } = render(<GoalsList {...props} />)
+        await updateAndSettle('1500')
+        if (reloadReadAt !== undefined) rerender(<GoalsList readAt={reloadReadAt} initialGoals={reloaded(1200)} />)
+        await updateAndSettle('1700')
+        expect(within(card(EF)).getByRole('alert').textContent).toBe('It may not have saved. Showing the latest.')
+        expect(amount(EF).value).toBe('1500')
+        expect(within(card(EF)).getByText(/\$1,500\.00 of \$3,000\.00/)).toBeTruthy()
+      })
+
       // A card holds back only what its own update sent. Held back too, another goal's change from
       // the other phone was lost when the update was refused, since nothing reloads after one, and
       // that goal's Update was left enabled to write its old amount back.
