@@ -116,11 +116,12 @@ export async function POST(req: Request) {
   } catch (e) {
     // The reconnect itself succeeded at Plaid — only the catch-up sync failed. Leave the item
     // marked healthy (the next Refresh will retry) and say so, rather than reporting a failure
-    // that would push the user toward disconnecting and relinking, which costs a slot.
+    // that would push the user toward disconnecting and relinking, which costs a slot. It says what
+    // Refresh will do, not to press it: ReconnectButton shows it on Settings, which has none (#192).
     console.error('[plaid] post-reconnect sync failed', item.id, plaidLogSafe(e))
     return NextResponse.json({
       ok: true,
-      warning: 'Reconnected. New transactions have not arrived yet — press Refresh in a moment.',
+      warning: 'Reconnected. New transactions have not arrived yet — Refresh will fetch them.',
     })
   }
 

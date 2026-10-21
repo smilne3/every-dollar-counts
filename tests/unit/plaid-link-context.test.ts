@@ -54,7 +54,7 @@ describe('completePendingLink: a new bank', () => {
 
   it('passes on the route’s warning when the bank connected but its data has not arrived', async () => {
     newBank()
-    const warning = 'Bank connected, but its balances have not arrived yet. Press Refresh in a moment.'
+    const warning = 'Bank connected, but its balances have not arrived yet. Refresh will fetch them.'
     vi.stubGlobal('fetch', answering(() => replyWith({ ok: true, warning })))
     expect(await finish()).toEqual({ outcome: 'done', warning })
   })

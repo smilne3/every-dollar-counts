@@ -162,7 +162,7 @@ describe('LinkButton: finishing a connection', () => {
   })
 
   it('shows the route’s warning when the bank connected but its data has not arrived', async () => {
-    const warning = 'Bank connected, but its balances have not arrived yet. Press Refresh in a moment.'
+    const warning = 'Bank connected, but its balances have not arrived yet. Refresh will fetch them.'
     vi.stubGlobal('fetch', answering(() => replyWith({ ok: true, warning })))
     await act(linked())
     expect(screen.getByText(warning)).toBeTruthy()

@@ -6,7 +6,7 @@ import { answering, replyWith, saved } from './helpers/save-replies'
 import { useMemoryStorage } from './helpers/memory-storage'
 
 // Reconnect inside the bank list (#165). The reconnect route can answer "Reconnected. New
-// transactions have not arrived yet — press Refresh in a moment." The reload that follows shows the
+// transactions have not arrived yet — Refresh will fetch them." The reload that follows shows the
 // bank healthy, the list stops rendering its Reconnect button, and a notice shown beside the button
 // would go with it, so the list holds it. Plaid Link cannot run here: usePlaidLink is a stand-in
 // that keeps the config it was given, to fire onSuccess as Link would.
@@ -43,7 +43,7 @@ afterEach(() => {
   plaid.config = null
 })
 
-const WARNING = 'Reconnected. New transactions have not arrived yet — press Refresh in a moment.'
+const WARNING = 'Reconnected. New transactions have not arrived yet — Refresh will fetch them.'
 const bank = (status: string) => ({
   id: 'item-1',
   institution_name: 'Wells Fargo',

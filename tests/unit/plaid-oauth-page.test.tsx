@@ -60,7 +60,7 @@ describe('Plaid OAuth return page', () => {
     cleanup()
     router.replace.mockClear()
     savePendingLink({ token: 'link-sandbox-1', mode: 'add', products: ['transactions'] })
-    const warning = 'Bank connected, but its balances have not arrived yet. Press Refresh in a moment.'
+    const warning = 'Bank connected, but its balances have not arrived yet. Refresh will fetch them.'
     vi.stubGlobal('fetch', answering(() => replyWith({ ok: true, warning })))
     await back()
     expect(router.replace).toHaveBeenCalledWith(`/dashboard?notice=${encodeURIComponent(warning)}`)
@@ -114,7 +114,7 @@ describe('Plaid OAuth return page, back from a Reconnect', () => {
   })
 
   it('goes to the dashboard once the reconnect is recorded, carrying its warning', async () => {
-    const warning = 'Reconnected. New transactions have not arrived yet — press Refresh in a moment.'
+    const warning = 'Reconnected. New transactions have not arrived yet — Refresh will fetch them.'
     const fetchMock = answering(() => replyWith({ ok: true, warning }))
     vi.stubGlobal('fetch', fetchMock)
     await back()

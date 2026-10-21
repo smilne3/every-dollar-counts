@@ -278,7 +278,7 @@ describe('POST /api/plaid/exchange-public-token: the bank', () => {
     storeAccounts.mockRejectedValueOnce(new Error('accounts down'))
     expect(await (await link()).json()).toEqual({
       ok: true,
-      warning: 'Bank connected, but its balances have not arrived yet. Press Refresh in a moment.',
+      warning: 'Bank connected, but its balances have not arrived yet. Refresh will fetch them.',
     })
     expect(syncAndStore).not.toHaveBeenCalled()
   })
@@ -367,7 +367,7 @@ describe('POST /api/plaid/exchange-public-token: an insert whose reply was lost'
     const res = await link()
     expect(await res.json()).toEqual({
       ok: true,
-      warning: 'Bank connected, but its balances have not arrived yet. Press Refresh in a moment.',
+      warning: 'Bank connected, but its balances have not arrived yet. Refresh will fetch them.',
     })
     expect(storeAccounts).not.toHaveBeenCalled()
     expect(itemRemove).not.toHaveBeenCalled()

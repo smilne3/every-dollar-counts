@@ -23,7 +23,7 @@ export const maxDuration = 300
 // check Settings first, since every new attempt spends a connection. Link has already created the
 // Item at Plaid by the time this runs.
 const NOT_FINISHED = "Couldn't finish connecting that bank."
-const BALANCES_LATER = 'Bank connected, but its balances have not arrived yet. Press Refresh in a moment.'
+const BALANCES_LATER = 'Bank connected, but its balances have not arrived yet. Refresh will fetch them.'
 const fail = (status: number, error: string) => NextResponse.json({ error }, { status })
 
 // Only the three product strings we support; default to transactions.

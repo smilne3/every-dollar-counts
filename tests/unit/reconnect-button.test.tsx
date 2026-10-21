@@ -148,7 +148,7 @@ describe('ReconnectButton: finishing a reconnection', () => {
   // The reload shows the bank healthy and the list stops rendering this button, so the warning goes
   // up to the list rather than beside the button.
   it('hands the route’s warning up when the catch-up has not arrived', async () => {
-    const warning = 'Reconnected. New transactions have not arrived yet — press Refresh in a moment.'
+    const warning = 'Reconnected. New transactions have not arrived yet — Refresh will fetch them.'
     vi.stubGlobal('fetch', answering(() => replyWith({ ok: true, warning })))
     const onNotice = vi.fn()
     await act(fixedAtPlaid(onNotice))

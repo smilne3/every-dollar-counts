@@ -280,7 +280,7 @@ describe('POST /api/plaid/reconnect: the reconnect', () => {
     syncAndStore.mockRejectedValue(new Error('sync down'))
     expect(await (await reconnect()).json()).toEqual({
       ok: true,
-      warning: 'Reconnected. New transactions have not arrived yet — press Refresh in a moment.',
+      warning: 'Reconnected. New transactions have not arrived yet — Refresh will fetch them.',
     })
   })
 })
