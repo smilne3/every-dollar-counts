@@ -1,29 +1,88 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
-const { results, tz } = vi.hoisted(() => ({
+const { results, tz, gates, started } = vi.hoisted(() => ({
   results: {} as Record<string, { data: unknown; error: { message: string } | null }>,
   tz: { value: 'America/New_York' },
+  // Reads a test holds open until it lets go, by name, and every read the page has started, so a
+  // test can tell a read made beside another from one made after it (#156).
+  gates: {} as Record<string, Promise<void>>,
+  started: [] as string[],
 }))
 
 const chainFor = (table: string) => {
   const chain: Record<string, unknown> = {}
   for (const m of ['select', 'order', 'eq', 'not', 'gte', 'lte', 'limit']) chain[m] = () => chain
-  chain.then = (resolve: (v: unknown) => unknown) =>
-    Promise.resolve(results[table] ?? { data: [], error: null }).then(resolve)
+  // maybeSingle only. Null data and no error is its answer for no row; .single() makes no row an
+  // error (PGRST116), which a stand-in answering null would hide (#172).
+  chain.maybeSingle = async () => {
+    started.push(table)
+    await gates[table]
+    return results[table] ?? { data: null, error: null }
+  }
+  chain.then = (resolve: (v: unknown) => unknown) => {
+    started.push(table)
+    return Promise.resolve(gates[table])
+      .then(() => results[table] ?? { data: [], error: null })
+      .then(resolve)
+  }
   return chain
 }
 
-vi.mock('@/lib/supabase/server', () => ({
-  createClient: async () => ({ from: (table: string) => chainFor(table) }),
-}))
-vi.mock('@/lib/household', () => ({
-  DEFAULT_TIMEZONE: 'America/New_York',
-  householdTimezone: async () => tz.value,
+// The signed-in client refuses plaid_items, which RLS gives it no rows of (#169).
+vi.mock('@/lib/supabase/server', async () => {
+  const { refuseSignedInPlaidItems } = await import('../stubs/plaid-items')
+  return {
+    createClient: async () => ({
+      from: (table: string) => {
+        refuseSignedInPlaidItems(table)
+        return chainFor(table)
+      },
+    }),
+  }
+})
+// The service-role client reads only plaid_items here, for the "isn't syncing" banner (#171),
+// through the strict stand-in in tests/stubs/plaid-items.ts: it applies the read's filters to the
+// stored rows, so the banner shows only this household's banks. lib/plaid-items.ts runs for real,
+// and needs only plaidEnv from lib/plaid.
+vi.mock('@/lib/supabase/admin', async () => {
+  const { plaidItemsQuery } = await import('../stubs/plaid-items')
+  return {
+    supabaseAdmin: {
+      from: (table: string) => {
+        if (table !== 'plaid_items') throw new Error(`reimbursements page read ${table} through the service-role client`)
+        started.push(table)
+        return plaidItemsQuery(results.plaid_items ?? { data: [], error: null }, gates.plaid_items)
+      },
+    },
+  }
+})
+vi.mock('@/lib/plaid', () => ({ plaidEnv: 'sandbox' }))
+// The real module but for the timezone, so currentHouseholdId reads `results.memberships`.
+vi.mock('@/lib/household', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/household')>()),
+  householdTimezone: async () => {
+    started.push('timezone')
+    await gates.timezone
+    return tz.value
+  },
 }))
 
 import ReimbursementsPage from '@/app/(app)/reimbursements/page'
+import { NotSyncingBanner } from '@/components/NotSyncingBanner'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { blocks, bannerText } from './helpers/banner'
+import { storedItem, FOREIGN_ITEMS } from '../stubs/plaid-items'
 
 const render = () => ReimbursementsPage()
+
+// Holds the read named `name` open until the test lets it go.
+function hold(name: string): () => void {
+  let release!: () => void
+  gates[name] = new Promise<void>((resolve) => (release = resolve))
+  return release
+}
+// One turn of the event loop, so every read the page can start without the held ones has started.
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 // Collect every className in the returned tree. jsdom computes no layout, so the class strings are
 // the only evidence the two layouts are gated on the breakpoint at all.
@@ -119,6 +178,10 @@ function gatesOf(node: unknown): { tables: string[]; cards: string[] } {
 // 100. That gap is exactly what the outstanding card must not get wrong. FIFO allocates on amounts
 // oldest-first, so the August expense consumes its own $40 and leaves $50 for September.
 beforeEach(() => {
+  for (const k of Object.keys(gates)) delete gates[k]
+  started.length = 0
+  results.memberships = { data: { household_id: 'hh-1' }, error: null }
+  results.plaid_items = { data: [], error: null }
   results.transactions = {
     data: [
       {
@@ -260,5 +323,68 @@ describe('Reimbursements page', () => {
       expect(gate).toContain('md:block')
     }
     for (const gate of cards) expect(gate).toContain('md:hidden')
+  })
+})
+
+// The dashboard's banner, above what you're owed (#171). A repayment deposit at a bank that isn't
+// syncing never arrives to cover its expense, so "You're owed" stays too high with nothing to say
+// the figure may be out of date.
+describe('Reimbursable banks (#171)', () => {
+  it("warns that a bank isn't syncing, first, above the header", async () => {
+    results.plaid_items = {
+      data: [storedItem({ status: 'temporarily_unavailable' }), storedItem({ id: 'item-2', institution_name: 'Amex' }), ...FOREIGN_ITEMS],
+      error: null,
+    }
+    const tree = await render()
+    expect(bannerText(tree)).toBe("Capital One isn't syncing — see Settings. These figures may be out of date.")
+    const order = blocks(tree).map((b) => b.type)
+    expect(order.indexOf(NotSyncingBanner)).toBe(0)
+    expect(order.indexOf(PageHeader)).toBe(1)
+  })
+
+  // Another household's broken bank, or this household's from the other Plaid environment, must
+  // not raise the banner here.
+  it("says nothing while every one of the household's banks is syncing", async () => {
+    results.plaid_items = { data: [storedItem(), ...FOREIGN_ITEMS], error: null }
+    expect(bannerText(await render())).toBe('')
+  })
+
+  // Rendered as no banks, a failed read would show what you're owed with no warning (#46). It
+  // throws, as the dashboard does, and app/(app)/error.tsx offers a retry.
+  it('fails loudly when the banks read fails, rather than hiding the banner', async () => {
+    results.plaid_items = { data: null, error: { message: 'statement timeout' } }
+    await expect(render()).rejects.toThrow(/could not read linked banks: statement timeout/)
+  })
+
+  it('fails loudly when the household read fails, rather than hiding the banner', async () => {
+    results.memberships = { data: null, error: { message: 'permission denied' } }
+    await expect(render()).rejects.toThrow(/could not read your household: permission denied/)
+  })
+
+  // An account with no membership, which sign-in lets through when it cannot check
+  // (lib/access.ts), has no household, so no banks. The page renders, as it did before it read
+  // banks, and reads none: the read is set to fail here, so reading it would throw.
+  it('renders for an account with no household, reading no banks', async () => {
+    results.memberships = { data: null, error: null }
+    results.plaid_items = { data: null, error: { message: 'read for no household' } }
+    expect(bannerText(await render())).toBe('')
+  })
+
+  // #156: the bank list is two reads, the household and then its banks, and neither may wait for
+  // the page's own, or the page's own for them. So both reads of each pair are held open at once,
+  // and both must have started: had either waited for the other, it could not have.
+  it("asks for the banks beside the page's own reads, neither waiting for the other", async () => {
+    const first = [hold('timezone'), hold('memberships')]
+    const second = [hold('transactions'), hold('plaid_items')]
+    const page = render()
+    await settle()
+    expect(started).toContain('timezone')
+    expect(started).toContain('memberships')
+    first.forEach((release) => release())
+    await settle()
+    expect(started).toContain('transactions')
+    expect(started).toContain('plaid_items')
+    second.forEach((release) => release())
+    await page
   })
 })

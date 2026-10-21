@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { NotSyncingBanner } from '@/components/NotSyncingBanner'
 import { TransactionRow } from '@/components/TransactionRow'
 import { TransactionCard } from '@/components/TransactionCard'
 import { Card } from '@/components/ui/Card'
@@ -10,6 +11,8 @@ import { fetchCategoryContext, SUGGESTION_EMBED, withSuggestion } from '@/lib/ca
 import { resolveCategory } from '@/lib/category-rules'
 import { filterByCategory, filterByFlow } from '@/lib/category-views'
 import { buildSpendContext } from '@/lib/spend-context'
+import { currentHouseholdId } from '@/lib/household'
+import { listItemsForHousehold } from '@/lib/plaid-items'
 
 export default async function TransactionsPage({
   searchParams,
@@ -31,9 +34,12 @@ export default async function TransactionsPage({
   const inMemoryFiltered = !!(category || flow === 'in' || flow === 'out')
 
   const supabase = await createClient()
+  // The household beside the categories, and its banks beside the account names below: the bank
+  // list the "isn't syncing" banner needs (#135, #171) is two reads, and this way it adds no wait of
+  // its own (#156).
   // Throws on a failed read: with no categories every row would be relabelled 'Uncategorized' and
   // the category filter would match nothing (#46).
-  const data = await fetchCategoryContext()
+  const [data, householdId] = await Promise.all([fetchCategoryContext(), currentHouseholdId()])
   const categoryOptions = data.categories.map((c) => c.name)
 
   // account_id -> name, for the phone sheet's Account row (TransactionCard's accountName prop —
@@ -41,9 +47,13 @@ export default async function TransactionsPage({
   // nothing to fetch on every load. Not the same query as the single-account read below, which
   // names ONE account for the filter chip when drilling in from a Net Worth / Cash row — this one
   // reads every account so each row can look its own up.
-  const { data: accountRows, error: accountRowsError } = await supabase
-    .from('accounts')
-    .select('account_id, name')
+  // A failed bank read throws too: rendered as no banks, a broken bank's transactions would stop
+  // at its last sync with nothing to say why (#46). An account with no household has no banks,
+  // and none is read.
+  const [{ data: accountRows, error: accountRowsError }, items] = await Promise.all([
+    supabase.from('accounts').select('account_id, name'),
+    householdId ? listItemsForHousehold(householdId) : [],
+  ])
   if (accountRowsError) throw new Error(`could not read account names: ${accountRowsError.message}`)
   const accountNameById = new Map<string, string>()
   for (const a of accountRows ?? []) {
@@ -132,6 +142,7 @@ export default async function TransactionsPage({
 
   return (
     <div className="space-y-6">
+      <NotSyncingBanner items={items} />
       <PageHeader
         title="Transactions"
         subtitle="Search and re-categorize your spending."

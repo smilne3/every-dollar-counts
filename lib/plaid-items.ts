@@ -17,8 +17,8 @@ export type ItemSummary = {
 // Throws on a failed read (#91). An empty list is a claim that no bank is linked: on the money
 // pages it hides the "isn't syncing" banner (#135), and on Settings it says "No banks connected
 // yet." beside the button that spends one of ten lifetime connections (#51). The dashboard, the
-// breakdowns, Budgets and Trends let this reach app/(app)/error.tsx; Settings catches it so its
-// other cards still render.
+// breakdowns, Budgets, Trends, Transactions and Reimbursable let this reach app/(app)/error.tsx;
+// Settings catches it so its other cards still render.
 export async function listItemsForHousehold(householdId: string): Promise<ItemSummary[]> {
   const { data, error } = await supabaseAdmin
     .from('plaid_items')

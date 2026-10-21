@@ -5,7 +5,8 @@ import type { ItemSummary } from '@/lib/plaid-items'
 // The warning every page that shows a bank's figures puts first, above its header, while any bank
 // isn't syncing (#135). Stale numbers that look fine are the failure this app exists to prevent. It
 // links to Settings, where a bank is reconnected. One component, so the dashboard, the breakdowns,
-// budgets and trends say the same thing, the same way, and its phone layout is checked once.
+// budgets, trends, transactions and reimbursable say the same thing, the same way, and its phone
+// layout is checked once.
 export function NotSyncingBanner({ items }: { items: Pick<ItemSummary, 'institution_name' | 'status'>[] }) {
   const unhealthy = notSyncing(items)
   if (unhealthy.length === 0) return null

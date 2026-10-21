@@ -1,9 +1,11 @@
 import { createClient } from '@/lib/supabase/server'
+import { NotSyncingBanner } from '@/components/NotSyncingBanner'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
 import { money } from '@/lib/format'
 import { todayIn } from '@/lib/clock'
-import { householdTimezone } from '@/lib/household'
+import { currentHouseholdId, householdTimezone } from '@/lib/household'
+import { listItemsForHousehold } from '@/lib/plaid-items'
 import { unreimbursedExpenses, owedToYou, type DatedReimbursableTxn } from '@/lib/reimbursements'
 import { ReimbursementCard } from '@/components/ReimbursementCard'
 import { transactionLabel } from '@/lib/transaction-presentation'
@@ -27,22 +29,33 @@ function monthLabel(key: string): string {
 export default async function ReimbursementsPage() {
   const supabase = await createClient()
 
+  // The household beside its timezone, and its banks beside the marked rows below: the bank list
+  // the "isn't syncing" banner needs (#135, #171) is two reads, and this way it adds no wait of its
+  // own (#156).
+  const [tz, householdId] = await Promise.all([householdTimezone(), currentHouseholdId()])
+
   // Which year is "this" one, for the cards below `md` (#111). The household's, not the server's —
   // on 31 December in New York the server is already into January, and a server reading would put
   // a year on every current row while leaving genuinely old ones unqualified. Same mistake #73 was
   // about. householdTimezone throws rather than defaulting on a failed read, which matches how
   // this page already treats its own query.
-  const currentYear = todayIn(await householdTimezone()).slice(0, 4)
+  const currentYear = todayIn(tz).slice(0, 4)
 
   // Every marked row, both directions. No window: an expense from last year is still owed, and the
   // FIFO allocation needs the deposits that settled the older ones to be correct about the newer.
-  const { data, error } = await supabase
-    .from('transactions')
-    .select('id, amount, date, name, merchant_name, reimbursable_amount, reimbursable_note')
-    .not('reimbursable_amount', 'is', null)
-    .eq('removed', false)
-    .order('date', { ascending: false })
-    .order('id', { ascending: false })  // #50: `date` is day-granular and ties constantly; without a unique second key Postgres may return tied rows in any order, so an UPDATE reshuffles the list under the reader.
+  // A failed bank read throws too: rendered as no banks, a repayment held up at a broken bank would
+  // leave "You're owed" too high with nothing to say why (#46). An account with no household has no
+  // banks, and none is read.
+  const [{ data, error }, items] = await Promise.all([
+    supabase
+      .from('transactions')
+      .select('id, amount, date, name, merchant_name, reimbursable_amount, reimbursable_note')
+      .not('reimbursable_amount', 'is', null)
+      .eq('removed', false)
+      .order('date', { ascending: false })
+      .order('id', { ascending: false }), // #50: `date` is day-granular and ties constantly; without a unique second key Postgres may return tied rows in any order, so an UPDATE reshuffles the list under the reader.
+    householdId ? listItemsForHousehold(householdId) : [],
+  ])
 
   // #46's lesson: a failed read must not render as "nothing outstanding".
   if (error) throw new Error(`could not read reimbursable transactions: ${error.message}`)
@@ -74,6 +87,7 @@ export default async function ReimbursementsPage() {
 
   return (
     <div className="space-y-6">
+      <NotSyncingBanner items={items} />
       <PageHeader
         title="Reimbursable"
         subtitle={

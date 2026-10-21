@@ -50,7 +50,9 @@ export function refuseSignedInPlaidItems(table: string): void {
 }
 
 // One `supabaseAdmin.from('plaid_items')` query over `reply`'s rows. Call it once per from().
-export function plaidItemsQuery(reply: Reply): Record<string, unknown> {
+// `held`, when given, keeps the read from answering until it settles, so a page test can tell a
+// read made beside another from one made after it (#156).
+export function plaidItemsQuery(reply: Reply, held?: Promise<unknown>): Record<string, unknown> {
   const filters: [string, unknown][] = []
   let columns: string[] | null = null
   let orderBy: string | null = null
@@ -67,7 +69,7 @@ export function plaidItemsQuery(reply: Reply): Record<string, unknown> {
     orderBy = col
     return chain
   }
-  chain.then = (resolve: (r: unknown) => unknown, reject?: (e: unknown) => unknown) => {
+  const answer = (resolve: (r: unknown) => unknown, reject?: (e: unknown) => unknown) => {
     if (reply.error || !Array.isArray(reply.data)) return Promise.resolve(reply).then(resolve, reject)
     const cols = columns
     if (!cols) return Promise.reject(new Error('plaid_items stand-in: read without a select()')).then(resolve, reject)
@@ -78,5 +80,7 @@ export function plaidItemsQuery(reply: Reply): Record<string, unknown> {
       .map((r) => Object.fromEntries(cols.filter((c) => c in r).map((c) => [c, r[c]])))
     return Promise.resolve({ data: rows, error: null }).then(resolve, reject)
   }
+  chain.then = (resolve: (r: unknown) => unknown, reject?: (e: unknown) => unknown) =>
+    held ? held.then(() => answer(resolve, reject)) : answer(resolve, reject)
   return chain
 }
