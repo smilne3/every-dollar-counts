@@ -19,15 +19,23 @@ const { results, selects, gates, started } = vi.hoisted(() => ({
 // A supabase query is a builder awaited at the end, so the stub returns itself for every chained
 // method and resolves to whatever the test configured for that table. Same shape as the two page
 // tests above; `range` and `or` are this page's additions, and the transactions read destructures
-// `count` alongside `data` because it asks for { count: 'exact' }.
+// `count` alongside `data` because it asks for { count: 'exact' }. An accounts read gets only the
+// columns it selects, as from Postgres: the note needs each account's plaid_item_id (#170), and a
+// read that dropped it would leave every bank looking as though none of its accounts had arrived.
 const chainFor = (table: string) => {
   const chain: Record<string, unknown> = {}
+  let columns: string[] = []
   for (const m of ['select', 'order', 'eq', 'gte', 'lt', 'lte', 'range', 'or', 'limit', 'not'])
     chain[m] = () => chain
   chain.select = (cols: string) => {
     (selects[table] ??= []).push(cols)
+    columns = cols.split(',').map((c) => c.trim())
     return chain
   }
+  const selected = (reply: { data: unknown; count?: number; error: unknown }) =>
+    table === 'accounts' && Array.isArray(reply.data)
+      ? { ...reply, data: (reply.data as Record<string, unknown>[]).map((r) => Object.fromEntries(columns.filter((c) => c in r).map((c) => [c, r[c]]))) }
+      : reply
   // maybeSingle only. Null data and no error is its answer for no row; .single() makes no row an
   // error (PGRST116), which a stand-in answering null would hide (#172).
   chain.maybeSingle = async () => {
@@ -38,7 +46,7 @@ const chainFor = (table: string) => {
   chain.then = (resolve: (v: unknown) => unknown) => {
     started.push(table)
     return Promise.resolve(gates[table])
-      .then(() => results[table] ?? { data: [], count: 0, error: null })
+      .then(() => selected(results[table] ?? { data: [], count: 0, error: null }))
       .then(resolve)
   }
   return chain
@@ -104,18 +112,22 @@ vi.mock('@/lib/category-context', async (importOriginal) => {
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {} }) }))
 
 import TransactionsPage from '@/app/(app)/transactions/page'
+import { MissingBalancesNote } from '@/components/MissingBalancesNote'
 import { NotSyncingBanner } from '@/components/NotSyncingBanner'
 import { TransactionCard } from '@/components/TransactionCard'
 import { TransactionRow } from '@/components/TransactionRow'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { catalogFingerprint } from '@/lib/category-rules'
 import { sug } from './helpers/category-context'
-import { blocks, bannerText } from './helpers/banner'
+import { blocks, bannerText, balancesNote } from './helpers/banner'
 import { storedItem, FOREIGN_ITEMS } from '../stubs/plaid-items'
 
 type Params = { q?: string; account?: string; category?: string; month?: string; flow?: string; page?: string }
 const render = (searchParams: Params = {}) =>
   TransactionsPage({ searchParams: Promise.resolve(searchParams) })
+
+// The household's one account, at storedItem()'s bank, so that bank's accounts are in (#170).
+const ACCOUNTS = [{ account_id: 'acc-1', name: '360 Checking', plaid_item_id: 'item-1' }]
 
 // Holds the read named `name` open until the test lets it go.
 function hold(name: string): () => void {
@@ -157,7 +169,7 @@ beforeEach(() => {
   results.categories = { data: [FOOD, GROCERY], error: null }
   results.category_rules = { data: [SAFEWAY_RULE], error: null }
   results.accounts = {
-    data: [{ account_id: 'acc-1', name: '360 Checking' }],
+    data: ACCOUNTS,
     error: null,
   }
   results.transactions = {
@@ -452,6 +464,7 @@ describe('Transactions page dual layout', () => {
 // bank isn't syncing its rows stop at its last sync, and without the banner nothing says why.
 describe('Transactions banks (#171)', () => {
   it("warns that a bank isn't syncing, first, above the header", async () => {
+    results.accounts = { data: [...ACCOUNTS, { account_id: 'acc-2', name: 'Gold Card', plaid_item_id: 'item-2' }], error: null }
     results.plaid_items = {
       data: [storedItem({ status: 'needs_reconnect' }), storedItem({ id: 'item-2', institution_name: 'Amex' }), ...FOREIGN_ITEMS],
       error: null,
@@ -462,7 +475,7 @@ describe('Transactions banks (#171)', () => {
     )
     const order = blocks(tree).map((b) => b.type)
     expect(order.indexOf(NotSyncingBanner)).toBe(0)
-    expect(order.indexOf(PageHeader)).toBe(1)
+    expect(order.indexOf(NotSyncingBanner)).toBeLessThan(order.indexOf(PageHeader))
   })
 
   // Another household's broken bank, or this household's from the other Plaid environment, must
@@ -509,5 +522,29 @@ describe('Transactions banks (#171)', () => {
     expect(started).toContain('plaid_items')
     second.forEach((release) => release())
     await page
+  })
+})
+
+// #170: a bank whose first balance pull failed has no accounts, so none of its transactions can be
+// in this list: each needs its account's row. The dashboard's note says so above the list, with a
+// Refresh button, which this page has no other of.
+describe("Transactions before a bank's balances arrive (#170)", () => {
+  const amex = storedItem({ id: 'item-2', institution_name: 'Amex', created_at: '2026-07-15T09:00:00Z' })
+
+  it('notes the bank, with Refresh, after the banner and before the header', async () => {
+    results.plaid_items = { data: [storedItem(), amex], error: null }
+    const tree = await render()
+    expect(balancesNote(tree)).toEqual({
+      text: "Amex is connected, but its balances and transactions haven't arrived yet. Press Refresh to fetch them.",
+      refresh: true,
+    })
+    expect(blocks(tree).map((b) => b.type).slice(0, 3)).toEqual([NotSyncingBanner, MissingBalancesNote, PageHeader])
+  })
+
+  // Another household's bank, or this household's from the other Plaid environment, has no
+  // accounts here either, and is not this household's bank.
+  it("says nothing while every one of the household's banks has its accounts", async () => {
+    results.plaid_items = { data: [storedItem(), ...FOREIGN_ITEMS], error: null }
+    expect(balancesNote(await render())).toBeNull()
   })
 })

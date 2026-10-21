@@ -230,11 +230,11 @@ describe('Breakdown banks (#135)', () => {
   })
 })
 
-// #170: a bank whose first balance pull failed has no accounts. Net worth and cash on hand are sums
-// over accounts, so their breakdowns leave it out and look complete. The dashboard's note says so
-// here too, under the banner and above the header.
+// #170: a bank whose first balance pull failed has no accounts, and so no transactions, which each
+// need their account's row. Every breakdown leaves it out and looks complete: net worth and cash on
+// hand sum the accounts, spent and saved the transactions. The dashboard's note says so here too,
+// under the banner and above the header.
 describe("Breakdown before a bank's balances arrive (#170)", () => {
-  const BALANCES = ['net-worth', 'cash']
   beforeEach(() => {
     vi.setSystemTime(new Date('2026-09-15T16:00:00Z'))
     results.accounts = { data: [account('item-1')], error: null }
@@ -242,37 +242,37 @@ describe("Breakdown before a bank's balances arrive (#170)", () => {
   const amex = (over: Record<string, unknown> = {}) =>
     storedItem({ id: 'item-2', institution_name: 'Amex', created_at: '2026-07-15T09:00:00Z', ...over })
 
-  it.each(BALANCES)("notes on %s the bank whose balances haven't arrived, after the banner and before the header", async (metric) => {
+  it.each(METRICS)("notes on %s the bank whose balances haven't arrived, after the banner and before the header", async (metric) => {
     results.plaid_items = { data: [storedItem(), amex()], error: null }
     const tree = await render(metric)
     expect(balancesNote(tree)).toEqual({
-      text: "Amex is connected, but its balances haven't arrived yet. Press Refresh to fetch them.",
+      text: "Amex is connected, but its balances and transactions haven't arrived yet. Press Refresh to fetch them.",
       refresh: true,
     })
     expect(blocks(tree).map((b) => b.type).slice(0, 3)).toEqual([NotSyncingBanner, MissingBalancesNote, PageHeader])
   })
 
   // Whether or not another bank's balances are in: an empty breakdown is no truer.
-  it.each(BALANCES)('notes it on %s when no bank has accounts yet', async (metric) => {
+  it.each(METRICS)('notes it on %s when no bank has accounts yet', async (metric) => {
     results.accounts = { data: [], error: null }
     results.plaid_items = { data: [storedItem()], error: null }
     expect(balancesNote(await render(metric))).toEqual({
-      text: "Capital One is connected, but its balances haven't arrived yet. Press Refresh to fetch them.",
+      text: "Capital One is connected, but its balances and transactions haven't arrived yet. Press Refresh to fetch them.",
       refresh: true,
     })
   })
 
   // Another household's bank, or this household's from the other Plaid environment, has no
   // accounts here either, and is not this household's bank.
-  it.each(BALANCES)("says nothing on %s while every one of the household's banks has its accounts", async (metric) => {
+  it.each(METRICS)("says nothing on %s while every one of the household's banks has its accounts", async (metric) => {
     results.plaid_items = { data: [storedItem(), ...FOREIGN_ITEMS], error: null }
     expect(balancesNote(await render(metric))).toBeNull()
   })
 
-  it.each(BALANCES)("promises nothing on %s for a bank that isn't syncing, and offers no Refresh", async (metric) => {
+  it.each(METRICS)("promises nothing on %s for a bank that isn't syncing, and offers no Refresh", async (metric) => {
     results.plaid_items = { data: [storedItem(), amex({ status: 'needs_reconnect' })], error: null }
     expect(balancesNote(await render(metric))).toEqual({
-      text: "Amex is connected, but its balances can't arrive until it's sorted out in Settings.",
+      text: "Amex is connected, but its balances and transactions can't arrive until it's sorted out in Settings.",
       refresh: false,
     })
   })
@@ -285,16 +285,21 @@ describe("Breakdown before a bank's balances arrive (#170)", () => {
       error: null,
     }
     expect(balancesNote(await render('net-worth'))).toEqual({
-      text: "Fidelity is connected, but its balances haven't arrived yet. Press Refresh to fetch them.",
+      text: "Fidelity is connected, but its balances and transactions haven't arrived yet. Press Refresh to fetch them.",
       refresh: true,
     })
   })
 
-  // Spent and Saved add up transactions, not balances. Saved's average says it is waiting for the
-  // bank instead (see 'Saved breakdown' below).
-  it.each(['spent', 'saved'])('places no note on %s', async (metric) => {
+  // On Saved this month's money in and out are short of the bank too, so the note is there, and the
+  // average's card says it is waiting for the bank (see 'Saved breakdown' below).
+  it('notes the bank on saved, where the average waits for it as well', async () => {
+    history.value = since('2026-05')
     results.plaid_items = { data: [storedItem(), amex()], error: null }
-    expect(blocks(await render(metric)).some((b) => b.type === MissingBalancesNote)).toBe(false)
+    const tree = await render('saved')
+    expect(balancesNote(tree)?.text).toBe(
+      "Amex is connected, but its balances and transactions haven't arrived yet. Press Refresh to fetch them."
+    )
+    expect(textOf(blocks(tree).at(-1)!)).toBe("The average is waiting for Amex's transaction history to arrive.")
   })
 })
 

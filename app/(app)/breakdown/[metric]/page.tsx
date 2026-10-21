@@ -34,9 +34,6 @@ const TITLES: Record<string, { title: string; subtitle: string }> = {
   saved: { title: 'Saved this month', subtitle: 'Money in versus money out' },
 }
 
-// The metrics that add up account balances, and so leave out a bank with no accounts yet (#170).
-const FROM_BALANCES = new Set(['net-worth', 'cash'])
-
 export default async function BreakdownPage({ params }: { params: Promise<{ metric: string }> }) {
   const { metric } = await params
   if (!TITLES[metric]) notFound()
@@ -230,7 +227,9 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
   return (
     <div className="space-y-6">
       <NotSyncingBanner items={items} />
-      {FROM_BALANCES.has(metric) && <MissingBalancesNote items={items} accounts={accounts} />}
+      {/* A bank with no accounts yet is missing from every metric: its balances, and its
+          transactions, which can't arrive before its accounts do (#170). */}
+      <MissingBalancesNote items={items} accounts={accounts} />
       <PageHeader title={header.title} subtitle={header.subtitle} />
       <Card className="p-5">
         <BreakdownList rows={rows} total={total} />

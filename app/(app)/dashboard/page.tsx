@@ -258,8 +258,9 @@ export default async function DashboardPage({
 
       <NotSyncingBanner items={items} />
 
-      {/* A bank with no accounts yet is missing from net worth and cash on hand below (#170). */}
-      <MissingBalancesNote items={items} accounts={accounts} />
+      {/* A bank with no accounts yet is missing from every figure below (#170). Its "Press Refresh"
+          means the header's button, so the note has none of its own. */}
+      <MissingBalancesNote items={items} accounts={accounts} refreshButton={false} />
 
       {homeStale && (
         <Link

@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { MissingBalancesNote } from '@/components/MissingBalancesNote'
 import { NotSyncingBanner } from '@/components/NotSyncingBanner'
 import { TransactionRow } from '@/components/TransactionRow'
 import { TransactionCard } from '@/components/TransactionCard'
@@ -46,12 +47,13 @@ export default async function TransactionsPage({
   // see spec: "when I tap a transaction, I expect to see the more tiles"). Twelve accounts is
   // nothing to fetch on every load. Not the same query as the single-account read below, which
   // names ONE account for the filter chip when drilling in from a Net Worth / Cash row — this one
-  // reads every account so each row can look its own up.
+  // reads every account so each row can look its own up, and with its bank, so the note can say
+  // which banks have none yet (#170).
   // A failed bank read throws too: rendered as no banks, a broken bank's transactions would stop
   // at its last sync with nothing to say why (#46). An account with no household has no banks,
   // and none is read.
   const [{ data: accountRows, error: accountRowsError }, items] = await Promise.all([
-    supabase.from('accounts').select('account_id, name'),
+    supabase.from('accounts').select('account_id, name, plaid_item_id'),
     householdId ? listItemsForHousehold(householdId) : [],
   ])
   if (accountRowsError) throw new Error(`could not read account names: ${accountRowsError.message}`)
@@ -143,6 +145,8 @@ export default async function TransactionsPage({
   return (
     <div className="space-y-6">
       <NotSyncingBanner items={items} />
+      {/* A bank with no accounts yet has no transactions here either: each needs its account (#170). */}
+      <MissingBalancesNote items={items} accounts={accountRows ?? []} />
       <PageHeader
         title="Transactions"
         subtitle="Search and re-categorize your spending."

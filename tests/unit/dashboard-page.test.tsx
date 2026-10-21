@@ -325,7 +325,7 @@ describe('Dashboard before a bank\'s balances arrive (#164)', () => {
     const tree = await render()
     const text = textOf(tree).replace(/\s+/g, ' ')
     expect(text).toContain('Your balances are on their way')
-    expect(text).toContain("Capital One is connected, but its balances haven't arrived yet. Press Refresh to fetch them.")
+    expect(text).toContain("Capital One is connected, but its balances and transactions haven't arrived yet. Press Refresh to fetch them.")
     expect(text).not.toContain('Connect your first account')
     expect(renders(tree, RefreshButton)).toBe(true)
     expect(renders(tree, LinkButton)).toBe(false)
@@ -334,14 +334,14 @@ describe('Dashboard before a bank\'s balances arrive (#164)', () => {
   it('counts several banks whose balances have not arrived', async () => {
     results.plaid_items = { data: [storedItem(), storedItem({ id: 'item-2', institution_name: 'Amex', created_at: '2026-07-15T09:00:00Z' })], error: null }
     expect(textOf(await render()).replace(/\s+/g, ' ')).toContain(
-      "2 banks are connected, but their balances haven't arrived yet."
+      "2 banks are connected, but their balances and transactions haven't arrived yet."
     )
   })
 
   it('says "Your bank" when the bank has no name', async () => {
     results.plaid_items = { data: [storedItem({ institution_name: null })], error: null }
     expect(textOf(await render()).replace(/\s+/g, ' ')).toContain(
-      "Your bank is connected, but its balances haven't arrived yet."
+      "Your bank is connected, but its balances and transactions haven't arrived yet."
     )
   })
 
@@ -369,7 +369,7 @@ describe('Dashboard before a bank\'s balances arrive (#164)', () => {
       const tree = await render()
       const { text, card } = emptyCard(tree)
       expect(text).toBe(
-        "Your bank needs attention Capital One is connected, but its balances can't arrive until it's sorted out in Settings. Go to Settings"
+        "Your bank needs attention Capital One is connected, but its balances and transactions can't arrive until it's sorted out in Settings. Go to Settings"
       )
       expect(findElement(card, Link)?.props.href).toBe('/settings')
       expect(renders(tree, RefreshButton)).toBe(false)
@@ -383,7 +383,7 @@ describe('Dashboard before a bank\'s balances arrive (#164)', () => {
       error: null,
     }
     expect(emptyCard(await render()).text).toBe(
-      "Your banks need attention 2 banks are connected, but their balances can't arrive until they're sorted out in Settings. Go to Settings"
+      "Your banks need attention 2 banks are connected, but their balances and transactions can't arrive until they're sorted out in Settings. Go to Settings"
     )
   })
 
@@ -396,7 +396,7 @@ describe('Dashboard before a bank\'s balances arrive (#164)', () => {
     }
     const tree = await render()
     expect(emptyCard(tree).text).toBe(
-      "Your balances are on their way Capital One is connected, but its balances haven't arrived yet. Press Refresh to fetch them."
+      "Your balances are on their way Capital One is connected, but its balances and transactions haven't arrived yet. Press Refresh to fetch them."
     )
     expect(renders(tree, RefreshButton)).toBe(true)
     expect(renders(tree, LinkButton)).toBe(false)
@@ -437,14 +437,21 @@ describe("Dashboard before a second bank's balances arrive (#170)", () => {
   it("notes the bank whose balances haven't arrived, after the banner and before the header", async () => {
     results.plaid_items = { data: [storedItem(), amex()], error: null }
     const tree = await render()
-    expect(balancesNote(tree)).toEqual({
-      text: "Amex is connected, but its balances haven't arrived yet. Press Refresh to fetch them.",
-      refresh: true,
-    })
+    const note = balancesNote(tree)
+    expect(note?.text).toBe("Amex is connected, but its balances and transactions haven't arrived yet. Press Refresh to fetch them.")
     const order = blocks(tree).map((b) => b.type)
     expect(order.indexOf(MissingBalancesNote)).toBe(order.indexOf(NotSyncingBanner) + 1)
     expect(order.indexOf(MissingBalancesNote)).toBeLessThan(order.indexOf(PageHeader))
     expect(findStatCards(tree).map((c) => c.props.label)).toContain('Net worth')
+  })
+
+  // "Press Refresh" means the header's button, just below: a second one in the note would be two
+  // buttons for one action, one screen apart.
+  it("points to the header's Refresh rather than offering one of its own", async () => {
+    results.plaid_items = { data: [storedItem(), amex()], error: null }
+    const tree = await render()
+    expect(balancesNote(tree)?.refresh).toBe(false)
+    expect(renders(findElement(tree, PageHeader)!.props.actions, RefreshButton)).toBe(true)
   })
 
   // The bank comes before the house: a reminder to update a figure that is in can wait for one that
@@ -468,13 +475,12 @@ describe("Dashboard before a second bank's balances arrive (#170)", () => {
 
   // Refresh skips a broken login, so the note promises nothing and the banner above it sends the
   // reader to Settings.
-  it("promises nothing for a bank that isn't syncing, and offers no Refresh", async () => {
+  it("promises nothing for a bank that isn't syncing", async () => {
     results.plaid_items = { data: [storedItem(), amex({ status: 'needs_reconnect' })], error: null }
     const tree = await render()
-    expect(balancesNote(tree)).toEqual({
-      text: "Amex is connected, but its balances can't arrive until it's sorted out in Settings.",
-      refresh: false,
-    })
+    expect(balancesNote(tree)?.text).toBe(
+      "Amex is connected, but its balances and transactions can't arrive until it's sorted out in Settings."
+    )
     expect(bannerText(tree)).toBe("Amex isn't syncing — reconnect in Settings to resume. These figures may be out of date.")
   })
 })

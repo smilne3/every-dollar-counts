@@ -14,9 +14,9 @@ const accountAt = (plaid_item_id: string) => ({ plaid_item_id })
 // What the note says, or '' when it renders nothing.
 const said = (container: HTMLElement) => container.querySelector('p')?.textContent ?? ''
 
-// #170: a bank whose first balance pull failed has no accounts, so net worth and cash on hand leave
-// it out while every other bank's balances are in. The page tests check where each page puts the
-// note; this checks what it says, and what it offers.
+// #170: a bank whose first balance pull failed has no accounts, and so no transactions, so every
+// figure leaves it out while every other bank's are in. The page tests check where each page puts
+// the note; this checks what it says, and what it offers.
 describe('MissingBalancesNote', () => {
   it('shows nothing while every bank has an account', () => {
     const { container } = render(
@@ -35,20 +35,30 @@ describe('MissingBalancesNote', () => {
     const { container } = render(
       <MissingBalancesNote items={[bank('capone', 'Capital One'), bank('amex', 'Amex')]} accounts={[accountAt('capone')]} />
     )
-    expect(said(container)).toBe("Amex is connected, but its balances haven't arrived yet. Press Refresh to fetch them.")
+    expect(said(container)).toBe("Amex is connected, but its balances and transactions haven't arrived yet. Press Refresh to fetch them.")
     expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Refresh'])
+  })
+
+  // A page with a Refresh button of its own (the dashboard's header) keeps the words and drops the
+  // note's button, so there aren't two.
+  it('leaves its button out when told to, and still says to press Refresh', () => {
+    const { container } = render(
+      <MissingBalancesNote items={[bank('capone', 'Capital One'), bank('amex', 'Amex')]} accounts={[accountAt('capone')]} refreshButton={false} />
+    )
+    expect(said(container)).toBe("Amex is connected, but its balances and transactions haven't arrived yet. Press Refresh to fetch them.")
+    expect(screen.queryAllByRole('button')).toEqual([])
   })
 
   it('counts several banks whose balances have not arrived', () => {
     const { container } = render(
       <MissingBalancesNote items={[bank('capone', 'Capital One'), bank('amex', 'Amex'), bank('chase', 'Chase')]} accounts={[accountAt('capone')]} />
     )
-    expect(said(container)).toBe("2 banks are connected, but their balances haven't arrived yet. Press Refresh to fetch them.")
+    expect(said(container)).toBe("2 banks are connected, but their balances and transactions haven't arrived yet. Press Refresh to fetch them.")
   })
 
   it('says "Your bank" when the bank has no name', () => {
     const { container } = render(<MissingBalancesNote items={[bank('capone', 'Capital One'), bank('amex', null)]} accounts={[accountAt('capone')]} />)
-    expect(said(container)).toBe("Your bank is connected, but its balances haven't arrived yet. Press Refresh to fetch them.")
+    expect(said(container)).toBe("Your bank is connected, but its balances and transactions haven't arrived yet. Press Refresh to fetch them.")
   })
 
   // Refresh skips a broken login and retries the rest without fixing what stopped them, so a bank
@@ -59,7 +69,7 @@ describe('MissingBalancesNote', () => {
       const { container } = render(
         <MissingBalancesNote items={[bank('capone', 'Capital One'), bank('amex', 'Amex', status)]} accounts={[accountAt('capone')]} />
       )
-      expect(said(container)).toBe("Amex is connected, but its balances can't arrive until it's sorted out in Settings.")
+      expect(said(container)).toBe("Amex is connected, but its balances and transactions can't arrive until it's sorted out in Settings.")
       expect(screen.queryAllByRole('button')).toEqual([])
     }
   )
@@ -71,7 +81,7 @@ describe('MissingBalancesNote', () => {
         accounts={[accountAt('capone')]}
       />
     )
-    expect(said(container)).toBe("2 banks are connected, but their balances can't arrive until they're sorted out in Settings.")
+    expect(said(container)).toBe("2 banks are connected, but their balances and transactions can't arrive until they're sorted out in Settings.")
   })
 
   it('with one of each, says both, and offers Refresh for the one syncing', () => {
@@ -82,8 +92,8 @@ describe('MissingBalancesNote', () => {
       />
     )
     expect(said(container)).toBe(
-      "Amex is connected, but its balances haven't arrived yet. Press Refresh to fetch them. " +
-        "Chase is connected, but its balances can't arrive until it's sorted out in Settings."
+      "Amex is connected, but its balances and transactions haven't arrived yet. Press Refresh to fetch them. " +
+        "Chase is connected, but its balances and transactions can't arrive until it's sorted out in Settings."
     )
     expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Refresh'])
   })

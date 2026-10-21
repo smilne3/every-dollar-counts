@@ -17,9 +17,11 @@ export function bySync<T extends { status: string }>(items: T[]): { syncing: T[]
 }
 
 // The banks with no accounts yet (#170): connected, but their first balance pull failed (#164), so
-// none of their balances are in. Net worth and cash on hand are sums over accounts, so they leave
-// these banks out, however many other banks have accounts. By the accounts' own plaid_item_id, so a
-// bank counts as arrived with any account at all: one with only a mortgage has its balance in.
+// none of their balances are in, and none of their transactions, which each need their account's
+// row (db/migrations/010_plaid_production.sql). Net worth, cash on hand and every spending figure
+// leave these banks out, however many other banks have accounts. By the accounts' own
+// plaid_item_id, so a bank counts as arrived with any account at all: one with only a mortgage has
+// its balance in.
 export function withoutAccounts<T extends { id: string }>(items: T[], accounts: { plaid_item_id: string }[]): T[] {
   const arrived = new Set(accounts.map((a) => a.plaid_item_id))
   return items.filter((i) => !arrived.has(i.id))
@@ -27,13 +29,14 @@ export function withoutAccounts<T extends { id: string }>(items: T[], accounts: 
 
 // What to say about banks that are connected but have no accounts yet (#164). The exchange route
 // keeps a bank whose first balance pull failed, and tells the person to press Refresh; until the
-// balances arrive it has no accounts rows. Read as "no banks", that state invited linking the same
-// bank again, which spends one of ten lifetime connections (#51). Only for banks that are syncing
-// (bySync), whose balances Refresh pulls. For one bank or more.
+// balances arrive it has no accounts rows, and so no transactions either (#170). Read as "no
+// banks", that state invited linking the same bank again, which spends one of ten lifetime
+// connections (#51). Only for banks that are syncing (bySync), whose balances Refresh pulls. For one
+// bank or more.
 export function balancesPending(items: { institution_name: string | null }[]): string {
   return items.length === 1
-    ? `${items[0].institution_name ?? 'Your bank'} is connected, but its balances haven't arrived yet.`
-    : `${items.length} banks are connected, but their balances haven't arrived yet.`
+    ? `${items[0].institution_name ?? 'Your bank'} is connected, but its balances and transactions haven't arrived yet.`
+    : `${items.length} banks are connected, but their balances and transactions haven't arrived yet.`
 }
 
 // The same for banks with no accounts that aren't syncing, and it promises nothing. Refresh skips a
@@ -43,6 +46,6 @@ export function balancesPending(items: { institution_name: string | null }[]): s
 export function balancesBlocked(items: { institution_name: string | null }[], { inSettings = false } = {}): string {
   const where = inSettings ? ' in Settings' : ''
   return items.length === 1
-    ? `${items[0].institution_name ?? 'Your bank'} is connected, but its balances can't arrive until it's sorted out${where}.`
-    : `${items.length} banks are connected, but their balances can't arrive until they're sorted out${where}.`
+    ? `${items[0].institution_name ?? 'Your bank'} is connected, but its balances and transactions can't arrive until it's sorted out${where}.`
+    : `${items.length} banks are connected, but their balances and transactions can't arrive until they're sorted out${where}.`
 }
