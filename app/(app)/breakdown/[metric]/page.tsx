@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { BreakdownList, type BreakdownRow } from '@/components/BreakdownList'
+import { MissingBalancesNote } from '@/components/MissingBalancesNote'
 import { NotSyncingBanner } from '@/components/NotSyncingBanner'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
@@ -32,6 +33,9 @@ const TITLES: Record<string, { title: string; subtitle: string }> = {
   spent: { title: 'Spent this month', subtitle: 'Where the money went, by category' },
   saved: { title: 'Saved this month', subtitle: 'Money in versus money out' },
 }
+
+// The metrics that add up account balances, and so leave out a bank with no accounts yet (#170).
+const FROM_BALANCES = new Set(['net-worth', 'cash'])
 
 export default async function BreakdownPage({ params }: { params: Promise<{ metric: string }> }) {
   const { metric } = await params
@@ -226,6 +230,7 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
   return (
     <div className="space-y-6">
       <NotSyncingBanner items={items} />
+      {FROM_BALANCES.has(metric) && <MissingBalancesNote items={items} accounts={accounts} />}
       <PageHeader title={header.title} subtitle={header.subtitle} />
       <Card className="p-5">
         <BreakdownList rows={rows} total={total} />

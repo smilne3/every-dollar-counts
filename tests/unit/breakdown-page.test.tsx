@@ -104,11 +104,12 @@ vi.mock('@/lib/history-start', () => ({ historyStart: async () => history.value 
 
 import BreakdownPage from '@/app/(app)/breakdown/[metric]/page'
 import { BreakdownList } from '@/components/BreakdownList'
+import { MissingBalancesNote } from '@/components/MissingBalancesNote'
 import { NotSyncingBanner } from '@/components/NotSyncingBanner'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { catalogFingerprint } from '@/lib/category-rules'
 import { sug } from './helpers/category-context'
-import { blocks, bannerText } from './helpers/banner'
+import { blocks, bannerText, balancesNote } from './helpers/banner'
 import { storedItem, FOREIGN_ITEMS } from '../stubs/plaid-items'
 
 const FOOD = { id: 'c-food', name: 'Food & Drink', pfc_primary: 'FOOD_AND_DRINK', sort_order: 0 }
@@ -198,6 +199,8 @@ describe('Breakdown reads', () => {
 describe('Breakdown banks (#135)', () => {
   beforeEach(() => {
     vi.setSystemTime(new Date('2026-09-15T16:00:00Z'))
+    // Both banks' balances are in, so these tests are about syncing alone (#170).
+    results.accounts = { data: [account('item-1'), account('item-2', { type: 'credit', subtype: 'credit card' })], error: null }
   })
 
   it.each(METRICS)("warns on %s that a bank isn't syncing, first, above the header", async (metric) => {
@@ -211,7 +214,7 @@ describe('Breakdown banks (#135)', () => {
     )
     const order = blocks(tree).map((b) => b.type)
     expect(order.indexOf(NotSyncingBanner)).toBe(0)
-    expect(order.indexOf(PageHeader)).toBe(1)
+    expect(order.indexOf(NotSyncingBanner)).toBeLessThan(order.indexOf(PageHeader))
   })
 
   // Another household's broken bank, or this household's from the other Plaid environment, must
@@ -219,6 +222,61 @@ describe('Breakdown banks (#135)', () => {
   it.each(METRICS)("says nothing on %s while every one of the household's banks is syncing", async (metric) => {
     results.plaid_items = { data: [storedItem(), ...FOREIGN_ITEMS], error: null }
     expect(bannerText(await render(metric))).toBe('')
+  })
+})
+
+// #170: a bank whose first balance pull failed has no accounts. Net worth and cash on hand are sums
+// over accounts, so their breakdowns leave it out and look complete. The dashboard's note says so
+// here too, under the banner and above the header.
+describe("Breakdown before a bank's balances arrive (#170)", () => {
+  const BALANCES = ['net-worth', 'cash']
+  beforeEach(() => {
+    vi.setSystemTime(new Date('2026-09-15T16:00:00Z'))
+    results.accounts = { data: [account('item-1')], error: null }
+  })
+  const amex = (over: Record<string, unknown> = {}) =>
+    storedItem({ id: 'item-2', institution_name: 'Amex', created_at: '2026-07-15T09:00:00Z', ...over })
+
+  it.each(BALANCES)("notes on %s the bank whose balances haven't arrived, after the banner and before the header", async (metric) => {
+    results.plaid_items = { data: [storedItem(), amex()], error: null }
+    const tree = await render(metric)
+    expect(balancesNote(tree)).toEqual({
+      text: "Amex is connected, but its balances haven't arrived yet. Press Refresh to fetch them.",
+      refresh: true,
+    })
+    expect(blocks(tree).map((b) => b.type).slice(0, 3)).toEqual([NotSyncingBanner, MissingBalancesNote, PageHeader])
+  })
+
+  // Whether or not another bank's balances are in: an empty breakdown is no truer.
+  it.each(BALANCES)('notes it on %s when no bank has accounts yet', async (metric) => {
+    results.accounts = { data: [], error: null }
+    results.plaid_items = { data: [storedItem()], error: null }
+    expect(balancesNote(await render(metric))).toEqual({
+      text: "Capital One is connected, but its balances haven't arrived yet. Press Refresh to fetch them.",
+      refresh: true,
+    })
+  })
+
+  // Another household's bank, or this household's from the other Plaid environment, has no
+  // accounts here either, and is not this household's bank.
+  it.each(BALANCES)("says nothing on %s while every one of the household's banks has its accounts", async (metric) => {
+    results.plaid_items = { data: [storedItem(), ...FOREIGN_ITEMS], error: null }
+    expect(balancesNote(await render(metric))).toBeNull()
+  })
+
+  it.each(BALANCES)("promises nothing on %s for a bank that isn't syncing, and offers no Refresh", async (metric) => {
+    results.plaid_items = { data: [storedItem(), amex({ status: 'needs_reconnect' })], error: null }
+    expect(balancesNote(await render(metric))).toEqual({
+      text: "Amex is connected, but its balances can't arrive until it's sorted out in Settings.",
+      refresh: false,
+    })
+  })
+
+  // Spent and Saved add up transactions, not balances. Saved's average says it is waiting for the
+  // bank instead (see 'Saved breakdown' below).
+  it.each(['spent', 'saved'])('places no note on %s', async (metric) => {
+    results.plaid_items = { data: [storedItem(), amex()], error: null }
+    expect(blocks(await render(metric)).some((b) => b.type === MissingBalancesNote)).toBe(false)
   })
 })
 

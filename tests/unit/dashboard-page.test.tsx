@@ -119,10 +119,11 @@ vi.mock('@/lib/history-start', () => ({ historyStart: async () => history.value 
 
 import { pagedTable } from '../stubs/postgrest-pages'
 import { storedItem, FOREIGN_ITEMS } from '../stubs/plaid-items'
-import { blocks, bannerText } from './helpers/banner'
+import { blocks, bannerText, balancesNote } from './helpers/banner'
 import DashboardPage from '@/app/(app)/dashboard/page'
 import BreakdownPage from '@/app/(app)/breakdown/[metric]/page'
 import { BreakdownList } from '@/components/BreakdownList'
+import { MissingBalancesNote } from '@/components/MissingBalancesNote'
 import { NotSyncingBanner } from '@/components/NotSyncingBanner'
 import Link from 'next/link'
 import { RefreshButton } from '@/components/RefreshButton'
@@ -134,6 +135,11 @@ import { catalogFingerprint } from '@/lib/category-rules'
 import { sug } from './helpers/category-context'
 
 const render = () => DashboardPage({ searchParams: Promise.resolve({}) })
+
+// An account at storedItem()'s bank, which every test starts with, and one at the second bank some
+// tests link. Each is that bank's balances being in (#170). The second moves no figure.
+const A1 = { id: 'a1', plaid_item_id: 'item-1', type: 'depository', current_balance: 100 }
+const A2 = { id: 'a2', plaid_item_id: 'item-2', type: 'credit', current_balance: 0 }
 
 // The exact moment from the #73 screenshot: 8:10pm on Wednesday 2 September in US Eastern, which
 // is already Thursday 3 September in UTC.
@@ -222,9 +228,8 @@ beforeEach(() => {
   vi.setSystemTime(REPORTED)
   tz.value = 'America/New_York'
   presentation.stampLabel = false
-  // One account, so the page renders the money tiles rather than the empty state. It is at
-  // storedItem()'s bank, so that bank's balances are in (#170).
-  results.accounts = { data: [{ id: 'a1', plaid_item_id: 'item-1', type: 'depository', current_balance: 100 }], error: null }
+  // One account, so the page renders the money tiles rather than the empty state.
+  results.accounts = { data: [A1], error: null }
   results.memberships = { data: { household_id: 'hh-1' }, error: null }
   results.categories = { data: [], error: null }
   results.category_rules = { data: [], error: null }
@@ -244,6 +249,7 @@ afterEach(() => {
 
 describe('Dashboard banks (#135)', () => {
   it("warns that a bank isn't syncing, first, above the header", async () => {
+    results.accounts = { data: [A1, A2], error: null }
     results.plaid_items = {
       data: [storedItem({ status: 'needs_reconnect' }), storedItem({ id: 'item-2', institution_name: 'Amex' }), ...FOREIGN_ITEMS],
       error: null,
@@ -416,6 +422,58 @@ describe('Dashboard before a bank\'s balances arrive (#164)', () => {
   })
 })
 
+// #170: the same state with another bank's accounts in. Net worth and cash on hand are sums over
+// accounts, so they leave the new bank out and look complete. A note says so, with the notices
+// above the header, and the figures stay.
+describe("Dashboard before a second bank's balances arrive (#170)", () => {
+  const amex = (over: Record<string, unknown> = {}) =>
+    storedItem({ id: 'item-2', institution_name: 'Amex', created_at: '2026-07-15T09:00:00Z', ...over })
+
+  it("notes the bank whose balances haven't arrived, after the banner and before the header", async () => {
+    results.plaid_items = { data: [storedItem(), amex()], error: null }
+    const tree = await render()
+    expect(balancesNote(tree)).toEqual({
+      text: "Amex is connected, but its balances haven't arrived yet. Press Refresh to fetch them.",
+      refresh: true,
+    })
+    const order = blocks(tree).map((b) => b.type)
+    expect(order.indexOf(MissingBalancesNote)).toBe(order.indexOf(NotSyncingBanner) + 1)
+    expect(order.indexOf(MissingBalancesNote)).toBeLessThan(order.indexOf(PageHeader))
+    expect(findStatCards(tree).map((c) => c.props.label)).toContain('Net worth')
+  })
+
+  // The bank comes before the house: a reminder to update a figure that is in can wait for one that
+  // is missing.
+  it('comes before the home value reminder', async () => {
+    results.plaid_items = { data: [storedItem(), amex()], error: null }
+    results.manual_assets = { data: [{ id: 'm1', name: 'Home', value: 500000, updated_at: '2026-07-01T00:00:00Z' }], error: null }
+    const tree = await render()
+    const kids = blocks(tree)
+    const home = kids.findIndex((b) => textOf(b).includes('Your home value was last updated'))
+    expect(home).toBeGreaterThan(-1)
+    expect(kids.findIndex((b) => b.type === MissingBalancesNote)).toBe(home - 1)
+  })
+
+  // Another household's bank, or this household's from the other Plaid environment, has no
+  // accounts here either, and is not this household's bank.
+  it('says nothing while every one of the household\'s banks has its accounts', async () => {
+    results.plaid_items = { data: [storedItem(), ...FOREIGN_ITEMS], error: null }
+    expect(balancesNote(await render())).toBeNull()
+  })
+
+  // Refresh skips a broken login, so the note promises nothing and the banner above it sends the
+  // reader to Settings.
+  it("promises nothing for a bank that isn't syncing, and offers no Refresh", async () => {
+    results.plaid_items = { data: [storedItem(), amex({ status: 'needs_reconnect' })], error: null }
+    const tree = await render()
+    expect(balancesNote(tree)).toEqual({
+      text: "Amex is connected, but its balances can't arrive until it's sorted out in Settings.",
+      refresh: false,
+    })
+    expect(bannerText(tree)).toBe("Amex isn't syncing — reconnect in Settings to resume. These figures may be out of date.")
+  })
+})
+
 describe('Dashboard average savings (#126)', () => {
   // REPORTED is 2026-09-02 in New York, so September is in progress. The fixture runs March to
   // September: March saves $8,000 and April to August $2,000 each.
@@ -555,6 +613,7 @@ describe('Dashboard average savings (#126)', () => {
     results.categories = income
     results.transactions = fixture()
     history.value = { kind: 'ready', month: '2026-02' }
+    results.accounts = { data: [A1, A2], error: null }
     results.plaid_items = { data: [storedItem({ status: 'needs_reconnect' }), storedItem({ id: 'item-2', institution_name: 'Amex' })], error: null }
     expect(await avgLine()).toBeUndefined()
     const foot = textOf((await phoneRows()).rows[2].foot)
@@ -573,7 +632,8 @@ describe('Dashboard average savings (#126)', () => {
 
   // #170: a second bank whose first balance pull failed has no accounts, so none of its
   // transactions either, and every month is short of it. Neither layout has room to say why; the
-  // saved breakdown it links to does. The average comes back once the bank has an account.
+  // note above the header names the bank, and the saved breakdown gives the reason. The average
+  // comes back once the bank has an account.
   it("shows no average while a bank's balances haven't arrived, on the tile or the phone row", async () => {
     results.categories = income
     results.transactions = fixture()
@@ -585,13 +645,7 @@ describe('Dashboard average savings (#126)', () => {
     expect(await avgLine()).toBeUndefined()
     expect(textOf((await phoneRows()).rows[2].foot)).not.toContain('Avg')
 
-    results.accounts = {
-      data: [
-        { id: 'a1', plaid_item_id: 'item-1', type: 'depository', current_balance: 100 },
-        { id: 'a2', plaid_item_id: 'item-2', type: 'credit', current_balance: 0 },
-      ],
-      error: null,
-    }
+    results.accounts = { data: [A1, A2], error: null }
     expect((await avgLine())!.props.children).toBe('Avg $3,000/mo · 6 mo')
   })
 
