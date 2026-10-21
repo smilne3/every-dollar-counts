@@ -13,14 +13,18 @@ const { results, switchState, onRead } = vi.hoisted(() => ({
 // method and resolves to whatever the test configured for that table.
 const chainFor = (table: string) => {
   const chain: Record<string, unknown> = {}
-  // PostgREST sends a count only when the select asks for one, so the stub does too: without
-  // { count: 'exact' } the count comes back null, as in production. Otherwise dropping the option
-  // from the accounts read would still pass while every visit said "Couldn't check your accounts."
-  let countAsked = false
-  chain.select = (_columns?: string, options?: { count?: string }) => {
-    countAsked = options?.count === 'exact'
+  // Each row comes back with only the columns the select names, as from PostgREST, so a read of the
+  // wrong column finds nothing in it. The accounts read gets each account's plaid_item_id, and a
+  // read that dropped it would leave every bank looking as if it had none (#186).
+  let columns: string[] = []
+  chain.select = (cols: string) => {
+    columns = cols.split(',').map((c) => c.trim())
     return chain
   }
+  const selected = (reply: { data: unknown; error: unknown }) =>
+    Array.isArray(reply.data)
+      ? { ...reply, data: reply.data.map((row: Record<string, unknown>) => Object.fromEntries(columns.filter((c) => c in row).map((c) => [c, row[c]]))) }
+      : reply
   for (const m of ['order', 'eq', 'limit']) chain[m] = () => chain
   // readAllRows (lib/read-all.ts) asks for the rows after its cursor with .or(); there are none
   // past this fixture, so a continuation page is empty and the read ends.
@@ -35,7 +39,7 @@ const chainFor = (table: string) => {
   chain.then = (resolve: (v: unknown) => unknown) => {
     onRead[table]?.()
     const reply = afterCursor ? { data: [], error: null } : (results[table] ?? { data: [], error: null })
-    return Promise.resolve('count' in reply && !countAsked ? { ...reply, count: null } : reply).then(resolve)
+    return Promise.resolve(selected(reply)).then(resolve)
   }
   return chain
 }
@@ -73,7 +77,10 @@ vi.mock('@/lib/category-context', async () => {
 vi.mock('@/lib/supabase/admin', () => ({ supabaseAdmin: { from: (table: string) => chainFor(table) } }))
 vi.mock('@/lib/plaid', () => ({ plaidEnv: 'sandbox' }))
 vi.mock('@/lib/plaid-slots', () => ({ countSlotsUsed: async () => null, LIFETIME_SLOTS: 10 }))
+// For the tests that render the bank list the page hands out, to read the card as the person does.
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {} }) }))
 
+import { render, screen, cleanup } from '@testing-library/react'
 import SettingsPage from '@/app/(app)/settings/page'
 import { TimezoneCard } from '@/components/TimezoneCard'
 import { CategoryManager } from '@/components/CategoryManager'
@@ -156,10 +163,7 @@ beforeEach(() => {
     data: [{ id: 'hh-1', name: 'Test Household', timezone: 'America/Los_Angeles' }],
     error: null,
   }
-  results.accounts = { data: [], error: null, count: 0 } as unknown as {
-    data: unknown
-    error: null
-  }
+  results.accounts = { data: [], error: null }
   results.categories = { data: [], error: null }
   results.category_rules = { data: [], error: null }
   results.transactions = { data: [], error: null }
@@ -172,6 +176,7 @@ beforeEach(() => {
 
 // A console.error spy left behind by a failing test would hand its calls to the next test's spy.
 afterEach(() => {
+  cleanup()
   vi.restoreAllMocks()
   vi.useRealTimers()
 })
@@ -234,13 +239,14 @@ describe('Settings: a failed read says so in its own card (#91)', () => {
   })
 
   // The count read printed "No banks connected yet." whenever it had no count, failed or not. Here
-  // the household has a bank, so that line would be a plain falsehood.
+  // the household has a bank, so that line would be a plain falsehood. With no accounts to go on,
+  // BankList isn't told any bank lacks them, so no bank's line guesses (#186).
   it.each([
-    ['fails', { data: null, error: { message: 'boom' }, count: null }, 'could not count accounts: boom'],
-    ['returns no count and no error', { data: null, error: null, count: null }, 'could not count accounts: read returned no count and no error'],
-  ])('says the accounts could not be checked when the count read %s', async (_name, reply, message) => {
+    ['fails', { data: null, error: { message: 'boom' } }, 'could not read accounts: boom'],
+    ['returns no data and no error', { data: null, error: null }, 'could not read accounts: read returned no data and no error'],
+  ])('says the accounts could not be checked when their read %s', async (_name, reply, message) => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
-    results.accounts = reply as never
+    results.accounts = reply
     results.plaid_items = {
       data: [{ id: 'item-1', institution_name: 'Capital One', status: 'ok', status_detail: null, products: ['transactions'], created_at: '2026-07-14T18:05:30Z' }],
       error: null,
@@ -248,15 +254,15 @@ describe('Settings: a failed read says so in its own card (#91)', () => {
     const banks = card(await SettingsPage(), 'Banks')
     expect(alertText(banks)).toBe("Couldn't check your accounts. Try again.")
     expect(flatText(banks)).not.toContain('No banks connected yet.')
-    expect(findProps(banks, BankList)).not.toBeNull()
-    expect(log).toHaveBeenCalledWith('[settings] could not load the account count', new Error(message))
+    expect(findProps(banks, BankList)).toMatchObject({ withoutAccounts: null })
+    expect(log).toHaveBeenCalledWith('[settings] could not load the accounts', new Error(message))
   })
 
   it.each([
     [0, 'No banks connected yet.'],
     [3, '3 account(s) connected.'],
-  ])('says how many accounts are connected when the count is %i', async (count, line) => {
-    results.accounts = { data: null, error: null, count } as never
+  ])('says how many accounts are connected when there are %i', async (count, line) => {
+    results.accounts = { data: Array.from({ length: count }, (_, n) => ({ id: `acct-${n}`, plaid_item_id: 'item-1' })), error: null }
     const banks = card(await SettingsPage(), 'Banks')
     expect(flatText(banks)).toContain(line)
     expect(alertText(banks)).toBeNull()
@@ -265,73 +271,68 @@ describe('Settings: a failed read says so in its own card (#91)', () => {
   // #164: a bank whose first balance pull failed is connected, with no accounts until Refresh
   // brings them. The count's "No banks connected yet." sat above a list that showed the bank, and
   // invited linking it again, which spends one of ten lifetime connections (#51).
-  describe("while a bank's balances haven't arrived (#164)", () => {
+  //
+  // #186: and with other banks' accounts in, its line said "Connected", and the card's first line
+  // only counted the accounts. Now each bank with no accounts yet says so in its own line, whatever
+  // the count, and the first line never names one, so the card says it once.
+  describe("while a bank's balances haven't arrived (#164, #186)", () => {
     const capitalOne = { id: 'item-1', institution_name: 'Capital One', status: 'ok', status_detail: null, products: ['transactions'], created_at: '2026-07-14T18:05:30Z' }
+    const amex = { ...capitalOne, id: 'item-2', institution_name: 'Amex' }
+    // As stored: the read must pick plaid_item_id out of it.
+    const accountAt = (plaid_item_id: string, n: number) => ({ id: `acct-${n}`, plaid_item_id, account_id: `plaid-acct-${n}`, name: 'Checking' })
 
-    it('takes the first line from the bank list', async () => {
-      results.plaid_items = { data: [capitalOne], error: null }
-      const banks = card(await SettingsPage(), 'Banks')
-      expect(flatText(banks)).toContain("Capital One is connected, but its balances and transactions haven't arrived yet.")
-      expect(flatText(banks)).not.toContain('No banks connected yet.')
-      expect(findProps(banks, BankList)).toMatchObject({ items: [capitalOne] })
-      expect(alertText(banks)).toBeNull()
+    // The Banks card as the person reads it: the page's own lines, and the list rendered from the
+    // props the page gave it. Each bank's line is the one under its name.
+    function readBanksCard(tree: unknown) {
+      const banks = card(tree, 'Banks')
+      render(<BankList {...(findProps(banks, BankList) as Parameters<typeof BankList>[0])} />)
+      const listText = document.body.textContent ?? ''
+      return {
+        all: flatText(banks) + listText,
+        lineOf: (name: string) => screen.getByText(name).nextElementSibling?.textContent,
+      }
+    }
+
+    // Once other banks' accounts are in, the count is true again, and stays the first line.
+    it('says which bank has no accounts yet in its own line, under the count of the others', async () => {
+      results.plaid_items = { data: [capitalOne, amex], error: null }
+      results.accounts = { data: [accountAt('item-1', 1), accountAt('item-1', 2), accountAt('item-1', 3)], error: null }
+      const tree = await SettingsPage()
+      expect(findProps(card(tree, 'Banks'), BankList)).toMatchObject({ items: [capitalOne, amex], withoutAccounts: ['item-2'] })
+      const read = readBanksCard(tree)
+      expect(read.all).toContain('3 account(s) connected.')
+      expect(read.lineOf('Capital One')).toBe('Connected')
+      expect(read.lineOf('Amex')).toBe('Connected, but its balances and transactions haven’t arrived yet. Refresh will fetch them.')
     })
 
-    it('counts several banks whose balances have not arrived', async () => {
-      results.plaid_items = { data: [capitalOne, { ...capitalOne, id: 'item-2', institution_name: 'Amex' }], error: null }
-      expect(flatText(card(await SettingsPage(), 'Banks'))).toContain(
-        "2 banks are connected, but their balances and transactions haven't arrived yet."
-      )
-    })
-
-    // #172: a bank Refresh can't help can't be counted on to send its balances (Refresh skips a
-    // broken login, and one that needs something done at the bank or to its setup fails again), so
-    // the line promises nothing for it. Its status line in the list below says what it needs.
-    it.each(['needs_reconnect', 'config_error', 'action_at_bank'])(
-      'promises nothing for a bank that is %s',
+    // With no accounts at all, the first line would name every bank again, so there is none, and no
+    // "No banks connected yet." either. Each bank's own line says what's wrong with it.
+    it.each(['ok', 'temporarily_unavailable', 'needs_reconnect', 'action_at_bank', 'config_error'])(
+      'has no first line while the one bank, %s, has no accounts yet',
       async (status) => {
         results.plaid_items = { data: [{ ...capitalOne, status }], error: null }
-        const text = flatText(card(await SettingsPage(), 'Banks'))
-        expect(text).toContain("Capital One is connected, but its balances and transactions can't arrive until it's sorted out.")
-        expect(text).not.toContain("haven't arrived")
+        const banks = card(await SettingsPage(), 'Banks')
+        // The heading, and nothing else of the page's own.
+        expect(flatText(banks)).toBe('Banks')
+        expect(findProps(banks, BankList)).toMatchObject({ withoutAccounts: ['item-1'] })
+        expect(alertText(banks)).toBeNull()
       }
     )
 
-    // #186: Refresh retries a bank that didn't respond last time, as its status line below says
-    // ("Nothing to do — try Refresh later"), so the first line doesn't send it to be sorted out.
-    it("says a bank that only didn't respond last time is still on its way", async () => {
-      results.plaid_items = { data: [{ ...capitalOne, status: 'temporarily_unavailable' }], error: null }
-      const text = flatText(card(await SettingsPage(), 'Banks'))
-      expect(text).toContain(
-        "Capital One is connected, but its balances and transactions haven't arrived yet. It didn't respond last time."
-      )
-      expect(text).not.toContain('sorted out')
+    it('tells the list about every bank with no accounts yet', async () => {
+      results.plaid_items = { data: [capitalOne, { ...amex, status: 'needs_reconnect' }], error: null }
+      expect(findProps(card(await SettingsPage(), 'Banks'), BankList)).toMatchObject({ withoutAccounts: ['item-1', 'item-2'] })
     })
 
-    it('counts several banks that are not syncing', async () => {
-      results.plaid_items = {
-        data: [{ ...capitalOne, status: 'needs_reconnect' }, { ...capitalOne, id: 'item-2', institution_name: 'Amex', status: 'config_error' }],
-        error: null,
-      }
-      expect(flatText(card(await SettingsPage(), 'Banks'))).toContain(
-        "2 banks are connected, but their balances and transactions can't arrive until they're sorted out."
-      )
-    })
-
-    it('with one bank syncing and one not, says which is on its way and which is not', async () => {
-      results.plaid_items = { data: [capitalOne, { ...capitalOne, id: 'item-2', institution_name: 'Amex', status: 'needs_reconnect' }], error: null }
-      expect(flatText(card(await SettingsPage(), 'Banks'))).toContain(
-        "Capital One is connected, but its balances and transactions haven't arrived yet. Amex is connected, but its balances and transactions can't arrive until it's sorted out."
-      )
-    })
-
-    // Once any account has arrived the count is true again, and stays the first line.
-    it('keeps the account count once there are accounts', async () => {
-      results.accounts = { data: null, error: null, count: 3 } as never
-      results.plaid_items = { data: [capitalOne], error: null }
-      const text = flatText(card(await SettingsPage(), 'Banks'))
-      expect(text).toContain('3 account(s) connected.')
-      expect(text).not.toContain("haven't arrived")
+    // Said twice before: once in a first line naming the bank, once more in its line in the list.
+    it.each([
+      ['ok', /haven.t arrived/g, 'Connected, but its balances and transactions haven’t arrived yet. Refresh will fetch them.'],
+      ['temporarily_unavailable', /didn.t respond/g, 'This bank didn’t respond last time. Nothing to do — try Refresh later.'],
+    ])('says once what is wrong with a bank that is %s and has no accounts yet', async (status, phrase, line) => {
+      results.plaid_items = { data: [{ ...capitalOne, status }], error: null }
+      const read = readBanksCard(await SettingsPage())
+      expect(read.all.match(phrase)).toHaveLength(1)
+      expect(read.lineOf('Capital One')).toBe(line)
     })
 
     // With the bank list unreadable, a count of zero cannot tell "no banks" from a bank with no

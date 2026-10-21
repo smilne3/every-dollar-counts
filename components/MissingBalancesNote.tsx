@@ -32,7 +32,7 @@ export function MissingBalancesNote({
       <p className="text-sm text-muted">
         {[
           syncing.length ? `${balancesPending(syncing)} Press Refresh to fetch them.` : '',
-          behind.length ? balancesBlocked(behind, { inSettings: true }) : '',
+          behind.length ? balancesBlocked(behind) : '',
         ]
           .filter(Boolean)
           .join(' ')}

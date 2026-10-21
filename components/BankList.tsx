@@ -25,7 +25,10 @@ const AT_BANK_COPY: Record<string, string> = {
   NO_ACCOUNTS: 'No open accounts were found at this bank.',
 }
 
-function statusLine(item: ItemSummary) {
+// A bank that isn't ok says what it needs, whether or not its accounts are in: that is the thing to
+// do, and its balances follow once it's done. So only an ok bank's line says whether its balances
+// have arrived (#186).
+function statusLine(item: ItemSummary, noAccounts: boolean) {
   switch (item.status) {
     case 'needs_reconnect':
       return { tone: 'coral', text: 'Connection lost — reconnect to resume syncing.' }
@@ -49,16 +52,28 @@ function statusLine(item: ItemSummary) {
         text: `Something is wrong with this connection's setup (${item.status_detail ?? 'unknown'}). Reconnecting won't fix it.`,
       }
     default:
-      return { tone: 'muted', text: 'Connected' }
+      // Connected, but with no accounts yet: none of its balances or transactions are in any figure
+      // (#170). In the words of the dashboard's note, with Refresh worded as for APP_ERROR above.
+      return {
+        tone: 'muted',
+        text: noAccounts
+          ? 'Connected, but its balances and transactions haven’t arrived yet. Refresh will fetch them.'
+          : 'Connected',
+      }
   }
 }
 
 export function BankList({
   items,
+  withoutAccounts = null,
   slotsUsed = null,
   lifetimeSlots,
 }: {
   items: ItemSummary[]
+  // The ids of the banks with no accounts yet (withoutAccounts in lib/bank-state.ts): their first
+  // balance pull failed (#164). Null when Settings couldn't read the accounts, which it says above
+  // the list; then no line guesses.
+  withoutAccounts?: string[] | null
   // How many of the lifetime allowance have been spent, or null when it cannot be established
   // (#51). Null keeps the old wording rather than printing a number we do not stand behind.
   slotsUsed?: number | null
@@ -141,7 +156,7 @@ export function BankList({
       ) : (
         <ul className="divide-y divide-line">
           {items.map((item) => {
-            const s = statusLine(item)
+            const s = statusLine(item, withoutAccounts?.includes(item.id) ?? false)
             return (
               <li key={item.id} className="flex items-center justify-between gap-3 py-3">
                 <div className="min-w-0">

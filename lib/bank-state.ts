@@ -9,8 +9,9 @@ export function notSyncing<T extends { status: string }>(items: T[]): T[] {
   return items.filter((i) => i.status !== 'ok')
 }
 
-// Banks with no accounts yet, split by what Refresh can do for them (#186), for the three places that
-// word them: the #164 dashboard card, components/MissingBalancesNote.tsx and the Settings first line.
+// Banks with no accounts yet, split by what Refresh can do for them (#186), for the two places that
+// word them together: the #164 dashboard card and components/MissingBalancesNote.tsx. Settings says
+// it of each bank in its own line (components/BankList.tsx).
 // - `syncing`: Refresh can bring in their balances and transactions. They are syncing, or the bank
 //   only didn't respond last time (temporarily_unavailable), which Refresh simply retries
 //   (lib/sync-policy.ts).
@@ -64,10 +65,8 @@ export function balancesPending(
 // The same for banks with no accounts that Refresh can't help (bySync), and it promises nothing.
 // Refresh skips a bank whose login broke, and one that needs something done at the bank or to its
 // setup fails again, so their balances are not on their way; Settings says what each one needs.
-// `inSettings` says where, for a page other than Settings.
-export function balancesBlocked(items: { institution_name: string | null }[], { inSettings = false } = {}): string {
-  const where = inSettings ? ' in Settings' : ''
+export function balancesBlocked(items: { institution_name: string | null }[]): string {
   return items.length === 1
-    ? `${items[0].institution_name ?? 'Your bank'} is connected, but its balances and transactions can't arrive until it's sorted out${where}.`
-    : `${items.length} banks are connected, but their balances and transactions can't arrive until they're sorted out${where}.`
+    ? `${items[0].institution_name ?? 'Your bank'} is connected, but its balances and transactions can't arrive until it's sorted out in Settings.`
+    : `${items.length} banks are connected, but their balances and transactions can't arrive until they're sorted out in Settings.`
 }

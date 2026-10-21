@@ -115,7 +115,7 @@ export default async function DashboardPage({
                   {behind.length === 1 ? 'Your bank needs attention' : 'Your banks need attention'}
                 </h2>
                 <p className="mx-auto mt-1 max-w-sm text-sm text-muted">
-                  {balancesBlocked(behind, { inSettings: true })}
+                  {balancesBlocked(behind)}
                 </p>
                 <div className="mt-5 flex justify-center">
                   <Link href="/settings" className={buttonClass('secondary', 'md')}>
