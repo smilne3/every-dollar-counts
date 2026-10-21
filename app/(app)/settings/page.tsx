@@ -28,10 +28,13 @@ type CategorySettings = {
 
 type Supabase = Awaited<ReturnType<typeof createClient>>
 
-// The household, and when the page began reading, by the server's clock, for the cards that follow
-// the server to tell this page from one read before their last save was written (#182). One time for
-// the page, taken before its first read, so it is never later than any read on it: a reload that
-// began before a save was written never passes as newer, however late in the page its read comes.
+// The household, and when the page began reading, by the server's clock, for TimezoneCard and
+// HomeValueCard to tell this page from one read before their last save was written (#182, #174). One
+// time for the page, taken before its first read, so it is never later than any read on it: a reload
+// that began before a save was written never passes as newer, however late in the page its read
+// comes. A time per read would let the home value's read, which comes after the banks', count a save
+// written while the page was reading them, so a card would refill one reload sooner; the reload
+// after the save does that anyway.
 async function readHousehold(supabase: Supabase) {
   const readAt = Date.now()
   const { data: households, error: householdsError } = await supabase
@@ -205,7 +208,7 @@ export default async function SettingsPage() {
           counted as a debt, so this shows what the house adds after the loan.
         </p>
         {manualAssets ? (
-          <HomeValueCard initialValue={home?.value ?? null} updatedAt={home?.updated_at ?? null} />
+          <HomeValueCard initialValue={home?.value ?? null} updatedAt={home?.updated_at ?? null} readAt={readAt} />
         ) : (
           unavailable("Couldn't load your home value.")
         )}

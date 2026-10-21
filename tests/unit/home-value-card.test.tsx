@@ -10,6 +10,7 @@ import {
   redirectedToLogin,
   refused,
   saved,
+  savedAt,
   useFakeSaveClock,
 } from './helpers/save-replies'
 
@@ -25,7 +26,8 @@ afterEach(() => {
 const refresh = vi.hoisted(() => vi.fn())
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }))
 
-const props = { initialValue: 700000, updatedAt: '2026-10-01T12:00:00Z' }
+// readAt is when the page read the value, by the server's clock.
+const props = { initialValue: 700000, updatedAt: '2026-10-01T12:00:00Z', readAt: 1_000 }
 
 // #165: the card checked res.ok alone, so a save made after the session ended, which is redirected
 // to the login page and answers 200, read as saved. The home value moves net worth.
@@ -158,5 +160,179 @@ describe('HomeValueCard saves', () => {
     typeAndSave()
     fireEvent.submit(field().closest('form') as HTMLFormElement)
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  // #174: the field was filled once and never followed the server. With Settings open, a value saved
+  // on the other phone reached "Currently" with the next reload but not the field, and a Save without
+  // retyping sent the old value over the new one, moving net worth back with nothing to say so.
+  // Times are the server's clock: the route says when it wrote (savedAt), and the page when it read
+  // (readAt). The home starts at 700,000, read at 1,000.
+  describe('and the server (#174)', () => {
+    const TRY_AGAIN = 'That could not be saved. Please try again.'
+    // The "Currently" line, which says what is stored.
+    const currently = () => screen.getByText(/^Currently /).textContent
+    // A reload of the page: the value it read, and when.
+    const reloaded = (initialValue: number, readAt: number) => (
+      <HomeValueCard initialValue={initialValue} updatedAt="2026-10-20T12:00:00Z" readAt={readAt} />
+    )
+    // A save, and the render after it settles: the field and Save are disabled until then.
+    async function saveAndSettle(value: string) {
+      typeAndSave(value)
+      await waitFor(() => expect(button().disabled).toBe(false))
+    }
+    // A first save that lands, written at 2,000, then a second whose reply waits for the test.
+    function firstSavedThenHeld() {
+      let settle!: (res: Response) => void
+      vi.stubGlobal(
+        'fetch',
+        vi
+          .fn()
+          .mockResolvedValueOnce(savedAt(2_000))
+          .mockImplementationOnce(() => new Promise<Response>((resolve) => (settle = resolve)))
+      )
+      return (res: Response) => settle(res)
+    }
+
+    it('follows a value saved on the other phone, so a Save without retyping sends it, not the old one', async () => {
+      const fetchMock = answering(() => savedAt(3_000))
+      vi.stubGlobal('fetch', fetchMock)
+      const { rerender } = render(<HomeValueCard {...props} />)
+      // Read at 2,000: the other phone has saved 800,000.
+      rerender(reloaded(800000, 2_000))
+      expect(field().value).toBe('800000')
+      fireEvent.click(button())
+      await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+      expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({ value: 800000 })
+    })
+
+    it('keeps what is being typed when a reload brings another value', () => {
+      const { rerender } = render(<HomeValueCard {...props} />)
+      fireEvent.change(field(), { target: { value: '$750,000' } })
+      rerender(reloaded(800000, 2_000))
+      expect(field().value).toBe('$750,000')
+      expect(currently()).toContain('$800,000.00')
+    })
+
+    // As Zillow shows it: a reload that brings back the value saved leaves the field as it was typed.
+    it('keeps the value as it was typed once the reload after its save brings it back', async () => {
+      vi.stubGlobal('fetch', answering(() => savedAt(2_000)))
+      const { rerender } = render(<HomeValueCard {...props} />)
+      await saveAndSettle('$750,000')
+      rerender(reloaded(750000, 2_500))
+      expect(field().value).toBe('$750,000')
+    })
+
+    // Reloads are told apart by when they read, not by the value they bring: the other phone saved
+    // 700,000 again after this one saved 750,000, and the reload that brings it must still refill the
+    // field, or the next Save sends 750,000 back over it.
+    it('follows a reload that brings back the value it was filled with before the save', async () => {
+      vi.stubGlobal('fetch', answering(() => savedAt(2_000)))
+      const { rerender } = render(<HomeValueCard {...props} />)
+      await saveAndSettle('750000')
+      rerender(reloaded(700000, 2_500))
+      expect(field().value).toBe('700000')
+      expect(currently()).toContain('$700,000.00')
+    })
+
+    // "Currently" says what is stored after each outcome. Once a save is confirmed, that is the value
+    // it wrote, until a reload that read after it says otherwise.
+    it('says the value saved is the current one once the save is confirmed', async () => {
+      vi.stubGlobal('fetch', answering(() => savedAt(2_000)))
+      render(<HomeValueCard {...props} />)
+      await saveAndSettle('750000')
+      expect(currently()).toContain('$750,000.00')
+    })
+
+    // #182's race, here: two quick saves, and the reload asked for after the first read the value
+    // before the second was written. Shown, it said the first save's value was current beside the
+    // second's in the field, as if the second had not saved.
+    it("keeps the second save's value, and says it is current, when the first save's reload lands after it", async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(savedAt(2_000)).mockResolvedValueOnce(savedAt(3_000)))
+      const { rerender } = render(<HomeValueCard {...props} />)
+      await saveAndSettle('750000')
+      await saveAndSettle('800000')
+      // The first save's reload, read at 2,500: after it was written and before the second was.
+      rerender(reloaded(750000, 2_500))
+      expect(field().value).toBe('800000')
+      expect(currently()).toContain('$800,000.00')
+      rerender(reloaded(800000, 3_500))
+      expect(field().value).toBe('800000')
+      expect(currently()).toContain('$800,000.00')
+    })
+
+    // The page takes its time before reading and the route after writing, so a read stamped in the
+    // same millisecond as the write may still have read before it. The next reload brings anything
+    // newer, a value saved on the other phone with it.
+    it('does not follow a read stamped at the time of the save, and does one after it', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(savedAt(2_000)))
+      const { rerender } = render(<HomeValueCard {...props} />)
+      await saveAndSettle('750000')
+      rerender(reloaded(700000, 2_000))
+      expect(field().value).toBe('750000')
+      expect(currently()).toContain('$750,000.00')
+      rerender(reloaded(800000, 2_001))
+      expect(field().value).toBe('800000')
+      expect(currently()).toContain('$800,000.00')
+    })
+
+    // In Next 16.4.2 the first save's reload can land while the second is in flight (see #176), and
+    // the field then holds what the second sent. Refilled from it, the field showed 750,000 once
+    // 800,000 had saved, and the next Save sent 750,000 back over it.
+    it("keeps the second save's value when the first save's reload lands while it is in flight", async () => {
+      const settle = firstSavedThenHeld()
+      const { rerender } = render(<HomeValueCard {...props} />)
+      await saveAndSettle('750000')
+      typeAndSave('800000')
+      rerender(reloaded(750000, 2_500))
+      expect(field().value).toBe('800000')
+      settle(savedAt(3_000))
+      await waitFor(() => expect(button().disabled).toBe(false))
+      expect(field().value).toBe('800000')
+      expect(currently()).toContain('$800,000.00')
+    })
+
+    // Nothing reloads after a refusal, so the first save's reload can still land after it. What was
+    // typed for the refused save was not stored: it is typing, which no reload overwrites.
+    it("keeps what was typed after a refusal when the first save's reload lands after it", async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(savedAt(2_000)).mockResolvedValueOnce(refused(500, TRY_AGAIN)))
+      const { rerender } = render(<HomeValueCard {...props} />)
+      await saveAndSettle('750000')
+      typeAndSave('800000')
+      await screen.findByRole('alert')
+      rerender(reloaded(750000, 2_500))
+      expect(field().value).toBe('800000')
+      expect(currently()).toContain('$750,000.00')
+    })
+
+    // It may have saved, and what was typed stays (#177): saving again sets the same value. Whatever
+    // the reload after it brings, the field keeps it, and "Currently" says what is stored.
+    it('keeps what was typed after an unknown outcome, whatever the reload brings', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      vi.stubGlobal('fetch', answering(badGateway))
+      const { rerender } = render(<HomeValueCard {...props} />)
+      typeAndSave('$750,000')
+      await screen.findByRole('alert')
+      // The reload after it, read at 2,000: the save did not land.
+      rerender(reloaded(700000, 2_000))
+      expect(field().value).toBe('$750,000')
+      expect(currently()).toContain('$700,000.00')
+    })
+
+    // Saved without retyping, the field holds what it was filled with, and a reload that lands while
+    // that save is in flight is held back. Nothing reloads after a refusal, so it is applied once the
+    // save is refused: left unapplied, the field kept 700,000 beside the other phone's 800,000, for
+    // the next Save to send back over it.
+    it('applies a reload that landed during a refused save once it is refused', async () => {
+      let settle!: (res: Response) => void
+      vi.stubGlobal('fetch', vi.fn().mockImplementationOnce(() => new Promise<Response>((resolve) => (settle = resolve))))
+      const { rerender } = render(<HomeValueCard {...props} />)
+      fireEvent.click(button())
+      // Read at 1,500: the other phone has saved 800,000.
+      rerender(reloaded(800000, 1_500))
+      expect(field().value).toBe('700000')
+      settle(refused(500, TRY_AGAIN))
+      await screen.findByRole('alert')
+      expect(field().value).toBe('800000')
+    })
   })
 })

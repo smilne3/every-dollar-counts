@@ -200,7 +200,11 @@ describe('Settings: a failed read says so in its own card (#91)', () => {
       error: null,
     }
     const tree = await SettingsPage()
-    expect(findProps(tree, HomeValueCard)).toEqual({ initialValue: 750000, updatedAt: '2026-10-01T12:00:00Z' })
+    expect(findProps(tree, HomeValueCard)).toEqual({
+      initialValue: 750000,
+      updatedAt: '2026-10-01T12:00:00Z',
+      readAt: expect.any(Number),
+    })
     expect(alertText(card(tree, 'Home value'))).toBeNull()
   })
 
@@ -362,6 +366,26 @@ describe('Settings timezone control', () => {
     const props = findProps(await SettingsPage(), TimezoneCard)
     expect(props?.current).toBe('America/Los_Angeles')
     expect(props?.readAt).toBe(before)
+  })
+})
+
+describe('Settings home value control', () => {
+  // #174: HomeValueCard gets the same time as TimezoneCard, though its read comes later. A time of
+  // its own, taken before the home value's read, would let a reload that began before a save was
+  // written pass as newer if the save landed while the page was still reading the banks.
+  it('tells the card when the page began reading, the same time as the time zone control', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-20T12:00:00Z'))
+    const before = Date.now()
+    onRead.households = () => vi.setSystemTime(before + 5_000)
+    onRead.manual_assets = () => vi.setSystemTime(before + 10_000)
+    results.manual_assets = {
+      data: [{ id: 'a1', name: 'Home', value: 750000, updated_at: '2026-10-01T12:00:00Z' }],
+      error: null,
+    }
+    const tree = await SettingsPage()
+    expect(findProps(tree, HomeValueCard)).toEqual({ initialValue: 750000, updatedAt: '2026-10-01T12:00:00Z', readAt: before })
+    expect(findProps(tree, TimezoneCard)?.readAt).toBe(before)
   })
 })
 
