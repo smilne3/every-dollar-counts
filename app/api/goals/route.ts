@@ -102,7 +102,10 @@ export async function PATCH(req: Request) {
     console.error('[goals] update matched no rows (goal deleted, or the update policy is missing)', { id })
     return fail(404, GONE)
   }
-  return NextResponse.json({ ok: true })
+  // When the update was done, by the server's clock: the goal's card refills what it sent only from a
+  // page that read the goals after this, so the time is taken after the write, not before (#182).
+  // The add and the delete leave no field that follows the server, so they do not say.
+  return NextResponse.json({ ok: true, savedAt: Date.now() })
 }
 
 export async function DELETE(req: Request) {

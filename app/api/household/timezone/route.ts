@@ -58,5 +58,7 @@ export async function POST(req: Request) {
     return fail(500, TRY_AGAIN)
   }
 
-  return NextResponse.json({ ok: true })
+  // When the zone was written, by the server's clock: TimezoneCard follows the server only from a
+  // page that read the zone after this, so the time is taken after the write, not before (#182).
+  return NextResponse.json({ ok: true, savedAt: Date.now() })
 }

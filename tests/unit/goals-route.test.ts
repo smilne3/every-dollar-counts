@@ -38,6 +38,8 @@ function makeSupabase({
   membership = { data: { household_id: 'hh-1' } as Row | null, error: null as DbError },
   insertError = null as DbError,
   writeError = null as DbError,
+  // Called as an update or delete is done, so a test can move the clock on.
+  onWrite = () => {},
 } = {}) {
   const calls = { membership: [] as unknown[][], inserts: [] as Row[], writes: [] as Write[] }
   // Like PostgREST's builder: each filter is recorded and returns the builder, and awaiting it runs
@@ -47,6 +49,7 @@ function makeSupabase({
     const builder = {
       eq: (col: string, val: unknown) => (entry.filters.push(['eq', col, val]), builder),
       then: (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) => {
+        onWrite()
         const matched = GOALS.filter((g) => entry.filters.every(([, col, val]) => g[col as string] === val)).length
         const result = writeError ? { error: writeError, count: null } : { error: null, count: matched }
         const counted = (entry.options as { count?: string } | undefined)?.count === 'exact'
@@ -112,7 +115,10 @@ beforeEach(() => {
   logs = []
   vi.spyOn(console, 'error').mockImplementation((...a) => void logs.push(a))
 })
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.useRealTimers()
+})
 
 // The three handlers sign in the same way, and each must refuse before writing.
 describe.each([
@@ -228,10 +234,20 @@ describe('PATCH /api/goals', () => {
     const calls = makeSupabase()
     const res = await update()
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ ok: true })
+    expect(await res.json()).toEqual({ ok: true, savedAt: expect.any(Number) })
     expect(calls.writes).toEqual([
       { op: 'update', payload: { saved_amount: 1500 }, options: { count: 'exact' }, filters: [['eq', 'id', 'g-1']] },
     ])
+  })
+
+  // #182: a goal's card refills what it sent only from a page that read the goals after the update,
+  // so a time taken before the write would let a page read in between pass as newer.
+  it('says when the update was written, by the server clock, once it is done', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(1_000)
+    makeSupabase({ onWrite: () => vi.setSystemTime(Date.now() + 1_000) })
+    const res = await update()
+    expect(await res.json()).toEqual({ ok: true, savedAt: 2_000 })
   })
 
   it('saves an amount of zero', async () => {

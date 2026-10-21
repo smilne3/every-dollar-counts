@@ -37,6 +37,8 @@ function makeSupabase({
   // The households the update can reach. None: the update policy is missing, as before #73.
   households = HOUSEHOLDS,
   updateError = null as DbError,
+  // Called as the update is done, so a test can move the clock on.
+  onWrite = () => {},
 } = {}) {
   const calls = { membership: [] as unknown[][], updates: [] as { payload: Row; options: unknown; filters: unknown[][] }[] }
   const client = {
@@ -66,6 +68,7 @@ function makeSupabase({
             const builder = {
               eq: (col: string, val: unknown) => (entry.filters.push(['eq', col, val]), builder),
               then: (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) => {
+                onWrite()
                 const matched = households.filter((h) => entry.filters.every(([, col, val]) => h[col as string] === val)).length
                 const result = updateError ? { error: updateError, count: null } : { error: null, count: matched }
                 return Promise.resolve(options?.count === 'exact' ? result : { ...result, count: null }).then(resolve, reject)
@@ -101,7 +104,10 @@ beforeEach(() => {
   logs = []
   vi.spyOn(console, 'error').mockImplementation((...a) => void logs.push(a))
 })
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.useRealTimers()
+})
 
 describe('POST /api/household/timezone', () => {
   // Validated before the database is touched: Postgres cannot check an IANA name, so this is the
@@ -124,11 +130,21 @@ describe('POST /api/household/timezone', () => {
     const calls = makeSupabase()
     const res = await post({ timezone: ' America/Chicago ' })
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ ok: true })
+    expect(await res.json()).toEqual({ ok: true, savedAt: expect.any(Number) })
     expect(calls.membership).toEqual([['select', 'household_id'], ['limit', 1]])
     expect(calls.updates).toEqual([
       { payload: { timezone: 'America/Chicago' }, options: { count: 'exact' }, filters: [['eq', 'id', 'hh-1']] },
     ])
+  })
+
+  // #182: TimezoneCard follows the server only from a page that read the zone after the save, so a
+  // time taken before the write would let a page read in between pass as newer.
+  it('says when the zone was written, by the server clock, once the update is done', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(1_000)
+    makeSupabase({ onWrite: () => vi.setSystemTime(Date.now() + 1_000) })
+    const res = await save()
+    expect(await res.json()).toEqual({ ok: true, savedAt: 2_000 })
   })
 
   it('answers 401 without a user, in words, and writes nothing', async () => {
