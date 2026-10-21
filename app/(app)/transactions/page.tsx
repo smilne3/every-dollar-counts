@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { MissingBalancesNote } from '@/components/MissingBalancesNote'
 import { NotSyncingBanner } from '@/components/NotSyncingBanner'
@@ -198,12 +199,21 @@ export default async function TransactionsPage({
           {/* Unfiltered and empty is either a household with no bank, or one whose bank hasn't
               sent any yet, which can take hours after it is linked (#185). Only the first is told
               to connect one: telling the second invites linking the same bank again, which spends
-              one of ten lifetime connections (#51). */}
+              one of ten lifetime connections (#51). It links to the page with the button, rather
+              than naming a page the nav calls Overview, and Home on a phone (#192). */}
           <p className="text-sm text-muted">
             {account || category || month || flow || safe || page > 1
               ? 'No transactions to show for this view. (Balances-only accounts like a mortgage have none.)'
               : items.length === 0
-                ? 'No transactions yet. Connect a bank on the Dashboard.'
+                ? (
+                    <>
+                      No transactions yet.{' '}
+                      <Link href="/dashboard" className="text-emerald hover:text-emerald-600">
+                        Connect a bank
+                      </Link>
+                      .
+                    </>
+                  )
                 : items.length === 1
                   ? "Your bank is connected, but its transactions haven't arrived yet. They can take a few hours on a new connection."
                   : "Your banks are connected, but their transactions haven't arrived yet. They can take a few hours on a new connection."}

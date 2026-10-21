@@ -111,6 +111,7 @@ vi.mock('@/lib/category-context', async (importOriginal) => {
 // element tree the server component returns — but importing them still runs their module bodies.
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {} }) }))
 
+import Link from 'next/link'
 import TransactionsPage from '@/app/(app)/transactions/page'
 import { MissingBalancesNote } from '@/components/MissingBalancesNote'
 import { NotSyncingBanner } from '@/components/NotSyncingBanner'
@@ -557,21 +558,38 @@ describe('Transactions with none yet (#185)', () => {
   beforeEach(() => {
     results.transactions = { data: [], count: 0, error: null }
   })
-  // What the empty list's card says.
-  const emptyText = (tree: unknown) => {
+  // The empty list's card's line, what it says, links and all, and where each link goes.
+  const emptyLine = (tree: unknown) => {
     const card = walk(tree).find((d) => d.el.type === Card && d.el.props?.className === 'p-8 text-center')
-    return walk(card?.el.props?.children).find((d) => d.el.type === 'p')?.el.props?.children
+    return walk(card?.el.props?.children).find((d) => d.el.type === 'p')?.el
   }
+  const textOf = (node: unknown): string => {
+    if (node == null || typeof node === 'boolean') return ''
+    if (typeof node === 'string' || typeof node === 'number') return String(node)
+    if (Array.isArray(node)) return node.map(textOf).join('')
+    return isEl(node) ? textOf(node.props?.children) : ''
+  }
+  const emptyText = (tree: unknown) => textOf(emptyLine(tree)?.props?.children)
+  const emptyLinks = (tree: unknown) =>
+    walk(emptyLine(tree)?.props?.children)
+      .filter((d) => d.el.type === Link)
+      .map((d) => [textOf(d.el.props?.children), d.el.props?.href])
 
-  it('says to connect a bank when the household has none', async () => {
-    expect(emptyText(await render())).toBe('No transactions yet. Connect a bank on the Dashboard.')
+  // #192: it said "on the Dashboard", a page the nav calls Overview, and Home on a phone. It links to
+  // that page, which has the button, instead.
+  it('says to connect a bank when the household has none, with a link to the page that connects one', async () => {
+    const tree = await render()
+    expect(emptyText(tree)).toBe('No transactions yet. Connect a bank.')
+    expect(emptyLinks(tree)).toEqual([['Connect a bank', '/dashboard']])
   })
 
   it("says a linked bank's transactions haven't arrived, and doesn't offer to connect one", async () => {
     results.plaid_items = { data: [storedItem()], error: null }
-    expect(emptyText(await render())).toBe(
+    const tree = await render()
+    expect(emptyText(tree)).toBe(
       "Your bank is connected, but its transactions haven't arrived yet. They can take a few hours on a new connection."
     )
+    expect(emptyLinks(tree)).toEqual([])
   })
 
   it('says the same of several banks', async () => {
@@ -585,7 +603,9 @@ describe('Transactions with none yet (#185)', () => {
   // this household's.
   it("still says to connect a bank when the only banks are another household's or the other environment's", async () => {
     results.plaid_items = { data: FOREIGN_ITEMS, error: null }
-    expect(emptyText(await render())).toBe('No transactions yet. Connect a bank on the Dashboard.')
+    const tree = await render()
+    expect(emptyText(tree)).toBe('No transactions yet. Connect a bank.')
+    expect(emptyLinks(tree)).toEqual([['Connect a bank', '/dashboard']])
   })
 
   // A filtered view's empty list is about the filter, whatever banks there are.
