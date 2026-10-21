@@ -370,9 +370,11 @@ describe('Settings timezone control', () => {
 })
 
 describe('Settings home value control', () => {
-  // #174: HomeValueCard gets the same time as TimezoneCard, though its read comes later. A time of
-  // its own, taken before the home value's read, would let a reload that began before a save was
-  // written pass as newer if the save landed while the page was still reading the banks.
+  // #174: HomeValueCard gets the same time as TimezoneCard, though its read comes later: one time for
+  // the page, taken before its first read. A time of its own, taken before the home value's read,
+  // would be safe too, since that read would still come after it. The one time is never later than
+  // a read, and only delays a refill: a save written while the page was still reading the banks is
+  // refilled by the next reload rather than this one.
   it('tells the card when the page began reading, the same time as the time zone control', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-10-20T12:00:00Z'))
