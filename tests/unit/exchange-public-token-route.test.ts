@@ -5,10 +5,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 // connections (#51), so every answer must be true about that, and none may carry the database's
 // words. The environment guard has its own suite, tests/unit/exchange-public-token-env.test.ts.
 //
-// The stand-ins are strict, as in tests/unit/reimbursable-route.test.ts (#101): the membership read
-// resolves only through .limit(1).maybeSingle(), and the insert only through .select('id').single(),
-// recording the row it was given. The insert's result is the test's, so it can be one postgrest-js
-// gives a request lost in flight (#173).
+// The stand-ins are strict, as in tests/unit/reimbursable-route.test.ts (#101):
+// - the membership read resolves only through .limit(1).maybeSingle();
+// - each insert resolves only through .select('id').single(), records the row it was given, and
+//   takes the next of the test's results, so it can get what postgrest-js gives a request lost in
+//   flight (#173). An insert past the last result throws, so a route that retries more than it is
+//   given cannot pass;
+// - the read of a stored row resolves only through .select().eq().maybeSingle(), records how, and
+//   finds the row only by its item_id.
 const {
   createClient,
   adminFrom,
@@ -42,19 +46,29 @@ vi.mock('@/lib/app-env', async (importOriginal) => ({
 import { AuthRetryableFetchError, type AuthError } from '@supabase/supabase-js'
 import { POST, maxDuration } from '@/app/api/plaid/exchange-public-token/route'
 import { EXCHANGE_TIMEOUT_MS } from '@/components/plaid-link-context'
-import { NO_ANSWER, REFUSED_5XX } from '../stubs/no-answer'
-import { answerOf, UNKNOWN_ANSWER } from './helpers/route-answers'
+import { GATEWAY_502, NO_ANSWER, REFUSED_5XX } from '../stubs/no-answer'
 
 type Row = Record<string, unknown>
 type DbError = { code?: string; message: string } | null
+
+// An insert that stored the bank, and one refused because a row with its item_id is there already.
+const STORED = (id: string) => ({ data: { id }, error: null, status: 201 })
+const DUPLICATE = {
+  data: null,
+  error: { code: '23505', message: 'duplicate key value violates unique constraint "plaid_items_item_id_key"' },
+  status: 409,
+}
 
 function makeStandIns({
   user = { id: 'user-1' } as { id: string } | null,
   authError = null as AuthError | null,
   membership = { data: { household_id: 'hh-1' } as Row | null, error: null as DbError },
-  insertResult = { data: { id: 'row-1' } as Row | null, error: null as DbError },
+  // The inserts' results, first to last.
+  inserts = [STORED('row-1')] as unknown[],
+  // The stored row, as a read by its item_id finds it.
+  storedRow = { data: { id: 'row-1' } as Row | null, error: null } as unknown,
 } = {}) {
-  const calls = { inserts: [] as Row[] }
+  const calls = { inserts: [] as Row[], reads: [] as unknown[][] }
   createClient.mockResolvedValue({
     // getUser answers { user: null, error } on ANY auth failure, a dropped connection included.
     auth: { getUser: vi.fn().mockResolvedValue({ data: { user }, error: authError }) },
@@ -73,7 +87,19 @@ function makeStandIns({
     return {
       insert: (row: Row) => {
         calls.inserts.push(row)
-        return { select: (cols: string) => (cols === 'id' ? { single: () => Promise.resolve(insertResult) } : {}) }
+        const result = inserts.shift()
+        if (!result) throw new Error(`unexpected insert #${calls.inserts.length}`)
+        return { select: (cols: string) => (cols === 'id' ? { single: () => Promise.resolve(result) } : {}) }
+      },
+      select: (cols: string) => {
+        calls.reads.push(['select', cols])
+        return {
+          eq: (col: string, val: unknown) => {
+            calls.reads.push(['eq', col, val])
+            const found = col === 'item_id' && val === 'item-1'
+            return { maybeSingle: () => Promise.resolve(found ? storedRow : { data: null, error: null }) }
+          },
+        }
       },
     }
   })
@@ -210,51 +236,44 @@ describe('POST /api/plaid/exchange-public-token: the bank', () => {
   })
 
   // The slot is spent and, if the teardown failed, the Item is still live at Plaid: neither "safe to
-  // try again" nor "nothing was connected" is true. The database's words go to the log only.
-  it('answers 500 when the bank cannot be stored, tears the Item down at Plaid and logs the database text', async () => {
-    makeStandIns({ insertResult: { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint' } } })
+  // try again" nor "nothing was connected" is true. The database's words go to the log only. A
+  // refusal is not tried again: nothing of it was written.
+  it('answers 500 when the bank is refused, tears the Item down at Plaid and logs the database text', async () => {
+    const notNull = { code: '23502', message: 'null value in column "household_id" violates not-null constraint' }
+    const calls = makeStandIns({ inserts: [{ data: null, error: notNull, status: 400 }] })
     const res = await link()
     expect(res.status).toBe(500)
     expect(await errorOf(res)).toBe('Could not save that bank.')
-    expect(itemRemove).toHaveBeenCalledExactlyOnceWith({ access_token: 'access-sandbox-1' })
-    expect(logs).toContainEqual([
-      '[plaid] failed to store item',
-      { itemId: 'item-1', code: '23505', message: 'duplicate key value violates unique constraint' },
-    ])
-    expect(storeAccounts).not.toHaveBeenCalled()
-  })
-
-  // #173: the insert may have committed, holding the token. Torn down at Plaid, that row would be a
-  // dead bank, and LinkButton, told the bank could not be saved, would not reload to show it, so the
-  // person would link it again and spend another connection (#51). So the Item stays at Plaid, the
-  // answer is that it may not have saved (LinkButton: the bank may have connected, and it reloads),
-  // and the log names the Item in case the row did not commit.
-  it('keeps the bank at Plaid, answers that it may not have saved, and logs the Item, when the database never answers the insert', async () => {
-    const calls = makeStandIns({ insertResult: NO_ANSWER })
-    const res = await link()
-    expect(await answerOf(res)).toEqual(UNKNOWN_ANSWER)
     expect(calls.inserts).toHaveLength(1)
-    expect(itemRemove).not.toHaveBeenCalled()
-    expect(logs).toContainEqual([
-      '[plaid] no answer storing item; kept at Plaid. If it is not in the list, remove it by hand',
-      { itemId: 'item-1', message: 'TypeError: fetch failed' },
-    ])
+    expect(itemRemove).toHaveBeenCalledExactlyOnceWith({ access_token: 'access-sandbox-1' })
+    expect(logs).toContainEqual(['[plaid] failed to store item', { itemId: 'item-1', ...notNull }])
     expect(storeAccounts).not.toHaveBeenCalled()
-    expect(syncAndStore).not.toHaveBeenCalled()
   })
 
   // A refusal carries a code, 5xx or not: nothing was stored, so we hold the only copy of the token.
   it('tears the Item down at Plaid when the insert is refused with a 5xx, since the refusal carries a code', async () => {
-    makeStandIns({ insertResult: REFUSED_5XX })
+    const calls = makeStandIns({ inserts: [REFUSED_5XX] })
     const res = await link()
     expect(res.status).toBe(500)
     expect(await errorOf(res)).toBe('Could not save that bank.')
+    expect(calls.inserts).toHaveLength(1)
     expect(itemRemove).toHaveBeenCalledExactlyOnceWith({ access_token: 'access-sandbox-1' })
+  })
+
+  // item_id is unique, so a duplicate can only be this bank, stored already. Torn down at Plaid, its
+  // row would be a dead bank whose next sync fails.
+  it('carries on with the bank already stored when the insert is a duplicate, and tears nothing down', async () => {
+    const calls = makeStandIns({ inserts: [DUPLICATE] })
+    const res = await link()
+    expect(await res.json()).toEqual({ ok: true, added: 2, modified: 0, removed: 0 })
+    expect(calls.reads).toEqual([['select', 'id'], ['eq', 'item_id', 'item-1']])
+    expect(storeAccounts).toHaveBeenCalledExactlyOnceWith('hh-1', 'row-1', 'access-sandbox-1')
+    expect(itemRemove).not.toHaveBeenCalled()
   })
 
   // Connected and stored: reporting a failure here would invite a duplicate link.
   it('answers ok with a warning when the first balances or transactions do not arrive', async () => {
-    makeStandIns()
+    makeStandIns({ inserts: [STORED('row-1'), STORED('row-1')] })
     storeAccounts.mockRejectedValueOnce(new Error('accounts down'))
     expect(await (await link()).json()).toEqual({
       ok: true,
@@ -266,5 +285,81 @@ describe('POST /api/plaid/exchange-public-token: the bank', () => {
       warning:
         'Bank connected. Transactions can take a few minutes to a few hours to arrive on a first connection — press Refresh again shortly. Do not re-link.',
     })
+  })
+})
+
+// #173: an insert whose reply was lost, to nothing at all or to a gateway's page in PostgREST's
+// place, may have stored the bank, token and all, or not. It is tried once more, and item_id, unique
+// in plaid_items, settles which.
+describe('POST /api/plaid/exchange-public-token: an insert whose reply was lost', () => {
+  const FAILED_AFTER_LOST =
+    '[plaid] FAILED to store item after an insert got no answer, which may have landed: tearing it down at Plaid. If it is in the list, disconnect it'
+
+  it.each([
+    ['no reply at all', NO_ANSWER],
+    ["a gateway's 502", GATEWAY_502],
+  ])('tries once more after %s, and carries on when that stores the bank', async (_, lost) => {
+    const calls = makeStandIns({ inserts: [lost, STORED('row-2')] })
+    const res = await link()
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true, added: 2, modified: 0, removed: 0 })
+    expect(calls.inserts).toHaveLength(2)
+    expect(calls.inserts[1]).toEqual(calls.inserts[0])
+    expect(storeAccounts).toHaveBeenCalledExactlyOnceWith('hh-1', 'row-2', 'access-sandbox-1')
+    expect(syncAndStore).toHaveBeenCalledExactlyOnceWith({ id: 'row-2', household_id: 'hh-1', access_token: 'access-sandbox-1' })
+    expect(itemRemove).not.toHaveBeenCalled()
+  })
+
+  // postgrest-js puts the cause in `details`: the connection refused, reset or timed out.
+  it('logs the lost reply with its details, which name the cause', async () => {
+    makeStandIns({ inserts: [NO_ANSWER, STORED('row-2')] })
+    await link()
+    expect(logs).toContainEqual([
+      '[plaid] no answer storing item; trying once more',
+      { itemId: 'item-1', code: '', message: 'TypeError: fetch failed', details: NO_ANSWER.error.details },
+    ])
+  })
+
+  // The first insert landed, so the bank is stored. Torn down at Plaid, it would be a dead row.
+  it('carries on as stored when the second insert is a duplicate, reading the row by its item_id, and tears nothing down', async () => {
+    const calls = makeStandIns({ inserts: [NO_ANSWER, DUPLICATE] })
+    const res = await link()
+    expect(await res.json()).toEqual({ ok: true, added: 2, modified: 0, removed: 0 })
+    expect(calls.inserts).toHaveLength(2)
+    expect(calls.reads).toEqual([['select', 'id'], ['eq', 'item_id', 'item-1']])
+    expect(storeAccounts).toHaveBeenCalledExactlyOnceWith('hh-1', 'row-1', 'access-sandbox-1')
+    expect(itemRemove).not.toHaveBeenCalled()
+  })
+
+  // Stored, as the duplicate proves, but with no id to pull its data under: Refresh pulls it.
+  it.each([
+    ['gets no answer', NO_ANSWER],
+    ['is refused', REFUSED_5XX],
+  ])('says the bank is connected and its balances are still to come when the read of its row %s', async (_, read) => {
+    makeStandIns({ inserts: [NO_ANSWER, DUPLICATE], storedRow: read })
+    const res = await link()
+    expect(await res.json()).toEqual({
+      ok: true,
+      warning: 'Bank connected, but its balances have not arrived yet. Press Refresh in a moment.',
+    })
+    expect(storeAccounts).not.toHaveBeenCalled()
+    expect(itemRemove).not.toHaveBeenCalled()
+  })
+
+  // Nothing holds the token but this request, and an Item nothing can remove at Plaid is billed for
+  // good. A row the first insert may have left is a dead bank, which shows and can be disconnected:
+  // LinkButton says to check Settings before trying again, and the log says to look.
+  it.each([
+    ['refused, with a code', REFUSED_5XX],
+    ['lost too', NO_ANSWER],
+  ])('tears the Item down at Plaid when the second insert is %s, and says the bank could not be saved', async (_, second) => {
+    const calls = makeStandIns({ inserts: [NO_ANSWER, second] })
+    const res = await link()
+    expect(res.status).toBe(500)
+    expect(await errorOf(res)).toBe('Could not save that bank.')
+    expect(calls.inserts).toHaveLength(2)
+    expect(itemRemove).toHaveBeenCalledExactlyOnceWith({ access_token: 'access-sandbox-1' })
+    expect(logs).toContainEqual([FAILED_AFTER_LOST, expect.objectContaining({ itemId: 'item-1', message: second.error.message })])
+    expect(storeAccounts).not.toHaveBeenCalled()
   })
 })
