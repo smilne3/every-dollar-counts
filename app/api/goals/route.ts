@@ -61,7 +61,7 @@ export async function POST(req: Request) {
   const { error, status } = await supabase.from('goals').insert({ household_id, name, target_amount: target, saved_amount: 0 })
   if (error) {
     console.error('[goals] add failed', { household_id, code: error.code, message: error.message })
-    return unknownIfLost(status) ?? fail(500, TRY_AGAIN)
+    return unknownIfLost(status, error) ?? fail(500, TRY_AGAIN)
   }
   return NextResponse.json({ ok: true })
 }
@@ -100,7 +100,7 @@ export async function PATCH(req: Request) {
   if (error) {
     console.error('[goals] update failed', { id, code: error.code, message: error.message })
     // As for an add: never answered, the amount may have been written, so the outcome is unknown.
-    return unknownIfLost(status) ?? fail(500, TRY_AGAIN)
+    return unknownIfLost(status, error) ?? fail(500, TRY_AGAIN)
   }
   if (!count) {
     // A stale-list refusal: GoalsList reloads on a 404 to show the latest.
@@ -126,7 +126,7 @@ export async function DELETE(req: Request) {
   if (error) {
     console.error('[goals] delete failed', { id, code: error.code, message: error.message })
     // As for an add: never answered, the goal may be gone, so the outcome is unknown.
-    return unknownIfLost(status) ?? fail(500, 'That goal could not be deleted. Please try again.')
+    return unknownIfLost(status, error) ?? fail(500, 'That goal could not be deleted. Please try again.')
   }
   if (!count) {
     // Gone already, most likely deleted on the other phone: what was asked for is done, so there is

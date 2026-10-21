@@ -121,7 +121,7 @@ export async function PATCH(req: Request) {
     console.error('[category-rules] change failed', { id, code: error.code, message: error.message })
     // A Change the database never answered may have landed, so its outcome is unknown
     // (lib/lost-reply.ts). Tried again after it did, it would match nothing and say the rule changed.
-    return unknownIfLost(status) ?? fail(500, TRY_AGAIN)
+    return unknownIfLost(status, error) ?? fail(500, TRY_AGAIN)
   }
   if (!count) return fail(409, RULE_CHANGED)
   console.log('[category-rules] changed', { id, from: current.name, to: target.name })
@@ -148,7 +148,7 @@ export async function DELETE(req: Request) {
   if (error) {
     console.error('[category-rules] remove failed', { id, code: error.code, message: error.message })
     // As for a Change: never answered, the rule may be gone, so the outcome is unknown.
-    return unknownIfLost(status) ?? fail(500, TRY_AGAIN)
+    return unknownIfLost(status, error) ?? fail(500, TRY_AGAIN)
   }
   if (!count) return fail(409, RULE_CHANGED)
   console.log('[category-rules] removed', { id, categoryId: expectedCategoryId })

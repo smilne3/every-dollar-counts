@@ -7,14 +7,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 // The stand-in is strict, as in tests/unit/reimbursable-route.test.ts (#99, #101). The membership
 // read resolves only through .select().eq().limit(1).maybeSingle(), against membership rows the way
 // RLS and the filter would match them (the caller's own rows, on the column and value given),
-// projected to the columns asked for. The upsert records exactly what it was given, and can go
-// unanswered, as postgrest-js reports a request lost in flight (#173).
+// projected to the columns asked for. The upsert records exactly what it was given, and can get a
+// reply of the test's: a request lost in flight, as postgrest-js reports it, or a 5xx refusal (#173).
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 
 import { AuthRetryableFetchError, type AuthError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
 import { POST } from '@/app/api/household/invite/route'
-import { NO_ANSWER } from '../stubs/no-answer'
+import { NO_ANSWER, REFUSED_5XX } from '../stubs/no-answer'
 import { answerOf, UNKNOWN_ANSWER } from './helpers/route-answers'
 
 type Row = Record<string, unknown>
@@ -38,8 +38,8 @@ function makeSupabase({
   authError = null as AuthError | null,
   membershipError = null as DbError,
   upsertError = null as DbError,
-  // The database never answers the upsert.
-  noAnswer = false,
+  // A reply for the upsert in place of its usual one.
+  reply = undefined as unknown,
 } = {}) {
   const calls = { membership: [] as unknown[][], upserts: [] as { row: Row; options: unknown }[] }
   const client = {
@@ -74,7 +74,7 @@ function makeSupabase({
         return {
           upsert: (row: Row, options: unknown) => {
             calls.upserts.push({ row, options })
-            return Promise.resolve(noAnswer ? NO_ANSWER : { error: upsertError })
+            return Promise.resolve(reply ?? { error: upsertError })
           },
         }
       }
@@ -182,9 +182,17 @@ describe('POST /api/household/invite', () => {
 
   // #173: the email may have been added, so the outcome is unknown, never a refusal.
   it('answers that it may not have saved when the database never answers the upsert, and logs it', async () => {
-    makeSupabase({ noAnswer: true })
+    makeSupabase({ reply: NO_ANSWER })
     const res = await invite()
     expect(await answerOf(res)).toEqual(UNKNOWN_ANSWER)
     expect(logs).toContainEqual(['[household/invite] upsert failed', { household_id: 'hh-1', code: '', message: 'TypeError: fetch failed' }])
+  })
+
+  // A refusal carries a code, 5xx or not, and nothing was written.
+  it('answers 500 for a refused upsert whose status is a 5xx, since it carries a code', async () => {
+    makeSupabase({ reply: REFUSED_5XX })
+    const res = await invite()
+    expect(res.status).toBe(500)
+    expect(await errorOf(res)).toBe(TRY_AGAIN)
   })
 })

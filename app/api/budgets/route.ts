@@ -71,7 +71,7 @@ export async function POST(req: Request) {
     const { error, status } = await supabase.from('budgets').upsert(toUpsert, { onConflict: 'household_id,category' })
     if (error) {
       console.error('[budgets] upsert failed', { household_id, code: error.code, message: error.message })
-      return unknownIfLost(status) ?? fail(500, TRY_AGAIN)
+      return unknownIfLost(status, error) ?? fail(500, TRY_AGAIN)
     }
   }
   // Scoped to the household the upsert wrote to, not left to RLS alone. If this is refused, the
@@ -80,7 +80,7 @@ export async function POST(req: Request) {
     const { error, status } = await supabase.from('budgets').delete().eq('household_id', household_id).in('category', toDelete)
     if (error) {
       console.error('[budgets] delete failed', { household_id, code: error.code, message: error.message })
-      return unknownIfLost(status) ?? fail(500, 'The limits you cleared could not be removed. Please try again.')
+      return unknownIfLost(status, error) ?? fail(500, 'The limits you cleared could not be removed. Please try again.')
     }
   }
   // When both writes were done, by the server's clock: BudgetEditor refills what it sent only from a

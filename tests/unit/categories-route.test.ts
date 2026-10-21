@@ -36,7 +36,7 @@ vi.mock('@/lib/app-env', async (importOriginal) => ({
 
 import { EnvMismatchError } from '@/lib/app-env'
 import { DELETE, PATCH, POST } from '@/app/api/categories/route'
-import { NO_ANSWER } from '../stubs/no-answer'
+import { NO_ANSWER, REFUSED_5XX } from '../stubs/no-answer'
 import { answerOf, UNKNOWN_ANSWER } from './helpers/route-answers'
 
 const send = (handler: (req: Request) => Promise<Response>, method: string, body: unknown) =>
@@ -92,10 +92,24 @@ describe('POST and PATCH /api/categories: a write the database never answered', 
     expect(calls).toEqual(['categories', 'categories'])
   })
 
-  it('still refuses an add the database refused', async () => {
-    replies.set('categories.insert', { error: { code: '23505', message: 'duplicate key value violates unique constraint' }, status: 409 })
+  // A refusal carries a code, whatever its status, and is answered as before: in JSON, a 400.
+  const refusals = [
+    ['a duplicate name, answered 409', { error: { code: '23505', message: 'duplicate key value violates unique constraint' }, status: 409 }],
+    ['a statement timeout, answered 500', REFUSED_5XX],
+  ] as const
+
+  it.each(refusals)('still refuses an add the database refused: %s', async (_, reply) => {
+    replies.set('categories.insert', reply)
     const res = await add()
     expect(res.status).toBe(400)
-    expect(await res.json()).not.toHaveProperty('unknown')
+    expect(res.headers.get('content-type')).toContain('application/json')
+  })
+
+  it.each(refusals)('still refuses a rename the database refused, and moves no picks or budgets: %s', async (_, reply) => {
+    replies.set('categories.update', reply)
+    const res = await rename()
+    expect(res.status).toBe(400)
+    expect(res.headers.get('content-type')).toContain('application/json')
+    expect(calls).toEqual(['categories', 'categories'])
   })
 })

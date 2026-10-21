@@ -15,7 +15,7 @@ vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 import { AuthRetryableFetchError, type AuthError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
 import { POST } from '@/app/api/budgets/route'
-import { NO_ANSWER } from '../stubs/no-answer'
+import { NO_ANSWER, REFUSED_5XX } from '../stubs/no-answer'
 import { answerOf, UNKNOWN_ANSWER } from './helpers/route-answers'
 
 type Row = Record<string, unknown>
@@ -27,8 +27,8 @@ function makeSupabase({
   membership = { data: { household_id: 'hh-1' } as Row | null, error: null as DbError },
   upsertError = null as DbError,
   deleteError = null as DbError,
-  // The write the database never answers.
-  noAnswer = undefined as 'upsert' | 'delete' | undefined,
+  // A reply for a write in place of its usual one.
+  replies = {} as Partial<Record<'upsert' | 'delete', unknown>>,
   // Called as each write is done, so a test can move the clock on.
   onWrite = () => {},
 } = {}) {
@@ -59,7 +59,7 @@ function makeSupabase({
           upsert: (rows: Row[], options: unknown) => {
             calls.upserts.push({ rows, options })
             onWrite()
-            return Promise.resolve(noAnswer === 'upsert' ? NO_ANSWER : { error: upsertError })
+            return Promise.resolve(replies.upsert ?? { error: upsertError })
           },
           delete: () => {
             const entry = { filters: [] as unknown[][] }
@@ -71,7 +71,7 @@ function makeSupabase({
                   in: (col2: string, vals: unknown[]) => {
                     entry.filters.push(['in', col2, vals])
                     onWrite()
-                    return Promise.resolve(noAnswer === 'delete' ? NO_ANSWER : { error: deleteError })
+                    return Promise.resolve(replies.delete ?? { error: deleteError })
                   },
                 }
               },
@@ -240,7 +240,7 @@ describe('POST /api/budgets', () => {
   // #173: either write the database never answered may have landed, so the save's outcome is
   // unknown, never a refusal. After an upsert with no answer, the delete does not run.
   it('answers that it may not have saved when the database never answers the upsert, logs it and deletes nothing', async () => {
-    const calls = makeSupabase({ noAnswer: 'upsert' })
+    const calls = makeSupabase({ replies: { upsert: NO_ANSWER } })
     const res = await save()
     expect(await answerOf(res)).toEqual(UNKNOWN_ANSWER)
     expect(logs).toContainEqual(['[budgets] upsert failed', { household_id: 'hh-1', code: '', message: 'TypeError: fetch failed' }])
@@ -248,8 +248,24 @@ describe('POST /api/budgets', () => {
   })
 
   it('answers that it may not have saved when the database never answers the delete', async () => {
-    makeSupabase({ noAnswer: 'delete' })
+    makeSupabase({ replies: { delete: NO_ANSWER } })
     const res = await save()
     expect(await answerOf(res)).toEqual(UNKNOWN_ANSWER)
+  })
+
+  // A refusal carries a code, 5xx or not, and is answered as before.
+  it('answers 500 for a refused upsert whose status is a 5xx, since it carries a code, and deletes nothing', async () => {
+    const calls = makeSupabase({ replies: { upsert: REFUSED_5XX } })
+    const res = await save()
+    expect(res.status).toBe(500)
+    expect(await errorOf(res)).toBe(TRY_AGAIN)
+    expect(calls.deletes).toHaveLength(0)
+  })
+
+  it('answers 500 for a refused delete whose status is a 5xx, and says which part did not save', async () => {
+    makeSupabase({ replies: { delete: REFUSED_5XX } })
+    const res = await save()
+    expect(res.status).toBe(500)
+    expect(await errorOf(res)).toBe('The limits you cleared could not be removed. Please try again.')
   })
 })

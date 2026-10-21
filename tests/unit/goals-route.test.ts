@@ -10,13 +10,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 // - an update or delete records every filter and runs only when awaited after the whole chain,
 //   against the goals that match each filter's column and value;
 // - a write returns a count only when { count: 'exact' } is asked for, as PostgREST does;
-// - any one write can go unanswered, as postgrest-js reports a request lost in flight (#173).
+// - any one write can get a reply of the test's, as postgrest-js reports a request lost in flight,
+//   a gateway's page or a 5xx refusal (#173).
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 
 import { AuthRetryableFetchError, type AuthError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
 import { POST, PATCH, DELETE } from '@/app/api/goals/route'
-import { NO_ANSWER } from '../stubs/no-answer'
+import { GATEWAY_502, GATEWAY_520, NO_ANSWER, REFUSED_5XX } from '../stubs/no-answer'
 import { answerOf, UNKNOWN_ANSWER } from './helpers/route-answers'
 
 type Row = Record<string, unknown>
@@ -41,8 +42,8 @@ function makeSupabase({
   membership = { data: { household_id: 'hh-1' } as Row | null, error: null as DbError },
   insertError = null as DbError,
   writeError = null as DbError,
-  // The write the database never answers.
-  noAnswer = undefined as 'insert' | 'update' | 'delete' | undefined,
+  // A reply for a write in place of its usual one.
+  replies = {} as Partial<Record<'insert' | 'update' | 'delete', unknown>>,
   // Called as an update or delete is done, so a test can move the clock on.
   onWrite = () => {},
 } = {}) {
@@ -55,7 +56,7 @@ function makeSupabase({
       eq: (col: string, val: unknown) => (entry.filters.push(['eq', col, val]), builder),
       then: (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) => {
         onWrite()
-        if (noAnswer === entry.op) return Promise.resolve(NO_ANSWER).then(resolve, reject)
+        if (replies[entry.op]) return Promise.resolve(replies[entry.op]).then(resolve, reject)
         const matched = GOALS.filter((g) => entry.filters.every(([, col, val]) => g[col as string] === val)).length
         const result = writeError ? { error: writeError, count: null } : { error: null, count: matched }
         const counted = (entry.options as { count?: string } | undefined)?.count === 'exact'
@@ -85,7 +86,7 @@ function makeSupabase({
         return {
           insert: (row: Row) => {
             calls.inserts.push(row)
-            return Promise.resolve(noAnswer === 'insert' ? NO_ANSWER : { error: insertError })
+            return Promise.resolve(replies.insert ?? { error: insertError })
           },
           update: (payload: Row, options?: unknown) => write({ op: 'update', payload, options, filters: [] }),
           delete: (options?: unknown) => write({ op: 'delete', options, filters: [] }),
@@ -212,13 +213,26 @@ describe('POST /api/goals', () => {
   })
 
   // #173: the goal may have been added. Answered as a refusal, GoalsList keeps the form filled, and
-  // goal names are not unique, so another Add would make the goal twice.
-  it('answers that it may not have saved when the database never answers the insert, and logs it', async () => {
-    const calls = makeSupabase({ noAnswer: 'insert' })
+  // goal names are not unique, so another Add would make the goal twice. A gateway's page in
+  // PostgREST's place is no answer either: the insert may have reached the database before it.
+  it.each([
+    ['no reply at all', NO_ANSWER],
+    ["a gateway's 502", GATEWAY_502],
+    ["Cloudflare's 520", GATEWAY_520],
+  ])('answers that it may not have saved when the insert gets %s, and logs it', async (_, reply) => {
+    const calls = makeSupabase({ replies: { insert: reply } })
     const res = await add()
     expect(await answerOf(res)).toEqual(UNKNOWN_ANSWER)
     expect(calls.inserts).toHaveLength(1)
-    expect(logs).toContainEqual(['[goals] add failed', { household_id: 'hh-1', code: '', message: 'TypeError: fetch failed' }])
+    expect(logs).toContainEqual(['[goals] add failed', expect.objectContaining({ household_id: 'hh-1', message: reply.error.message })])
+  })
+
+  // A refusal carries a code, 5xx or not, and nothing was written: the form keeps what was typed.
+  it('answers 500 for a refused insert whose status is a 5xx, since it carries a code', async () => {
+    makeSupabase({ replies: { insert: REFUSED_5XX } })
+    const res = await add()
+    expect(res.status).toBe(500)
+    expect(await errorOf(res)).toBe(TRY_AGAIN)
   })
 })
 
@@ -302,9 +316,16 @@ describe('PATCH /api/goals', () => {
 
   // #173: the amount may have been written.
   it('answers that it may not have saved when the database never answers the update', async () => {
-    makeSupabase({ noAnswer: 'update' })
+    makeSupabase({ replies: { update: NO_ANSWER } })
     const res = await update()
     expect(await answerOf(res)).toEqual(UNKNOWN_ANSWER)
+  })
+
+  it('answers 500 for a refused update whose status is a 5xx, since it carries a code', async () => {
+    makeSupabase({ replies: { update: REFUSED_5XX } })
+    const res = await update()
+    expect(res.status).toBe(500)
+    expect(await errorOf(res)).toBe(TRY_AGAIN)
   })
 })
 
@@ -351,8 +372,15 @@ describe('DELETE /api/goals', () => {
 
   // #173: the goal may be gone.
   it('answers that it may not have saved when the database never answers the delete', async () => {
-    makeSupabase({ noAnswer: 'delete' })
+    makeSupabase({ replies: { delete: NO_ANSWER } })
     const res = await remove()
     expect(await answerOf(res)).toEqual(UNKNOWN_ANSWER)
+  })
+
+  it('answers 500 for a refused delete whose status is a 5xx, since it carries a code', async () => {
+    makeSupabase({ replies: { delete: REFUSED_5XX } })
+    const res = await remove()
+    expect(res.status).toBe(500)
+    expect(await errorOf(res)).toBe('That goal could not be deleted. Please try again.')
   })
 })

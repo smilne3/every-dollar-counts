@@ -89,7 +89,7 @@ export async function PATCH(req: Request) {
     console.error('[reimbursable] update failed', { id: transactionId, code: error.code, message: error.message })
     // A mark the database never answered may have been written, so its outcome is unknown
     // (lib/lost-reply.ts): the editors say so and reload.
-    return unknownIfLost(status) ?? fail(500, TRY_AGAIN)
+    return unknownIfLost(status, error) ?? fail(500, TRY_AGAIN)
   }
   if (!count) {
     // A stale-card refusal: the editors reload on a 409 to show the latest.

@@ -12,7 +12,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 // - the item read matches on the column and value it is given and returns only the columns asked
 //   for, so reading the wrong row, or too few columns, starves the checks that follow;
 // - the delete resolves only once narrowed, and records how, so a delete of the wrong row cannot
-//   pass, and can go unanswered, as postgrest-js reports a request lost in flight (#173).
+//   pass. Each delete can get a reply of the test's, in turn: a request lost in flight, as
+//   postgrest-js reports it, or a 5xx refusal (#173).
 const { createClient, adminFrom, itemRemove, decrypt } = vi.hoisted(() => ({
   createClient: vi.fn(),
   adminFrom: vi.fn(),
@@ -26,7 +27,7 @@ vi.mock('@/lib/crypto', () => ({ decrypt }))
 
 import { AuthRetryableFetchError, type AuthError } from '@supabase/supabase-js'
 import { POST } from '@/app/api/plaid/remove-item/route'
-import { NO_ANSWER } from '../stubs/no-answer'
+import { NO_ANSWER, REFUSED_5XX } from '../stubs/no-answer'
 import { answerOf, UNKNOWN_ANSWER } from './helpers/route-answers'
 
 type Row = Record<string, unknown>
@@ -54,8 +55,8 @@ function makeStandIns({
   item = ITEM as Row | null,
   readError = null as DbError,
   deleteError = null as DbError,
-  // The database never answers the delete.
-  deleteUnanswered = false,
+  // Replies for the deletes in place of their usual one, first to last.
+  deleteReplies = [] as unknown[],
 } = {}) {
   const calls = { membership: [] as unknown[][], reads: [] as unknown[][], deletes: [] as unknown[][] }
   createClient.mockResolvedValue({
@@ -92,7 +93,7 @@ function makeStandIns({
       delete: () => ({
         eq: (col: string, val: unknown) => {
           calls.deletes.push(['eq', col, val])
-          return Promise.resolve(deleteUnanswered ? NO_ANSWER : { error: deleteError })
+          return Promise.resolve(deleteReplies.shift() ?? { error: deleteError })
         },
       }),
     }
@@ -290,11 +291,19 @@ describe('POST /api/plaid/remove-item: once Plaid may have removed it', () => {
   // transactions under it, or not. "Still in your list" would be a guess: BankList says it may or
   // may not have been disconnected and reloads to show which.
   it('answers that it may not have saved when the database never answers the delete, and logs it', async () => {
-    const calls = makeStandIns({ deleteUnanswered: true })
+    const calls = makeStandIns({ deleteReplies: [NO_ANSWER] })
     const res = await disconnect()
     expect(await answerOf(res)).toEqual(UNKNOWN_ANSWER)
     expect(itemRemove).toHaveBeenCalledExactlyOnceWith({ access_token: 'access-sandbox-1' })
     expect(calls.deletes).toEqual([['eq', 'id', 'item-1']])
     expect(logs).toContainEqual(['[plaid] remove-item delete failed', { itemId: 'item-1', code: '', message: 'TypeError: fetch failed' }])
+  })
+
+  // A refusal carries a code, 5xx or not: the row is still there, as the words say.
+  it('answers 500 for a refused delete whose status is a 5xx, since it carries a code, and says the bank is still listed', async () => {
+    makeStandIns({ deleteReplies: [REFUSED_5XX] })
+    const res = await disconnect()
+    expect(res.status).toBe(500)
+    expect(await errorOf(res)).toBe('That bank was disconnected at Plaid but is still in your list. Please try again.')
   })
 })

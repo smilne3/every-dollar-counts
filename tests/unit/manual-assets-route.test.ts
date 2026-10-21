@@ -7,8 +7,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 // The stand-in is strict, as in tests/unit/budgets-route.test.ts (#99, #101): the membership read
 // resolves only through .select().limit(1).maybeSingle() and projects the fixture to the columns it
 // asks for, so .single() (which errors on no row) or a narrowed select cannot pass, and the upsert
-// records exactly what it was given, and can go unanswered, as postgrest-js reports a request lost
-// in flight (#173).
+// records exactly what it was given, and can get a reply of the test's: a request lost in flight, as
+// postgrest-js reports it, or a 5xx refusal (#173).
 const { assertEnvMatchesDatabase } = vi.hoisted(() => ({ assertEnvMatchesDatabase: vi.fn() }))
 
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
@@ -22,7 +22,7 @@ vi.mock('@/lib/app-env', async (importOriginal) => ({
 import { AuthRetryableFetchError, type AuthError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
 import { POST } from '@/app/api/manual-assets/route'
-import { NO_ANSWER } from '../stubs/no-answer'
+import { NO_ANSWER, REFUSED_5XX } from '../stubs/no-answer'
 import { answerOf, UNKNOWN_ANSWER } from './helpers/route-answers'
 
 type Row = Record<string, unknown>
@@ -40,8 +40,8 @@ function makeSupabase({
   authError = null as AuthError | null,
   membership = { data: { household_id: 'hh-1' } as Row | null, error: null as DbError },
   upsertError = null as DbError,
-  // The database never answers the upsert.
-  noAnswer = false,
+  // A reply for the upsert in place of its usual one.
+  reply = undefined as unknown,
   // Called as the upsert is done, so a test can move the clock on.
   onWrite = () => {},
 } = {}) {
@@ -68,7 +68,7 @@ function makeSupabase({
           upsert: (row: Row, options: unknown) => {
             calls.upserts.push({ row, options })
             onWrite()
-            return Promise.resolve(noAnswer ? NO_ANSWER : { error: upsertError })
+            return Promise.resolve(reply ?? { error: upsertError })
           },
         }
       }
@@ -213,9 +213,17 @@ describe('POST /api/manual-assets', () => {
 
   // #173: the value may have been written, so the outcome is unknown, never a refusal.
   it('answers that it may not have saved when the database never answers the upsert, and logs it', async () => {
-    makeSupabase({ noAnswer: true })
+    makeSupabase({ reply: NO_ANSWER })
     const res = await save()
     expect(await answerOf(res)).toEqual(UNKNOWN_ANSWER)
     expect(logs).toContainEqual(['[manual-assets] upsert failed', { household_id: 'hh-1', code: '', message: 'TypeError: fetch failed' }])
+  })
+
+  // A refusal carries a code, 5xx or not, and nothing was written.
+  it('answers 500 for a refused upsert whose status is a 5xx, since it carries a code', async () => {
+    makeSupabase({ reply: REFUSED_5XX })
+    const res = await save()
+    expect(res.status).toBe(500)
+    expect(await errorOf(res)).toBe(TRY_AGAIN)
   })
 })

@@ -47,7 +47,7 @@ export async function POST(req: Request) {
     .insert({ household_id: hid, name: clean, pfc_primary: null, sort_order })
   // An add the database never answered may have landed, so its outcome is unknown
   // (lib/lost-reply.ts). Names are unique per household, so adding it again cannot make two.
-  if (error) return unknownIfLost(status) ?? NextResponse.json({ error: error.message }, { status: 400 })
+  if (error) return unknownIfLost(status, error) ?? NextResponse.json({ error: error.message }, { status: 400 })
   return NextResponse.json({ ok: true })
 }
 
@@ -70,7 +70,7 @@ export async function PATCH(req: Request) {
   // A rename the database never answered may have landed, so its outcome is unknown
   // (lib/lost-reply.ts), and the cascades below do not run. Their own errors are never read (#100),
   // so a lost reply there still answers ok.
-  if (error) return unknownIfLost(status) ?? NextResponse.json({ error: error.message }, { status: 400 })
+  if (error) return unknownIfLost(status, error) ?? NextResponse.json({ error: error.message }, { status: 400 })
   await supabase.from('transactions').update({ user_category: clean }).eq('user_category', oldName)
   await supabase.from('budgets').update({ category: clean }).eq('category', oldName)
   return NextResponse.json({ ok: true })

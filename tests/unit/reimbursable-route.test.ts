@@ -20,7 +20,7 @@ vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 import { AuthRetryableFetchError, type AuthError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
 import { PATCH } from '@/app/api/reimbursable/route'
-import { NO_ANSWER } from '../stubs/no-answer'
+import { NO_ANSWER, REFUSED_5XX } from '../stubs/no-answer'
 import { answerOf, UNKNOWN_ANSWER } from './helpers/route-answers'
 
 type Row = Record<string, unknown>
@@ -293,6 +293,14 @@ describe('PATCH /api/reimbursable', () => {
     const res = await mark()
     expect(await answerOf(res)).toEqual(UNKNOWN_ANSWER)
     expect(logs).toContainEqual(['[reimbursable] update failed', { id: 'txn-1', code: '', message: 'TypeError: fetch failed' }])
+  })
+
+  // A refusal carries a code, 5xx or not, and nothing was written.
+  it('answers 500 for a refused write whose status is a 5xx, since it carries a code', async () => {
+    makeSupabase({ update: REFUSED_5XX })
+    const res = await mark()
+    expect(res.status).toBe(500)
+    expect(await errorOf(res)).toBe(TRY_AGAIN)
   })
 
   // The row changed between the read and the write, or the update policy is missing (#73). Either

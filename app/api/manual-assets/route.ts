@@ -76,7 +76,7 @@ export async function POST(req: Request) {
   )
   if (error) {
     console.error('[manual-assets] upsert failed', { household_id, code: error.code, message: error.message })
-    return unknownIfLost(status) ?? fail(500, TRY_AGAIN)
+    return unknownIfLost(status, error) ?? fail(500, TRY_AGAIN)
   }
   // When the value was written, by the server's clock: HomeValueCard refills what it sent only from a
   // page that read the value after this, so the time is taken after the write, not before (#174).

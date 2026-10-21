@@ -52,7 +52,7 @@ vi.mock('@/lib/app-env', async (importOriginal) => ({
 
 import { EnvMismatchError } from '@/lib/app-env'
 import { PATCH, DELETE } from '@/app/api/category-rules/route'
-import { NO_ANSWER } from '../stubs/no-answer'
+import { NO_ANSWER, REFUSED_5XX } from '../stubs/no-answer'
 import { answerOf, UNKNOWN_ANSWER } from './helpers/route-answers'
 
 const CATS = [
@@ -151,6 +151,16 @@ describe('PATCH /api/category-rules (Change)', () => {
     log.mockRestore()
   })
 
+  // A refusal carries a code, 5xx or not, and nothing was written.
+  it('answers 500 for a refused write whose status is a 5xx, since it carries a code', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    db.write = REFUSED_5XX
+    const res = await change()
+    expect(res.status).toBe(500)
+    expect(await error(res)).toBe('That could not be saved. Please try again.')
+    log.mockRestore()
+  })
+
   it('answers 500 on a failed rule or categories read', async () => {
     db.rule = { data: null, error: { message: 'boom' } }
     expect((await change()).status).toBe(500)
@@ -215,6 +225,15 @@ describe('DELETE /api/category-rules (Remove)', () => {
     db.write = NO_ANSWER
     const res = await remove()
     expect(await answerOf(res)).toEqual(UNKNOWN_ANSWER)
+    log.mockRestore()
+  })
+
+  it('answers 500 for a refused delete whose status is a 5xx, since it carries a code', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    db.write = REFUSED_5XX
+    const res = await remove()
+    expect(res.status).toBe(500)
+    expect(await error(res)).toBe('That could not be saved. Please try again.')
     log.mockRestore()
   })
 

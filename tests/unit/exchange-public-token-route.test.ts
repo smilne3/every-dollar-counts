@@ -42,7 +42,7 @@ vi.mock('@/lib/app-env', async (importOriginal) => ({
 import { AuthRetryableFetchError, type AuthError } from '@supabase/supabase-js'
 import { POST, maxDuration } from '@/app/api/plaid/exchange-public-token/route'
 import { EXCHANGE_TIMEOUT_MS } from '@/components/plaid-link-context'
-import { NO_ANSWER } from '../stubs/no-answer'
+import { NO_ANSWER, REFUSED_5XX } from '../stubs/no-answer'
 import { answerOf, UNKNOWN_ANSWER } from './helpers/route-answers'
 
 type Row = Record<string, unknown>
@@ -241,6 +241,15 @@ describe('POST /api/plaid/exchange-public-token: the bank', () => {
     ])
     expect(storeAccounts).not.toHaveBeenCalled()
     expect(syncAndStore).not.toHaveBeenCalled()
+  })
+
+  // A refusal carries a code, 5xx or not: nothing was stored, so we hold the only copy of the token.
+  it('tears the Item down at Plaid when the insert is refused with a 5xx, since the refusal carries a code', async () => {
+    makeStandIns({ insertResult: REFUSED_5XX })
+    const res = await link()
+    expect(res.status).toBe(500)
+    expect(await errorOf(res)).toBe('Could not save that bank.')
+    expect(itemRemove).toHaveBeenCalledExactlyOnceWith({ access_token: 'access-sandbox-1' })
   })
 
   // Connected and stored: reporting a failure here would invite a duplicate link.

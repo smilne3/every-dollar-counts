@@ -117,7 +117,7 @@ export async function POST(req: Request) {
   // finishes it: itemRemove then finds it gone, which is swallowed above.
   if (error) {
     console.error('[plaid] remove-item delete failed', { itemId: item.id, code: error.code, message: error.message })
-    return unknownIfLost(status) ?? fail(500, 'That bank was disconnected at Plaid but is still in your list. Please try again.')
+    return unknownIfLost(status, error) ?? fail(500, 'That bank was disconnected at Plaid but is still in your list. Please try again.')
   }
 
   return NextResponse.json({ ok: true })

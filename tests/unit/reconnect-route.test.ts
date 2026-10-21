@@ -7,8 +7,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 // The stand-ins are strict, as in tests/unit/reimbursable-route.test.ts (#101): the membership read
 // resolves only through .limit(1).maybeSingle(); the bank read only through .eq().maybeSingle(),
 // matching on the value given and returning only the columns asked for; and the status write only
-// once narrowed, recording how. The status write can go unanswered, as postgrest-js reports a
-// request lost in flight (#173).
+// once narrowed, recording how. The status write can get a reply of the test's: a request lost in
+// flight, as postgrest-js reports it, or a 5xx refusal (#173).
 const { createClient, adminFrom, decrypt, storeAccounts, syncAndStore, assertEnvMatchesDatabase } = vi.hoisted(() => ({
   createClient: vi.fn(),
   adminFrom: vi.fn(),
@@ -31,7 +31,7 @@ vi.mock('@/lib/app-env', async (importOriginal) => ({
 import { AuthRetryableFetchError, type AuthError } from '@supabase/supabase-js'
 import { EnvMismatchError } from '@/lib/app-env'
 import { POST } from '@/app/api/plaid/reconnect/route'
-import { NO_ANSWER } from '../stubs/no-answer'
+import { NO_ANSWER, REFUSED_5XX } from '../stubs/no-answer'
 import { answerOf, UNKNOWN_ANSWER } from './helpers/route-answers'
 
 type Row = Record<string, unknown>
@@ -61,8 +61,8 @@ function makeStandIns({
   item = ITEM as Row | null,
   readError = null as DbError,
   writeError = null as DbError,
-  // The database never answers the status write.
-  noAnswer = false,
+  // A reply for the status write in place of its usual one.
+  reply = undefined as unknown,
 } = {}) {
   const calls = { reads: [] as unknown[][], writes: [] as { values: Row; filter: unknown[] }[] }
   createClient.mockResolvedValue({
@@ -94,7 +94,7 @@ function makeStandIns({
       update: (values: Row) => ({
         eq: (col: string, val: unknown) => {
           calls.writes.push({ values, filter: ['eq', col, val] })
-          return Promise.resolve(noAnswer ? NO_ANSWER : { error: writeError })
+          return Promise.resolve(reply ?? { error: writeError })
         },
       }),
     }
@@ -257,10 +257,19 @@ describe('POST /api/plaid/reconnect: the reconnect', () => {
   // #173: the flag may have been cleared. ReconnectButton says the reconnect may not have finished
   // and reloads to show whether the bank still needs it; the catch-up waits for the next Refresh.
   it('answers that it may not have saved when the database never answers the status write, and pulls nothing', async () => {
-    makeStandIns({ noAnswer: true })
+    makeStandIns({ reply: NO_ANSWER })
     const res = await reconnect()
     expect(await answerOf(res)).toEqual(UNKNOWN_ANSWER)
     expect(logs).toContainEqual(['[plaid] reconnect status write failed', { itemId: 'item-1', code: '', message: 'TypeError: fetch failed' }])
+    expect(storeAccounts).not.toHaveBeenCalled()
+  })
+
+  // A refusal carries a code, 5xx or not: the flag was not cleared, and reconnecting again is free.
+  it('answers 500 for a refused status write whose status is a 5xx, since it carries a code, and pulls nothing', async () => {
+    makeStandIns({ reply: REFUSED_5XX })
+    const res = await reconnect()
+    expect(res.status).toBe(500)
+    expect(await errorOf(res)).toBe(NOT_FINISHED)
     expect(storeAccounts).not.toHaveBeenCalled()
   })
 

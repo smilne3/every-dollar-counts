@@ -99,7 +99,7 @@ export async function POST(req: Request) {
       code: statusError.code,
       message: statusError.message,
     })
-    return unknownIfLost(httpStatus) ?? fail(500, NOT_FINISHED)
+    return unknownIfLost(httpStatus, statusError) ?? fail(500, NOT_FINISHED)
   }
 
   try {

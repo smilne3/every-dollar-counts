@@ -55,7 +55,7 @@ export async function POST(req: Request) {
   const { error, status } = await supabase.from('invites').upsert({ email, household_id }, { onConflict: 'email' })
   if (error) {
     console.error('[household/invite] upsert failed', { household_id, code: error.code, message: error.message })
-    return unknownIfLost(status) ?? fail(500, TRY_AGAIN)
+    return unknownIfLost(status, error) ?? fail(500, TRY_AGAIN)
   }
 
   return NextResponse.json({ ok: true })

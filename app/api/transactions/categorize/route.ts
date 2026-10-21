@@ -119,7 +119,7 @@ export async function POST(req: Request) {
     console.error('[categorize] update failed', error.message)
     // A pick the database never answered may have landed, so its outcome is unknown
     // (lib/lost-reply.ts). Nothing is learned from it: only a saved pick can teach (step 8).
-    return unknownIfLost(status) ?? NextResponse.json({ error: SAVE_FAILED }, { status: 500 })
+    return unknownIfLost(status, error) ?? NextResponse.json({ error: SAVE_FAILED }, { status: 500 })
   }
   if (!count) {
     // Usually the row changed underneath us. A missing update policy would also land here, which is
@@ -190,10 +190,10 @@ async function learn(
       )
       .select('id')
     if (error) {
-      // 23503 here is the category deleted between the read and the insert. One the database never
-      // answered (code '', lib/lost-reply.ts) may have made the rule, and still reads 'failed': the
-      // pick is saved either way, nothing here reaches the person, and the merchant's next pick
-      // finds the rule if it was made.
+      // 23503 here is the category deleted between the read and the insert. One whose reply was
+      // lost (lib/lost-reply.ts) may have made the rule, and still reads 'failed': the pick is saved
+      // either way, nothing here reaches the person, and the merchant's next pick finds the rule if
+      // it was made.
       console.error('[categorize] learn failed', {
         ...context,
         code: error.code,

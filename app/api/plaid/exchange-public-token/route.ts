@@ -144,7 +144,7 @@ export async function POST(req: Request) {
     // (lib/lost-reply.ts): LinkButton says the bank may have connected and reloads to show whether
     // it did. If the row did not commit, the token is now held nowhere, which is what the teardown
     // below exists to prevent, so the log names the Item for it to be removed by hand.
-    const unknown = unknownIfLost(insertStatus)
+    const unknown = unknownIfLost(insertStatus, itemErr)
     if (unknown) {
       console.error('[plaid] no answer storing item; kept at Plaid. If it is not in the list, remove it by hand', {
         itemId,

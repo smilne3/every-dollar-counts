@@ -53,7 +53,7 @@ export async function POST(req: Request) {
   // neither: it may have written the zone, so its outcome is unknown (lib/lost-reply.ts).
   if (error) {
     console.error('[household/timezone] update failed', { household_id, code: error.code, message: error.message })
-    return unknownIfLost(status) ?? fail(500, TRY_AGAIN)
+    return unknownIfLost(status, error) ?? fail(500, TRY_AGAIN)
   }
   if (!count) {
     console.error('[household/timezone] update matched no rows — is the update policy present?', { household_id })
