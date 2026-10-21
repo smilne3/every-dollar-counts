@@ -86,10 +86,12 @@ export default async function DashboardPage({
     // accounts for every bank it does not skip. Connect here would invite linking the same bank
     // again, which spends one of ten lifetime connections (#51), so it is never offered.
     //
-    // Only a bank that is syncing is promised its balances, with Refresh. One that isn't can't be
-    // counted on to send them (Refresh skips a broken login, and retries the rest without fixing
-    // what stopped them), so the card points to Settings for it instead. With both kinds, the card
-    // speaks for the syncing ones and the banner, first as always, for the rest.
+    // Only a bank Refresh can fetch from is promised its balances, with Refresh: one that is
+    // syncing, or whose bank only didn't respond last time, which Refresh retries (bySync, #186).
+    // The rest can't be counted on to send them (Refresh skips a broken login, and one that needs
+    // something done at the bank or to its setup fails again), so the card points to Settings for
+    // them instead. With both kinds, the card speaks for the first and the banner, first as always,
+    // for the rest.
     if (items.length > 0) {
       const { syncing, behind } = bySync(items)
       return (

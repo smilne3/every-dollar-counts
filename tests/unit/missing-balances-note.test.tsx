@@ -61,9 +61,9 @@ describe('MissingBalancesNote', () => {
     expect(said(container)).toBe("Your bank is connected, but its balances and transactions haven't arrived yet. Press Refresh to fetch them.")
   })
 
-  // Refresh skips a broken login and retries the rest without fixing what stopped them, so a bank
-  // that isn't syncing gets no promise and no Refresh. The banner above it links to Settings.
-  it.each(['needs_reconnect', 'action_at_bank', 'temporarily_unavailable', 'config_error'])(
+  // Refresh skips a broken login, and one that needs something done at the bank or to its setup
+  // fails again, so those get no promise and no Refresh. The banner above links to Settings.
+  it.each(['needs_reconnect', 'action_at_bank', 'config_error'])(
     'promises nothing for a bank that is %s, and offers no Refresh',
     (status) => {
       const { container } = render(
@@ -73,6 +73,21 @@ describe('MissingBalancesNote', () => {
       expect(screen.queryAllByRole('button')).toEqual([])
     }
   )
+
+  // #186: Refresh simply retries a bank that didn't respond last time, and Settings says to try
+  // Refresh later. So it is on its way, with the reason, and the button.
+  it("promises the balances of a bank that only didn't respond last time, and offers Refresh", () => {
+    const { container } = render(
+      <MissingBalancesNote
+        items={[bank('capone', 'Capital One'), bank('amex', 'Amex', 'temporarily_unavailable')]}
+        accounts={[accountAt('capone')]}
+      />
+    )
+    expect(said(container)).toBe(
+      "Amex is connected, but its balances and transactions haven't arrived yet. It didn't respond last time. Press Refresh to fetch them."
+    )
+    expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Refresh'])
+  })
 
   it("counts several banks that aren't syncing", () => {
     const { container } = render(

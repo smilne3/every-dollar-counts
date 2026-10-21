@@ -358,11 +358,11 @@ describe('Dashboard before a bank\'s balances arrive (#164)', () => {
     expect(order.indexOf(PageHeader)).toBe(1)
   })
 
-  // #172: a bank that isn't syncing can't be counted on to send its balances. Refresh skips a broken
-  // login and retries the rest without fixing what stopped them, so "on their way" and "Press
-  // Refresh" would be a promise it can't keep. The card promises nothing and points to Settings,
-  // and still never offers Connect.
-  it.each(['needs_reconnect', 'config_error', 'action_at_bank', 'temporarily_unavailable'])(
+  // #172: a bank Refresh can't help can't be counted on to send its balances. Refresh skips a broken
+  // login, and one that needs something done at the bank or to its setup fails again, so "on their
+  // way" and "Press Refresh" would be a promise it can't keep. The card promises nothing and points
+  // to Settings, and still never offers Connect.
+  it.each(['needs_reconnect', 'config_error', 'action_at_bank'])(
     'promises nothing for a bank that is %s, and points to Settings instead of Refresh',
     async (status) => {
       results.plaid_items = { data: [storedItem({ status })], error: null }
@@ -376,6 +376,19 @@ describe('Dashboard before a bank\'s balances arrive (#164)', () => {
       expect(renders(tree, LinkButton)).toBe(false)
     }
   )
+
+  // #186: Refresh simply retries a bank that didn't respond last time, so its balances are on their
+  // way, with the reason and Refresh. The banner above still says it isn't syncing.
+  it("promises the balances of a bank that only didn't respond last time, with Refresh", async () => {
+    results.plaid_items = { data: [storedItem({ status: 'temporarily_unavailable' })], error: null }
+    const tree = await render()
+    expect(emptyCard(tree).text).toBe(
+      "Your balances are on their way Capital One is connected, but its balances and transactions haven't arrived yet. It didn't respond last time. Press Refresh to fetch them."
+    )
+    expect(renders(tree, RefreshButton)).toBe(true)
+    expect(renders(tree, LinkButton)).toBe(false)
+    expect(bannerText(tree)).toBe("Capital One isn't syncing — see Settings. These figures may be out of date.")
+  })
 
   it('says how many banks need attention when none of them is syncing', async () => {
     results.plaid_items = {

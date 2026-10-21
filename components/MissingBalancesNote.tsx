@@ -9,9 +9,10 @@ import type { ItemSummary } from '@/lib/plaid-items'
 // Transactions, which read the accounts anyway. Not on Budgets, Trends or Reimbursable: they don't,
 // and reading them there would be one more wait before the page shows (#156).
 //
-// In the words the dashboard uses when no bank has accounts (#164), split the same way: Refresh for
-// the banks still syncing, whose balances it pulls; for the rest a promise of nothing, under the
-// "isn't syncing" banner, which links to Settings. Never Connect: the bank is linked, and linking it
+// In the words the dashboard uses when no bank has accounts (#164), split the same way (bySync):
+// Refresh for the banks it can fetch from, those syncing and those that only didn't respond last
+// time (#186); for the rest a promise of nothing, under the "isn't syncing" banner, which links to
+// Settings. Never Connect: the bank is linked, and linking it
 // again spends one of ten lifetime connections (#51). Quieter than that banner, since nothing is
 // broken. One component, so every page says the same thing, the same way. `refreshButton` is false
 // where the page already has a Refresh button, the dashboard's header, so there aren't two.

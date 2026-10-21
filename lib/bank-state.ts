@@ -9,11 +9,19 @@ export function notSyncing<T extends { status: string }>(items: T[]): T[] {
   return items.filter((i) => i.status !== 'ok')
 }
 
-// The banks split by notSyncing(), so no split can use a second definition: those still syncing,
-// and those behind.
+// Banks with no accounts yet, split by what Refresh can do for them (#186), for the three places that
+// word them: the #164 dashboard card, components/MissingBalancesNote.tsx and the Settings first line.
+// - `syncing`: Refresh can bring in their balances and transactions. They are syncing, or the bank
+//   only didn't respond last time (temporarily_unavailable), which Refresh simply retries
+//   (lib/sync-policy.ts).
+// - `behind`: Refresh can't. It skips a bank whose login broke, and one that needs something done at
+//   the bank or to its setup fails again the same way. Settings says what each one needs. So does a
+//   status this code has never seen: it is promised nothing.
+// notSyncing() stays the definition for the banner and the average (#135). They ask something else:
+// whether a bank's figures are current, and a bank that didn't respond last time is behind on them.
 export function bySync<T extends { status: string }>(items: T[]): { syncing: T[]; behind: T[] } {
-  const behind = notSyncing(items)
-  return { syncing: items.filter((i) => !behind.includes(i)), behind }
+  const fetchable = (i: T) => i.status === 'ok' || i.status === 'temporarily_unavailable'
+  return { syncing: items.filter(fetchable), behind: items.filter((i) => !fetchable(i)) }
 }
 
 // The banks with no accounts yet (#170): connected, but their first balance pull failed (#164), so
@@ -31,18 +39,29 @@ export function withoutAccounts<T extends { id: string }>(items: T[], accounts: 
 // keeps a bank whose first balance pull failed, and tells the person to press Refresh; until the
 // balances arrive it has no accounts rows, and so no transactions either (#170). Read as "no
 // banks", that state invited linking the same bank again, which spends one of ten lifetime
-// connections (#51). Only for banks that are syncing (bySync), whose balances Refresh pulls. For one
-// bank or more.
-export function balancesPending(items: { institution_name: string | null }[]): string {
-  return items.length === 1
-    ? `${items[0].institution_name ?? 'Your bank'} is connected, but its balances and transactions haven't arrived yet.`
-    : `${items.length} banks are connected, but their balances and transactions haven't arrived yet.`
+// connections (#51). Only for banks whose balances Refresh can pull (bySync). One whose bank didn't
+// respond last time is told so, briefly, so the wait has a reason (#186). For one bank or more.
+export function balancesPending(items: { institution_name: string | null; status: string }[]): string {
+  const quiet = items.filter((i) => i.status === 'temporarily_unavailable')
+  if (items.length === 1) {
+    const why = quiet.length ? " It didn't respond last time." : ''
+    return `${items[0].institution_name ?? 'Your bank'} is connected, but its balances and transactions haven't arrived yet.${why}`
+  }
+  const why =
+    quiet.length === 0
+      ? ''
+      : quiet.length === items.length
+        ? " They didn't respond last time."
+        : quiet.length === 1
+          ? ` ${quiet[0].institution_name ?? 'One of them'} didn't respond last time.`
+          : ` ${quiet.length} of them didn't respond last time.`
+  return `${items.length} banks are connected, but their balances and transactions haven't arrived yet.${why}`
 }
 
-// The same for banks with no accounts that aren't syncing, and it promises nothing. Refresh skips a
-// bank whose login broke, and retries the rest without fixing what stopped them, so their balances
-// are not on their way; Settings says what each one needs. `inSettings` says where, for a page
-// other than Settings.
+// The same for banks with no accounts that Refresh can't help (bySync), and it promises nothing.
+// Refresh skips a bank whose login broke, and one that needs something done at the bank or to its
+// setup fails again, so their balances are not on their way; Settings says what each one needs.
+// `inSettings` says where, for a page other than Settings.
 export function balancesBlocked(items: { institution_name: string | null }[], { inSettings = false } = {}): string {
   const where = inSettings ? ' in Settings' : ''
   return items.length === 1
