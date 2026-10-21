@@ -51,6 +51,21 @@ describe('app/(app)/error.tsx', () => {
     )
   })
 
+  // #130: in production the message is replaced ("Minified React error #441"), and only the digest
+  // matches the screen to the server's log line.
+  it("shows a server error's digest, in small print", () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const props: NextErrorProps = { error: serverError('2817436171'), reset: vi.fn(), retry: vi.fn() }
+    render(<AppSegmentError {...props} />)
+    expect(screen.getByText('Error ID 2817436171').className).toContain('text-xs')
+  })
+
+  it('shows no digest line for an error without one', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const props: NextErrorProps = { error: new Error('boom'), reset: vi.fn(), retry: vi.fn() }
+    render(<AppSegmentError {...props} />)
+    expect(screen.queryByText(/^Error ID/)).toBeNull()
+  })
 })
 
 // An error a server component threw, as the browser receives it in production: the message

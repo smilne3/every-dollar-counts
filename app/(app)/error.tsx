@@ -19,6 +19,10 @@ import { Card } from '@/components/ui/Card'
 // `retry`, not `unstable_retry`: Next 16.3 made the prop stable under its new name, and the old one is
 // never passed, so a button calling it does nothing. tests/unit/app-error-boundary.test.tsx holds these
 // props to the ones Next's error boundary passes (its ErrorInfo type).
+//
+// In production a server error's message is replaced ("Minified React error #441"), so the digest
+// is shown too, in small print: it is how a screenshot is matched to the server's log line, where
+// Next logs the read's own message, "could not read <what>: …", with it (#130).
 export default function AppSegmentError({
   error,
   retry,
@@ -44,6 +48,7 @@ export default function AppSegmentError({
             {error.message}
           </p>
         )}
+        {error.digest && <p className="mt-3 text-xs text-muted">Error ID {error.digest}</p>}
         <button
           type="button"
           onClick={() => retry()}
