@@ -11,6 +11,7 @@ import {
   redirectedToLogin,
   refused,
   replyWith,
+  unanswered,
   useFakeSaveClock,
 } from './helpers/save-replies'
 import { useMemoryStorage } from './helpers/memory-storage'
@@ -174,6 +175,8 @@ describe('ReconnectButton: finishing a reconnection', () => {
   it.each([
     ['a gateway error page', () => answering(badGateway)],
     ['a request that fails in flight', () => offline()],
+    // The reconnect route's own answer when the database never answered its write (#173).
+    ["the route's word that the database never answered", () => answering(unanswered)],
   ])('after %s, says it may not have finished and reloads', async (_, fetchMock) => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.stubGlobal('fetch', fetchMock())

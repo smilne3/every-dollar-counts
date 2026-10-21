@@ -11,6 +11,7 @@ import {
   redirectedToLogin,
   refused,
   saved,
+  unanswered,
   useFakeSaveClock,
 } from './helpers/save-replies'
 
@@ -211,6 +212,8 @@ describe('CategoryManager saves', () => {
     ['a 200 without ok: true', () => answering(() => new Response('{}', { headers: { 'content-type': 'application/json' } })), 'That could not be saved.', 0],
     ['a gateway error page', () => answering(badGateway), 'It may not have saved. Showing the latest.', 1],
     ['a request that fails in flight', () => offline(), 'It may not have saved. Showing the latest.', 1],
+    // The route's own answer when the database never answered its write (#173).
+    ["the route's word that the database never answered", () => answering(unanswered), 'It may not have saved. Showing the latest.', 1],
   ])('after %s, keeps the typed name, says why and re-enables', async (_, fetchMock, message, reloads) => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.stubGlobal('fetch', fetchMock())

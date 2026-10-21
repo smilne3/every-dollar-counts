@@ -10,6 +10,7 @@ import {
   redirectedToLogin,
   refused,
   saved,
+  unanswered,
   useFakeSaveClock,
 } from './helpers/save-replies'
 
@@ -134,6 +135,8 @@ describe('ReimbursableCheckbox', () => {
     // The #103 bug: any OK reply used to count as saved.
     ['a 200 without ok: true', () => new Response('{}', { headers: { 'content-type': 'application/json' } }), 'That could not be saved.', 0],
     ['a gateway error page', badGateway, 'It may not have saved. Showing the latest.', 1],
+    // The route's own answer when the database never answered its write (#173).
+    ["the route's word that the database never answered", unanswered, 'It may not have saved. Showing the latest.', 1],
   ])('after %s, takes the tick back, says why and stops being busy', async (_, reply, message, reloads) => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const onBusyChange = vi.fn()

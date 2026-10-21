@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, cleanup, act } from '@testing-library/react'
 import PlaidOAuthPage from '@/app/plaid/oauth/page'
 import { savePendingLink } from '@/components/plaid-link-context'
-import { answering, badGateway, offline, redirectedToLogin, refused, replyWith } from './helpers/save-replies'
+import { answering, badGateway, offline, redirectedToLogin, refused, replyWith, unanswered } from './helpers/save-replies'
 import { useMemoryStorage } from './helpers/memory-storage'
 
 // /plaid/oauth, where an OAuth bank (Wells Fargo, Chase…) returns the person (#165). Link resumes
@@ -87,6 +87,8 @@ describe('Plaid OAuth return page', () => {
   it.each([
     ['a gateway error page', () => answering(badGateway)],
     ['a request that fails in flight', () => offline()],
+    // The exchange route's own answer when the database never answered its insert (#173).
+    ["the route's word that the database never answered", () => answering(unanswered)],
   ])('after %s, says it could not confirm the connection, never that it failed', async (_, fetchMock) => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.stubGlobal('fetch', fetchMock())
@@ -133,6 +135,8 @@ describe('Plaid OAuth return page, back from a Reconnect', () => {
   it.each([
     ['a gateway error page', () => answering(badGateway)],
     ['a request that fails in flight', () => offline()],
+    // The reconnect route's own answer when the database never answered its write (#173).
+    ["the route's word that the database never answered", () => answering(unanswered)],
   ])('after %s, says the reconnect could not be confirmed, with no slot warning', async (_, fetchMock) => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.stubGlobal('fetch', fetchMock())

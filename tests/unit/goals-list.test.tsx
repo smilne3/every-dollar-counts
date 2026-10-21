@@ -11,6 +11,7 @@ import {
   refused,
   saved,
   savedAt,
+  unanswered,
   useFakeSaveClock,
 } from './helpers/save-replies'
 
@@ -165,6 +166,8 @@ describe('GoalsList saves', () => {
   const unknown = [
     ['a gateway error page', () => answering(badGateway)],
     ['a request that fails in flight', () => offline()],
+    // The route's own answer when the database never answered its write (#173).
+    ["the route's word that the database never answered", () => answering(unanswered)],
   ] as const
 
   describe('add', () => {
@@ -600,6 +603,7 @@ describe('GoalsList saves', () => {
       ['a refusal because the goal is gone', () => answering(() => refused(404, 'That goal was already deleted.')), 'That goal was already deleted.', 1],
       ['a gateway error page', () => answering(badGateway), 'It may not have saved. Showing the latest.', 1],
       ['a request that fails in flight', () => offline(), 'It may not have saved. Showing the latest.', 1],
+      ["the route's word that the database never answered", () => answering(unanswered), 'It may not have saved. Showing the latest.', 1],
     ])('after %s, says why on that goal and re-enables', async (_, fetchMock, message, reloads) => {
       vi.spyOn(console, 'error').mockImplementation(() => {})
       vi.stubGlobal('fetch', fetchMock())

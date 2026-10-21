@@ -9,6 +9,7 @@ import {
   redirectedToLogin,
   refused,
   replyWith,
+  unanswered,
   useFakeSaveClock,
 } from './helpers/save-replies'
 import { useMemoryStorage } from './helpers/memory-storage'
@@ -86,6 +87,8 @@ describe('completePendingLink: a new bank', () => {
     ['a gateway error page', () => answering(badGateway)],
     ['a request that fails in flight', () => offline()],
     ['an OK reply that is not the route’s answer', () => answering(() => replyWith({}))],
+    // The exchange route's own answer when the database never answered its insert (#173).
+    ["the route's word that the database never answered", () => answering(unanswered)],
   ])('after %s, reports it unknown, not failed, and keeps the pending link', async (_, fetchMock) => {
     newBank()
     vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -144,6 +147,8 @@ describe('completePendingLink: a reconnect', () => {
   it.each([
     ['a gateway error page', () => answering(badGateway)],
     ['a request that fails in flight', () => offline()],
+    // The reconnect route's own answer when the database never answered its write (#173).
+    ["the route's word that the database never answered", () => answering(unanswered)],
   ])('after %s, reports it unknown', async (_, fetchMock) => {
     reconnecting()
     vi.spyOn(console, 'error').mockImplementation(() => {})

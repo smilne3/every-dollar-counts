@@ -10,6 +10,7 @@ import {
   redirectedToLogin,
   refused,
   saved,
+  unanswered,
   useFakeSaveClock,
 } from './helpers/save-replies'
 
@@ -73,6 +74,8 @@ describe('InvitePartnerForm saves', () => {
   it.each([
     ['a gateway error page', () => answering(badGateway)],
     ['a request that fails in flight', () => offline()],
+    // The route's own answer when the database never answered its write (#173).
+    ["the route's word that the database never answered", () => answering(unanswered)],
   ])('after %s, says it may not have saved, keeps the address and asks for another try', async (_, fetchMock) => {
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.stubGlobal('fetch', fetchMock())

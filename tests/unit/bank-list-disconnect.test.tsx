@@ -10,6 +10,7 @@ import {
   redirectedToLogin,
   refused,
   saved,
+  unanswered,
   useFakeSaveClock,
 } from './helpers/save-replies'
 
@@ -114,6 +115,8 @@ describe('BankList Disconnect', () => {
   it.each([
     ['a gateway error page', () => answering(badGateway)],
     ['a request that fails in flight', () => offline()],
+    // The route's own answer when the database never answered its delete (#173).
+    ["the route's word that the database never answered", () => answering(unanswered)],
   ])('after %s, says it may or may not have been disconnected, and reloads', async (_, fetchMock) => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.stubGlobal('fetch', fetchMock())

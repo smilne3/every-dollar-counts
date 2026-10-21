@@ -11,6 +11,7 @@ import {
   redirectedToLogin,
   refused,
   replyWith,
+  unanswered,
   useFakeSaveClock,
 } from './helpers/save-replies'
 import { useMemoryStorage } from './helpers/memory-storage'
@@ -189,6 +190,8 @@ describe('LinkButton: finishing a connection', () => {
   it.each([
     ['a gateway error page', () => answering(badGateway)],
     ['a request that fails in flight', () => offline()],
+    // The exchange route's own answer when the database never answered its insert (#173).
+    ["the route's word that the database never answered", () => answering(unanswered)],
   ])('after %s, says the bank may have connected, never that it failed, and reloads', async (_, fetchMock) => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.stubGlobal('fetch', fetchMock())
