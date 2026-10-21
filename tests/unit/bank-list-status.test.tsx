@@ -27,15 +27,25 @@ function lineFor(name: string): HTMLElement {
 
 const NO_ACCOUNTS_YET = 'Connected, but its balances and transactions haven’t arrived yet. Refresh will fetch them.'
 
-// Each status that isn't ok, and its line.
+// Each status that isn't ok, and its line. Settings has no Refresh button (the dashboard has), so a
+// line that needs Refresh says what Refresh will do rather than to press it (#189, #192).
 const NOT_OK: [string, string, string][] = [
-  ['temporarily_unavailable', 'INSTITUTION_DOWN', 'This bank didn’t respond last time. Nothing to do — try Refresh later.'],
-  // #189: a sync that failed on this app's own side. Settings has no Refresh button, so it says
-  // what Refresh will do rather than to press it.
+  ['temporarily_unavailable', 'INSTITUTION_DOWN', 'This bank didn’t respond last time. Nothing to do — the next Refresh will try again.'],
+  // #189: a sync that failed on this app's own side.
   ['temporarily_unavailable', 'APP_ERROR', 'This app couldn’t save this bank’s latest data. Refresh will try again.'],
   ['needs_reconnect', 'ITEM_LOGIN_REQUIRED', 'Connection lost — reconnect to resume syncing.'],
-  ['action_at_bank', 'ITEM_LOCKED', 'Your account is locked. Unlock it on the bank’s website, then press Refresh.'],
+  ['action_at_bank', 'ITEM_LOCKED', 'Your account is locked. Unlock it on the bank’s website, then Refresh will resume syncing.'],
   ['config_error', 'ENV_MISMATCH', "Something is wrong with this connection's setup (ENV_MISMATCH). Reconnecting won't fix it."],
+]
+
+// The rest of the codes that need something done at the bank, and one this code has never seen.
+const AT_BANK: [string, string][] = [
+  ['PASSWORD_RESET_REQUIRED', 'The bank wants a new password. Reset it on their website, then Refresh will resume syncing.'],
+  ['USER_SETUP_REQUIRED', 'The bank needs you to finish something on their website, then Refresh will resume syncing.'],
+  ['INSUFFICIENT_CREDENTIALS', 'The bank sign-in wasn’t completed. Try connecting again.'],
+  ['ITEM_NOT_SUPPORTED', 'This bank can’t share this account with Plaid.'],
+  ['NO_ACCOUNTS', 'No open accounts were found at this bank.'],
+  ['A_CODE_FROM_LATER', 'This bank needs something from you on their website, then Refresh will resume syncing.'],
 ]
 
 describe("BankList: each bank's line", () => {
@@ -43,6 +53,23 @@ describe("BankList: each bank's line", () => {
   it.each(all)('for a bank that is %s (%s), says so', (status, detail, line) => {
     render(<BankList items={[bank(status, detail)]} withoutAccounts={[]} slotsUsed={6} lifetimeSlots={10} />)
     expect(lineFor('Amex').textContent).toBe(line)
+  })
+
+  it.each(AT_BANK)('for a bank that needs something done at the bank (%s), says what', (detail, line) => {
+    render(<BankList items={[bank('action_at_bank', detail)]} withoutAccounts={[]} slotsUsed={6} lifetimeSlots={10} />)
+    expect(lineFor('Amex').textContent).toBe(line)
+  })
+
+  // Not "press Refresh", "try Refresh later" or "then Refresh.": in a line, Refresh is only ever what
+  // will act. With no accounts yet, so an ok bank's line is the one that mentions Refresh.
+  const everyLine: [string, string | null][] = [
+    ['ok', null],
+    ...NOT_OK.map(([status, detail]): [string, string] => [status, detail]),
+    ...AT_BANK.map(([detail]): [string, string] => ['action_at_bank', detail]),
+  ]
+  it.each(everyLine)('never says to press a Refresh button, which Settings does not have (%s, %s)', (status, detail) => {
+    render(<BankList items={[bank(status, detail)]} withoutAccounts={['item-1']} slotsUsed={6} lifetimeSlots={10} />)
+    expect(lineFor('Amex').textContent).not.toMatch(/Refresh(?! will)/)
   })
 
   // Nothing the person can fix themselves, so quiet, like a bank that didn't respond.

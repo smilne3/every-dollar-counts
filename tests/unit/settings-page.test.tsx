@@ -327,7 +327,7 @@ describe('Settings: a failed read says so in its own card (#91)', () => {
     // Said twice before: once in a first line naming the bank, once more in its line in the list.
     it.each([
       ['ok', /haven.t arrived/g, 'Connected, but its balances and transactions haven’t arrived yet. Refresh will fetch them.'],
-      ['temporarily_unavailable', /didn.t respond/g, 'This bank didn’t respond last time. Nothing to do — try Refresh later.'],
+      ['temporarily_unavailable', /didn.t respond/g, 'This bank didn’t respond last time. Nothing to do — the next Refresh will try again.'],
     ])('says once what is wrong with a bank that is %s and has no accounts yet', async (status, phrase, line) => {
       results.plaid_items = { data: [{ ...capitalOne, status }], error: null }
       const read = readBanksCard(await SettingsPage())

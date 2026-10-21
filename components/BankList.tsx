@@ -15,11 +15,14 @@ const MAY_HAVE_DISCONNECTED = 'That bank may or may not have been disconnected. 
 
 // Plaid's own wording for the codes that need action at the bank. A Reconnect button for these
 // would just fail again and push the user toward a relink, which spends an unrefundable slot.
+// These lines show only on Settings, which has no Refresh button (the dashboard has), so each says
+// what Refresh will do, not to press it (#192).
 const AT_BANK_COPY: Record<string, string> = {
-  ITEM_LOCKED: 'Your account is locked. Unlock it on the bank’s website, then press Refresh.',
+  ITEM_LOCKED: 'Your account is locked. Unlock it on the bank’s website, then Refresh will resume syncing.',
   PASSWORD_RESET_REQUIRED:
-    'The bank wants a new password. Reset it on their website, then press Refresh.',
-  USER_SETUP_REQUIRED: 'The bank needs you to finish something on their website, then Refresh.',
+    'The bank wants a new password. Reset it on their website, then Refresh will resume syncing.',
+  USER_SETUP_REQUIRED:
+    'The bank needs you to finish something on their website, then Refresh will resume syncing.',
   INSUFFICIENT_CREDENTIALS: 'The bank sign-in wasn’t completed. Try connecting again.',
   ITEM_NOT_SUPPORTED: 'This bank can’t share this account with Plaid.',
   NO_ACCOUNTS: 'No open accounts were found at this bank.',
@@ -37,15 +40,14 @@ function statusLine(item: ItemSummary, noAccounts: boolean) {
         tone: 'coral',
         text:
           AT_BANK_COPY[item.status_detail ?? ''] ??
-          'This bank needs something from you on their website, then press Refresh.',
+          'This bank needs something from you on their website, then Refresh will resume syncing.',
       }
     case 'temporarily_unavailable':
       // APP_ERROR is a sync that failed on this app's own side, such as a database write, not the
-      // bank's or Plaid's (#189). Settings has no Refresh button (the dashboard has), so the line says
-      // what Refresh will do, not to press it here.
+      // bank's or Plaid's (#189). Both lines say what Refresh will do, as above.
       return item.status_detail === 'APP_ERROR'
         ? { tone: 'muted', text: 'This app couldn’t save this bank’s latest data. Refresh will try again.' }
-        : { tone: 'muted', text: 'This bank didn’t respond last time. Nothing to do — try Refresh later.' }
+        : { tone: 'muted', text: 'This bank didn’t respond last time. Nothing to do — the next Refresh will try again.' }
     case 'config_error':
       return {
         tone: 'coral',
