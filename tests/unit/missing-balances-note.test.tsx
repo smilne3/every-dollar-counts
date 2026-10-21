@@ -8,7 +8,12 @@ import { MissingBalancesNote } from '@/components/MissingBalancesNote'
 
 afterEach(cleanup)
 
-const bank = (id: string, institution_name: string | null, status = 'ok') => ({ id, institution_name, status })
+const bank = (id: string, institution_name: string | null, status = 'ok', status_detail: string | null = null) => ({
+  id,
+  institution_name,
+  status,
+  status_detail,
+})
 const accountAt = (plaid_item_id: string) => ({ plaid_item_id })
 
 // What the note says, or '' when it renders nothing.
@@ -86,6 +91,19 @@ describe('MissingBalancesNote', () => {
     expect(said(container)).toBe(
       "Amex is connected, but its balances and transactions haven't arrived yet. It didn't respond last time. Press Refresh to fetch them."
     )
+    expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Refresh'])
+  })
+
+  // #189: one whose sync failed on this app's own side is retried by Refresh all the same, and the
+  // note doesn't blame the bank for it. Settings says whose it was.
+  it("promises the balances of a bank whose sync failed on this app's side, without blaming the bank", () => {
+    const { container } = render(
+      <MissingBalancesNote
+        items={[bank('capone', 'Capital One'), bank('amex', 'Amex', 'temporarily_unavailable', 'APP_ERROR')]}
+        accounts={[accountAt('capone')]}
+      />
+    )
+    expect(said(container)).toBe("Amex is connected, but its balances and transactions haven't arrived yet. Press Refresh to fetch them.")
     expect(screen.getAllByRole('button').map((b) => b.textContent)).toEqual(['Refresh'])
   })
 

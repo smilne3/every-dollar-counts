@@ -40,9 +40,12 @@ export function withoutAccounts<T extends { id: string }>(items: T[], accounts: 
 // balances arrive it has no accounts rows, and so no transactions either (#170). Read as "no
 // banks", that state invited linking the same bank again, which spends one of ten lifetime
 // connections (#51). Only for banks whose balances Refresh can pull (bySync). One whose bank didn't
-// respond last time is told so, briefly, so the wait has a reason (#186). For one bank or more.
-export function balancesPending(items: { institution_name: string | null; status: string }[]): string {
-  const quiet = items.filter((i) => i.status === 'temporarily_unavailable')
+// respond last time is told so, briefly, so the wait has a reason (#186). Not one whose sync failed
+// on this app's own side (APP_ERROR, #189): that wasn't the bank. For one bank or more.
+export function balancesPending(
+  items: { institution_name: string | null; status: string; status_detail: string | null }[]
+): string {
+  const quiet = items.filter((i) => i.status === 'temporarily_unavailable' && i.status_detail !== 'APP_ERROR')
   if (items.length === 1) {
     const why = quiet.length ? " It didn't respond last time." : ''
     return `${items[0].institution_name ?? 'Your bank'} is connected, but its balances and transactions haven't arrived yet.${why}`

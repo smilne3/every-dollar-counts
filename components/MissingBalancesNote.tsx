@@ -21,7 +21,7 @@ export function MissingBalancesNote({
   accounts,
   refreshButton = true,
 }: {
-  items: Pick<ItemSummary, 'id' | 'institution_name' | 'status'>[]
+  items: Pick<ItemSummary, 'id' | 'institution_name' | 'status' | 'status_detail'>[]
   accounts: { plaid_item_id: string }[]
   refreshButton?: boolean
 }) {

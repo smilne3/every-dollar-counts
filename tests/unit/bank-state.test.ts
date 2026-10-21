@@ -1,7 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import { balancesPending, bySync, notSyncing } from '@/lib/bank-state'
 
-const bank = (institution_name: string | null, status: string) => ({ institution_name, status })
+const bank = (institution_name: string | null, status: string, status_detail: string | null = null) => ({
+  institution_name,
+  status,
+  status_detail,
+})
 
 // What the pages say about a bank with no accounts yet is split by what Refresh can do for it
 // (#186). The sync route retries a bank that only didn't respond last time (lib/sync-policy.ts),
@@ -52,5 +56,16 @@ describe('balancesPending', () => {
     expect(balancesPending(banks)).toBe(
       `${banks.length} banks are connected, but their balances and transactions haven't arrived yet.${why}`
     )
+  })
+
+  // #189: the sync route records a failure of this app's own as APP_ERROR, with the same status.
+  // The bank may well have answered, so it isn't said not to have.
+  it("doesn't say a bank whose sync failed on this app's side didn't respond", () => {
+    expect(balancesPending([bank('Amex', 'temporarily_unavailable', 'APP_ERROR')])).toBe(
+      "Amex is connected, but its balances and transactions haven't arrived yet."
+    )
+    expect(
+      balancesPending([bank('Amex', 'temporarily_unavailable', 'APP_ERROR'), bank('Chase', 'temporarily_unavailable', 'INSTITUTION_DOWN')])
+    ).toBe("2 banks are connected, but their balances and transactions haven't arrived yet. Chase didn't respond last time.")
   })
 })

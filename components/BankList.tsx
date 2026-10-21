@@ -37,7 +37,12 @@ function statusLine(item: ItemSummary) {
           'This bank needs something from you on their website, then press Refresh.',
       }
     case 'temporarily_unavailable':
-      return { tone: 'muted', text: 'This bank didn’t respond last time. Nothing to do — try Refresh later.' }
+      // APP_ERROR is a sync that failed on this app's own side, such as a database write, not the
+      // bank's or Plaid's (#189). Settings has no Refresh button (the dashboard has), so the line says
+      // what Refresh will do, not to press it here.
+      return item.status_detail === 'APP_ERROR'
+        ? { tone: 'muted', text: 'This app couldn’t save this bank’s latest data. Refresh will try again.' }
+        : { tone: 'muted', text: 'This bank didn’t respond last time. Nothing to do — try Refresh later.' }
     case 'config_error':
       return {
         tone: 'coral',
