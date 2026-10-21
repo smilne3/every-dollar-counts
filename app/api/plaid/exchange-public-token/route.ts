@@ -9,6 +9,7 @@ import { storeAccounts, syncAndStore } from '@/lib/ingest'
 import { recordSlotUsed } from '@/lib/plaid-slots'
 import { shouldSyncTransactions } from '@/lib/sync-policy'
 import { assertEnvMatchesDatabase, envGuardResponse } from '@/lib/app-env'
+import { unknownIfLost } from '@/lib/lost-reply'
 
 // The longest this route may run, in seconds (#165). The browser waits longer than this before it
 // says the bank may have connected (EXCHANGE_TIMEOUT_MS, components/plaid-link-context.ts), so by
@@ -69,7 +70,8 @@ export async function POST(req: Request) {
 
   // THE ITEM ALREADY EXISTS AT PLAID by the time this route runs — Link created it the moment the
   // user finished at their bank. Everything below is us catching up. That asymmetry is why every
-  // failure path here has to be loud and has to clean up after itself.
+  // failure path here has to be loud and, unless the bank may have been stored, has to clean up
+  // after itself.
   let accessToken: string
   let itemId: string
   try {
@@ -91,7 +93,7 @@ export async function POST(req: Request) {
   // BEFORE the exchange would not leave the slot unspent; it would only forfeit the one access
   // token /item/remove could ever use, leaving a live authorization against a real bank login
   // that nothing can revoke. The slot is gone either way, so this path takes the token and tears
-  // the Item down, exactly like the insert-failure path below. The guard that actually prevents
+  // the Item down, exactly like a refused insert below. The guard that actually prevents
   // the cost is in create-link-token: it refuses before Link opens, so no Item is ever created.
   // This one is the backstop for a database that changed identity mid-flow.
   try {
@@ -119,7 +121,7 @@ export async function POST(req: Request) {
     })
   }
 
-  const { data: item, error: itemErr } = await supabaseAdmin
+  const { data: item, error: itemErr, status: insertStatus } = await supabaseAdmin
     .from('plaid_items')
     .insert({
       household_id,
@@ -134,11 +136,27 @@ export async function POST(req: Request) {
     .select('id')
     .single()
 
-  // If we cannot store it, we hold the only copy of the access token. Abandoning it here would
-  // leave a live connection to a real bank that nothing can ever revoke, and would silently spend
-  // one of ten unrefundable slots. Tear it down at Plaid; log the id either way so it can be
-  // removed by hand if that also fails.
   if (itemErr || !item) {
+    // An insert the database never answered may have stored the bank, token and all (#173). Torn
+    // down at Plaid, a stored row would be a dead bank whose next sync fails, and told "Could not
+    // save that bank.", LinkButton would not reload to show it, so the person would link it again
+    // and spend another of the ten connections (#51). So the Item stays, and the outcome is unknown
+    // (lib/lost-reply.ts): LinkButton says the bank may have connected and reloads to show whether
+    // it did. If the row did not commit, the token is now held nowhere, which is what the teardown
+    // below exists to prevent, so the log names the Item for it to be removed by hand.
+    const unknown = unknownIfLost(insertStatus)
+    if (unknown) {
+      console.error('[plaid] no answer storing item; kept at Plaid. If it is not in the list, remove it by hand', {
+        itemId,
+        message: itemErr?.message,
+      })
+      return unknown
+    }
+
+    // Refused, it is not stored, and we hold the only copy of the access token. Abandoning it here
+    // would leave a live connection to a real bank that nothing can ever revoke, and would silently
+    // spend one of ten unrefundable slots. Tear it down at Plaid; log the id either way so it can be
+    // removed by hand if that also fails.
     console.error('[plaid] failed to store item', { itemId, code: itemErr?.code, message: itemErr?.message })
     try {
       await plaidClient.itemRemove({ access_token: accessToken })

@@ -7,7 +7,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 //
 // The stand-ins are strict, as in tests/unit/reimbursable-route.test.ts (#101): the membership read
 // resolves only through .limit(1).maybeSingle(), and the insert only through .select('id').single(),
-// recording the row it was given.
+// recording the row it was given. The insert's result is the test's, so it can be one postgrest-js
+// gives a request lost in flight (#173).
 const {
   createClient,
   adminFrom,
@@ -41,6 +42,8 @@ vi.mock('@/lib/app-env', async (importOriginal) => ({
 import { AuthRetryableFetchError, type AuthError } from '@supabase/supabase-js'
 import { POST, maxDuration } from '@/app/api/plaid/exchange-public-token/route'
 import { EXCHANGE_TIMEOUT_MS } from '@/components/plaid-link-context'
+import { MAY_NOT_HAVE_SAVED } from '@/lib/save-response'
+import { NO_ANSWER } from '../stubs/no-answer'
 
 type Row = Record<string, unknown>
 type DbError = { code?: string; message: string } | null
@@ -219,6 +222,26 @@ describe('POST /api/plaid/exchange-public-token: the bank', () => {
       { itemId: 'item-1', code: '23505', message: 'duplicate key value violates unique constraint' },
     ])
     expect(storeAccounts).not.toHaveBeenCalled()
+  })
+
+  // #173: the insert may have committed, holding the token. Torn down at Plaid, that row would be a
+  // dead bank, and LinkButton, told the bank could not be saved, would not reload to show it, so the
+  // person would link it again and spend another connection (#51). So the Item stays at Plaid, the
+  // answer is that it may not have saved (LinkButton: the bank may have connected, and it reloads),
+  // and the log names the Item in case the row did not commit.
+  it('keeps the bank at Plaid, answers that it may not have saved, and logs the Item, when the database never answers the insert', async () => {
+    const calls = makeStandIns({ insertResult: NO_ANSWER })
+    const res = await link()
+    expect(res.status).toBe(502)
+    expect(await res.json()).toEqual({ error: MAY_NOT_HAVE_SAVED, unknown: true })
+    expect(calls.inserts).toHaveLength(1)
+    expect(itemRemove).not.toHaveBeenCalled()
+    expect(logs).toContainEqual([
+      '[plaid] no answer storing item; kept at Plaid. If it is not in the list, remove it by hand',
+      { itemId: 'item-1', message: 'TypeError: fetch failed' },
+    ])
+    expect(storeAccounts).not.toHaveBeenCalled()
+    expect(syncAndStore).not.toHaveBeenCalled()
   })
 
   // Connected and stored: reporting a failure here would invite a duplicate link.

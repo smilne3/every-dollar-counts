@@ -9,7 +9,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 // - the banks read resolves only once narrowed twice, returns only the rows both filters match and
 //   only the columns asked for, so a read of another household's banks, or another environment's,
 //   cannot pass;
-// - each status write resolves only once narrowed, and records how.
+// - each status write resolves only once narrowed, and records how, and can go unanswered, as
+//   postgrest-js reports a request lost in flight (#173).
 const { createClient, adminFrom, storeAccounts, syncAndStore, suggestCategories, afterFns } = vi.hoisted(() => ({
   createClient: vi.fn(),
   adminFrom: vi.fn(),
@@ -31,6 +32,7 @@ vi.mock('@/lib/category-suggest', () => ({ suggestCategories }))
 
 import { AuthRetryableFetchError, type AuthError } from '@supabase/supabase-js'
 import { POST } from '@/app/api/plaid/sync-transactions/route'
+import { NO_ANSWER } from '../stubs/no-answer'
 
 type Row = Record<string, unknown>
 type DbError = { code?: string; message: string } | null
@@ -60,6 +62,8 @@ function makeStandIns({
   rows = [bank()] as Row[],
   readError = null as DbError,
   writeError = null as DbError,
+  // The database never answers a status write.
+  noAnswer = false,
 } = {}) {
   const calls = { reads: [] as unknown[][], writes: [] as { values: Row; filter: unknown[] }[] }
   createClient.mockResolvedValue({
@@ -96,7 +100,7 @@ function makeStandIns({
       update: (values: Row) => ({
         eq: (col: string, val: unknown) => {
           calls.writes.push({ values, filter: ['eq', col, val] })
-          return Promise.resolve({ error: writeError })
+          return Promise.resolve(noAnswer ? NO_ANSWER : { error: writeError })
         },
       }),
     }
@@ -244,5 +248,29 @@ describe('POST /api/plaid/sync-transactions: the banks', () => {
       '[plaid] sync status write failed',
       { itemId: 'item-1', code: '42501', message: 'permission denied for table plaid_items' },
     ])
+  })
+})
+
+// #173: no write here is answered with a refusal, so none the database never answered can read as
+// one. lib/ingest.ts throws on any failed write, an unanswered one included, and the bank it was
+// syncing counts as needing attention: its sync may not have finished, and pressing Refresh again
+// is safe. Every refusal this route gives comes from a read, before anything is written.
+describe('POST /api/plaid/sync-transactions: a write the database never answered', () => {
+  it('counts the bank whose sync threw as needing attention, syncs the others, and answers ok', async () => {
+    syncAndStore.mockRejectedValueOnce(new Error('transactions upsert failed: TypeError: fetch failed'))
+    makeStandIns({ rows: [bank(), bank({ id: 'item-2', cursor: 'cursor-2', institution_name: 'Wells Fargo' })] })
+    const res = await refresh()
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ ok: true, banks: 2, added: 3, failed: 1, problems: [{ bank: 'Chase' }] })
+    expect(syncAndStore).toHaveBeenCalledTimes(2)
+  })
+
+  // The bank's data synced, so it counts as synced; a flag the write did not set is set again by
+  // the next Refresh, which still sees it as not ok.
+  it('logs a status write it never answered, and still counts the bank as synced', async () => {
+    makeStandIns({ rows: [bank({ status: 'temporarily_unavailable' })], noAnswer: true })
+    const res = await refresh()
+    expect(await res.json()).toMatchObject({ ok: true, banks: 1, added: 3, failed: 0 })
+    expect(logs).toContainEqual(['[plaid] sync status write failed', { itemId: 'item-1', code: '', message: 'TypeError: fetch failed' }])
   })
 })

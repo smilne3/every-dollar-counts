@@ -5,6 +5,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin'
 import { decrypt } from '@/lib/crypto'
 import { plaidClient, plaidEnv } from '@/lib/plaid'
 import { plaidLogSafe, isAlreadyRemoved, plaidRefused } from '@/lib/plaid-errors'
+import { unknownIfLost } from '@/lib/lost-reply'
 
 // Disconnect a bank: remove it at Plaid, THEN delete our record. Deleting the plaid_items row
 // cascades to accounts (002) and, via the FK added in 010, on to its transactions — so nothing is
@@ -109,12 +110,14 @@ export async function POST(req: Request) {
     }
   }
 
-  const { error } = await supabaseAdmin.from('plaid_items').delete().eq('id', item.id)
-  // Plaid has removed it, so it is disconnected, but it still shows. Trying again finishes it:
-  // itemRemove then finds it gone, which is swallowed above.
+  const { error, status } = await supabaseAdmin.from('plaid_items').delete().eq('id', item.id)
+  // Plaid has removed it, so it is disconnected. Refused, the delete leaves it showing. Never
+  // answered, it may have taken the row, and the accounts and transactions it cascades to, or not:
+  // unknown (lib/lost-reply.ts), and BankList reloads to show which. Either way, trying again
+  // finishes it: itemRemove then finds it gone, which is swallowed above.
   if (error) {
     console.error('[plaid] remove-item delete failed', { itemId: item.id, code: error.code, message: error.message })
-    return fail(500, 'That bank was disconnected at Plaid but is still in your list. Please try again.')
+    return unknownIfLost(status) ?? fail(500, 'That bank was disconnected at Plaid but is still in your list. Please try again.')
   }
 
   return NextResponse.json({ ok: true })

@@ -8,6 +8,7 @@ import { plaidLogSafe } from '@/lib/plaid-errors'
 import { storeAccounts, syncAndStore } from '@/lib/ingest'
 import { shouldSyncTransactions } from '@/lib/sync-policy'
 import { assertEnvMatchesDatabase, envGuardResponse } from '@/lib/app-env'
+import { unknownIfLost } from '@/lib/lost-reply'
 
 // ReconnectButton and the OAuth return page show these as they stand. By the time this runs, Link's
 // update mode has fixed the login at Plaid; a failure here means this app did not record it, and
@@ -84,19 +85,21 @@ export async function POST(req: Request) {
   }
 
   // Clear the flag first so the item is eligible for the sync below.
-  const { error: statusError } = await supabaseAdmin
+  const { error: statusError, status: httpStatus } = await supabaseAdmin
     .from('plaid_items')
     .update({ status: 'ok', status_detail: null })
     .eq('id', item.id)
   // Not recorded, the bank still shows as needing a reconnect, and Refresh skips it. Saying it
-  // reconnected would leave it that way.
+  // reconnected would leave it that way. A write the database never answered may have recorded it,
+  // so its outcome is unknown (lib/lost-reply.ts): the catch-up is left to the next Refresh, and
+  // the reload shows whether the bank still needs reconnecting, which costs nothing to do again.
   if (statusError) {
     console.error('[plaid] reconnect status write failed', {
       itemId: item.id,
       code: statusError.code,
       message: statusError.message,
     })
-    return fail(500, NOT_FINISHED)
+    return unknownIfLost(httpStatus) ?? fail(500, NOT_FINISHED)
   }
 
   try {

@@ -115,6 +115,10 @@ export async function POST() {
       // INSTITUTION_DOWN, rate limits, ITEM_LOCKED, PASSWORD_RESET_REQUIRED, and a failed decrypt
       // are all live possibilities. Rethrowing here would 500 the whole refresh and leave every
       // bank after this one silently unsynced.
+      // A write in lib/ingest.ts that the database never answered (#173) lands here too, as a
+      // throw. It may have landed, so this bank's sync may not have finished, and it is counted as
+      // one that needs attention, never as a failed Refresh. Refreshing again is safe: every write
+      // there is keyed on the row, and the cursor moves only after them.
       // An environment mismatch is OUR misconfiguration, not the bank's — 010 defines
       // 'config_error' for exactly this and says never to render it as "the bank is having
       // trouble." It carries no Plaid error_code, so classifyPlaidError would fall through to its

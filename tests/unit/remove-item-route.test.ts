@@ -12,7 +12,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 // - the item read matches on the column and value it is given and returns only the columns asked
 //   for, so reading the wrong row, or too few columns, starves the checks that follow;
 // - the delete resolves only once narrowed, and records how, so a delete of the wrong row cannot
-//   pass.
+//   pass, and can go unanswered, as postgrest-js reports a request lost in flight (#173).
 const { createClient, adminFrom, itemRemove, decrypt } = vi.hoisted(() => ({
   createClient: vi.fn(),
   adminFrom: vi.fn(),
@@ -25,7 +25,9 @@ vi.mock('@/lib/plaid', () => ({ plaidEnv: 'sandbox', plaidClient: { itemRemove }
 vi.mock('@/lib/crypto', () => ({ decrypt }))
 
 import { AuthRetryableFetchError, type AuthError } from '@supabase/supabase-js'
+import { MAY_NOT_HAVE_SAVED } from '@/lib/save-response'
 import { POST } from '@/app/api/plaid/remove-item/route'
+import { NO_ANSWER } from '../stubs/no-answer'
 
 type Row = Record<string, unknown>
 type DbError = { code?: string; message: string } | null
@@ -52,6 +54,8 @@ function makeStandIns({
   item = ITEM as Row | null,
   readError = null as DbError,
   deleteError = null as DbError,
+  // The database never answers the delete.
+  deleteUnanswered = false,
 } = {}) {
   const calls = { membership: [] as unknown[][], reads: [] as unknown[][], deletes: [] as unknown[][] }
   createClient.mockResolvedValue({
@@ -88,7 +92,7 @@ function makeStandIns({
       delete: () => ({
         eq: (col: string, val: unknown) => {
           calls.deletes.push(['eq', col, val])
-          return Promise.resolve({ error: deleteError })
+          return Promise.resolve(deleteUnanswered ? NO_ANSWER : { error: deleteError })
         },
       }),
     }
@@ -280,5 +284,18 @@ describe('POST /api/plaid/remove-item: once Plaid may have removed it', () => {
       '[plaid] remove-item delete failed',
       { itemId: 'item-1', code: '42501', message: 'permission denied for table plaid_items' },
     ])
+  })
+
+  // #173: Plaid has removed it, and the delete may have taken the row, and the accounts and
+  // transactions under it, or not. "Still in your list" would be a guess: BankList says it may or
+  // may not have been disconnected and reloads to show which.
+  it('answers that it may not have saved when the database never answers the delete, and logs it', async () => {
+    const calls = makeStandIns({ deleteUnanswered: true })
+    const res = await disconnect()
+    expect(res.status).toBe(502)
+    expect(await res.json()).toEqual({ error: MAY_NOT_HAVE_SAVED, unknown: true })
+    expect(itemRemove).toHaveBeenCalledExactlyOnceWith({ access_token: 'access-sandbox-1' })
+    expect(calls.deletes).toEqual([['eq', 'id', 'item-1']])
+    expect(logs).toContainEqual(['[plaid] remove-item delete failed', { itemId: 'item-1', code: '', message: 'TypeError: fetch failed' }])
   })
 })

@@ -7,7 +7,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 // The stand-ins are strict, as in tests/unit/reimbursable-route.test.ts (#101): the membership read
 // resolves only through .limit(1).maybeSingle(); the bank read only through .eq().maybeSingle(),
 // matching on the value given and returning only the columns asked for; and the status write only
-// once narrowed, recording how.
+// once narrowed, recording how. The status write can go unanswered, as postgrest-js reports a
+// request lost in flight (#173).
 const { createClient, adminFrom, decrypt, storeAccounts, syncAndStore, assertEnvMatchesDatabase } = vi.hoisted(() => ({
   createClient: vi.fn(),
   adminFrom: vi.fn(),
@@ -29,7 +30,9 @@ vi.mock('@/lib/app-env', async (importOriginal) => ({
 
 import { AuthRetryableFetchError, type AuthError } from '@supabase/supabase-js'
 import { EnvMismatchError } from '@/lib/app-env'
+import { MAY_NOT_HAVE_SAVED } from '@/lib/save-response'
 import { POST } from '@/app/api/plaid/reconnect/route'
+import { NO_ANSWER } from '../stubs/no-answer'
 
 type Row = Record<string, unknown>
 type DbError = { code?: string; message: string } | null
@@ -58,6 +61,8 @@ function makeStandIns({
   item = ITEM as Row | null,
   readError = null as DbError,
   writeError = null as DbError,
+  // The database never answers the status write.
+  noAnswer = false,
 } = {}) {
   const calls = { reads: [] as unknown[][], writes: [] as { values: Row; filter: unknown[] }[] }
   createClient.mockResolvedValue({
@@ -89,7 +94,7 @@ function makeStandIns({
       update: (values: Row) => ({
         eq: (col: string, val: unknown) => {
           calls.writes.push({ values, filter: ['eq', col, val] })
-          return Promise.resolve({ error: writeError })
+          return Promise.resolve(noAnswer ? NO_ANSWER : { error: writeError })
         },
       }),
     }
@@ -246,6 +251,17 @@ describe('POST /api/plaid/reconnect: the reconnect', () => {
       '[plaid] reconnect status write failed',
       { itemId: 'item-1', code: '42501', message: 'permission denied for table plaid_items' },
     ])
+    expect(storeAccounts).not.toHaveBeenCalled()
+  })
+
+  // #173: the flag may have been cleared. ReconnectButton says the reconnect may not have finished
+  // and reloads to show whether the bank still needs it; the catch-up waits for the next Refresh.
+  it('answers that it may not have saved when the database never answers the status write, and pulls nothing', async () => {
+    makeStandIns({ noAnswer: true })
+    const res = await reconnect()
+    expect(res.status).toBe(502)
+    expect(await res.json()).toEqual({ error: MAY_NOT_HAVE_SAVED, unknown: true })
+    expect(logs).toContainEqual(['[plaid] reconnect status write failed', { itemId: 'item-1', code: '', message: 'TypeError: fetch failed' }])
     expect(storeAccounts).not.toHaveBeenCalled()
   })
 
