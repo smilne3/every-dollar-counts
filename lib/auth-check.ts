@@ -10,8 +10,12 @@ import { isAuthRetryableFetchError, type AuthError, type User, type UserResponse
 // - 'ended': every other answer, a null user included. No session, or one Supabase Auth refused,
 //   such as an expired one whose refresh token is dead, which comes back as the refresh call's own
 //   4xx (refresh_token_not_found, refresh_token_already_used, session_expired), not as a missing
-//   session. "Try again" there would never succeed.
-export type SignIn = { state: 'signed-in'; user: User } | { state: 'unknown'; error: AuthError } | { state: 'ended' }
+//   session. "Try again" there would never succeed. Its error comes with it, for a caller to whom an
+//   ended session is news worth logging (app/auth/confirm/route.ts).
+export type SignIn =
+  | { state: 'signed-in'; user: User }
+  | { state: 'unknown'; error: AuthError }
+  | { state: 'ended'; error: AuthError | null }
 
 // getUser answers { user: null, error } on ANY auth failure, a dropped connection included, so only
 // the error tells the two apart. A check that could not be made is logged here, under the caller's
@@ -26,5 +30,5 @@ export async function checkSignIn(supabase: { auth: { getUser(): Promise<UserRes
     console.error(`${tag} auth check failed`, { status: error.status, message: error.message })
     return { state: 'unknown', error }
   }
-  return user ? { state: 'signed-in', user } : { state: 'ended' }
+  return user ? { state: 'signed-in', user } : { state: 'ended', error }
 }

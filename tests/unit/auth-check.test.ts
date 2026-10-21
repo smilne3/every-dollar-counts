@@ -48,8 +48,8 @@ describe('checkSignIn', () => {
     ['session_expired', new AuthApiError('Session Expired', 403, 'session_expired')],
     ['a token Supabase Auth refused', new AuthApiError('invalid JWT', 403, 'bad_jwt')],
     ['an answer that could not be read', new AuthUnknownError('Unexpected token < in JSON', null)],
-  ])('reads %s as ended, and logs nothing', async (_, error) => {
-    expect(await checkSignIn(answering(null, error), '[here]')).toEqual({ state: 'ended' })
+  ])('reads %s as ended, with its error, and logs nothing', async (_, error) => {
+    expect(await checkSignIn(answering(null, error), '[here]')).toEqual({ state: 'ended', error })
     expect(logs).toEqual([])
   })
 
@@ -111,7 +111,7 @@ describe('checkSignIn with a real Supabase client', () => {
           headers: { 'content-type': 'application/json', 'x-supabase-api-version': '2024-01-01' },
         })
     )
-    expect(await checkSignIn(client(fetch), '[here]')).toEqual({ state: 'ended' })
+    expect(await checkSignIn(client(fetch), '[here]')).toMatchObject({ state: 'ended', error: { status: 403, code: 'bad_jwt' } })
     expect(logs).toEqual([])
   })
 
@@ -122,7 +122,9 @@ describe('checkSignIn with a real Supabase client', () => {
 
   it('reads no session cookie as ended, without asking Supabase Auth', async () => {
     const fetch = vi.fn(async () => new Response('{}', { status: 200 }))
-    expect(await checkSignIn(client(fetch, []), '[here]')).toEqual({ state: 'ended' })
+    const signIn = await checkSignIn(client(fetch, []), '[here]')
+    expect(signIn.state).toBe('ended')
+    expect(signIn.state === 'ended' && signIn.error).toBeInstanceOf(AuthSessionMissingError)
     expect(fetch).not.toHaveBeenCalled()
   })
 })

@@ -36,8 +36,20 @@ export async function GET(request: NextRequest) {
   // be asked, nothing showed they aren't invited: they are told sign-in couldn't be completed, and to
   // try again, which runs the invite check too. One whose session has ended is sent to sign in again.
   const signIn = await checkSignIn(supabase, '[auth/confirm]')
-  if (signIn.state === 'unknown') return NextResponse.redirect(new URL('/auth/try-again', request.url))
-  if (signIn.state === 'ended') return NextResponse.redirect(new URL('/login', request.url))
+  if (signIn.state === 'unknown') {
+    // The exchange above has set the new session's cookie. Kept, it would let the person open the
+    // app with the invite check never run, and an invited first-timer would find no household. So
+    // it is signed out here, before the redirect carries the cookies: supabase-js removes a session
+    // this fresh even when Supabase Auth can't be told, so its answer changes nothing.
+    await supabase.auth.signOut({ scope: 'local' })
+    return NextResponse.redirect(new URL('/auth/try-again', request.url))
+  }
+  if (signIn.state === 'ended') {
+    // Moments after a sign-in that worked, so not something to pass over.
+    const { error } = signIn
+    console.error('[auth/confirm] session ended right after sign-in', { status: error?.status, code: error?.code, message: error?.message })
+    return NextResponse.redirect(new URL('/login', request.url))
+  }
   if (await ensureHouseholdAccess(signIn.user.id, signIn.user.email)) {
     return NextResponse.redirect(new URL(next, request.url))
   }
