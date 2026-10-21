@@ -99,6 +99,24 @@ describe('GET /auth/confirm: the session ended right after sign-in', () => {
   })
 })
 
+// A code or token Supabase Auth never answered says nothing about the link: before, it read as
+// "That link didn't work. The login link was invalid or expired."
+describe('GET /auth/confirm: Supabase Auth could not be asked to finish signing in (#143)', () => {
+  it('sends a code exchange that got no answer to try again, and checks no further', async () => {
+    auth.exchangeCodeForSession.mockResolvedValue({ data: { user: null, session: null }, error: new AuthRetryableFetchError('fetch failed', 0) })
+    expect(await sentTo(confirm('code=abc'))).toBe('/auth/try-again')
+    expect(auth.getUser).not.toHaveBeenCalled()
+    expect(ensureHouseholdAccess).not.toHaveBeenCalled()
+    expect(logs).toEqual([['[auth/confirm] sign-in exchange failed', { status: 0, message: 'fetch failed' }]])
+  })
+
+  it('sends an email link Supabase Auth answered with a 5xx to try again', async () => {
+    auth.verifyOtp.mockResolvedValue({ data: { user: null, session: null }, error: new AuthRetryableFetchError('HTTP 503', 503) })
+    expect(await sentTo(confirm('token_hash=th&type=magiclink'))).toBe('/auth/try-again')
+    expect(auth.getUser).not.toHaveBeenCalled()
+  })
+})
+
 describe('GET /auth/confirm: the link itself', () => {
   it('sends a code Supabase Auth refused to "That link didn\'t work", and checks no further', async () => {
     auth.exchangeCodeForSession.mockResolvedValue({
@@ -108,6 +126,15 @@ describe('GET /auth/confirm: the link itself', () => {
     expect(await sentTo(confirm('code=abc'))).toBe('/auth/auth-code-error')
     expect(auth.getUser).not.toHaveBeenCalled()
     expect(ensureHouseholdAccess).not.toHaveBeenCalled()
+  })
+
+  it('sends an email link Supabase Auth refused to "That link didn\'t work"', async () => {
+    auth.verifyOtp.mockResolvedValue({
+      data: { user: null, session: null },
+      error: new AuthApiError('Email link is invalid or has expired', 403, 'otp_expired'),
+    })
+    expect(await sentTo(confirm('token_hash=th&type=magiclink'))).toBe('/auth/auth-code-error')
+    expect(auth.getUser).not.toHaveBeenCalled()
   })
 
   it('sends a request with neither a code nor a token to "That link didn\'t work"', async () => {
