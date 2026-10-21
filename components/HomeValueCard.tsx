@@ -38,8 +38,8 @@ export function HomeValueCard({
   const router = useRouter()
   const [value, setValue] = useState(valueText(initialValue))
   // The field's base, as in BudgetEditor: what it was last filled with from the server, or last
-  // sent. A field that still equals it holds nothing typed since; one that does not holds typing no
-  // reload may overwrite.
+  // sent, or what was typed once a read shows the server has it. A field that still equals it holds
+  // nothing typed since; one that does not holds typing no reload may overwrite.
   const [base, setBase] = useState(value)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -60,13 +60,19 @@ export function HomeValueCard({
     // Only a read made after a save can hold the value it wrote, as in BudgetEditor (#176). With two
     // quick saves, the reload asked for after the first can read the value before the second writes
     // it and land after it is sent: refilled from it, the field would show the first value, for the
-    // next Save to send back. So a field holding what it was filled with or sent is not refilled
-    // while a save is in flight, when the time of the write is not known yet, nor from a read made
-    // by then. One that already holds the value the server has keeps it as it was written.
+    // next Save to send back. So nothing is taken from the page while a save is in flight, when the
+    // time of the write is not known yet, nor from a read made by then.
     const server = valueText(initialValue)
-    if (value === base && !busy && readAt > savedAt && !sameValue(value, server)) {
-      setValue(server)
-      setBase(server)
+    if (!busy && readAt > savedAt) {
+      // A field that holds the value the server has keeps it as it was written, and holds nothing
+      // unsaved, even if it was typed: it becomes the base, so the field follows the server again.
+      // Kept as typing after a save with an unknown outcome that landed, it never followed the other
+      // phone again, and a Save without retyping sent it back over the other phone's value (#174).
+      if (sameValue(value, server)) setBase(value)
+      else if (value === base) {
+        setValue(server)
+        setBase(server)
+      }
     }
   }
   // What "Currently" says is stored, after each outcome (#174): the page's value, unless the page
@@ -119,8 +125,8 @@ export function HomeValueCard({
         setError(result.error)
       } else {
         // It may have saved. What was typed stays, since saving again sets the same value: its base
-        // goes back as on a refusal, so the reload's value does not replace it, and the reload's
-        // "Currently" line shows what is stored.
+        // goes back as on a refusal, so a reload's other value does not replace it, and the reload's
+        // "Currently" line shows what is stored. A reload that shows it landed makes it the base.
         console.error('[HomeValueCard] save failed', result.cause)
         setBase(before)
         setError(MAY_NOT_HAVE_SAVED)

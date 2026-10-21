@@ -318,6 +318,43 @@ describe('HomeValueCard saves', () => {
       expect(currently()).toContain('$700,000.00')
     })
 
+    // It may have saved, and the reload after it shows it did: the field then holds what the server
+    // has, so nothing typed is at stake, and it follows the server again. Left as typing, it kept
+    // 750,000 beside the other phone's 800,000, and a Save without retyping sent 750,000 back over it,
+    // which is #174 again.
+    it('follows the server again once a reload shows that a save with an unknown outcome landed', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      const fetchMock = vi.fn().mockResolvedValueOnce(badGateway()).mockResolvedValueOnce(savedAt(9_000))
+      vi.stubGlobal('fetch', fetchMock)
+      const { rerender } = render(<HomeValueCard {...props} />)
+      typeAndSave('$750,000')
+      await screen.findByRole('alert')
+      // The reload after it, read at 2,000: the save landed.
+      rerender(reloaded(750000, 2_000))
+      expect(field().value).toBe('$750,000')
+      // Read at 5,000: the other phone has saved 800,000 since.
+      rerender(reloaded(800000, 5_000))
+      expect(field().value).toBe('800000')
+      fireEvent.click(button())
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+      expect(JSON.parse(fetchMock.mock.calls[1][1]?.body as string)).toEqual({ value: 800000 })
+    })
+
+    // Only a read made after the last save confirmed here says what the server has now. An older one
+    // that happens to hold what is being typed is not taken as the server having it: taken so, the
+    // typing counted as filled, and the next reload overwrote it.
+    it('does not take a read made before the last save as the server holding what is typed', async () => {
+      vi.stubGlobal('fetch', answering(() => savedAt(2_000)))
+      const { rerender } = render(<HomeValueCard {...props} />)
+      await saveAndSettle('750000')
+      fireEvent.change(field(), { target: { value: '700000' } })
+      // Read at 1,500, before the save was written.
+      rerender(reloaded(700000, 1_500))
+      // Read at 2,500, after it.
+      rerender(reloaded(750000, 2_500))
+      expect(field().value).toBe('700000')
+    })
+
     // Saved without retyping, the field holds what it was filled with, and a reload that lands while
     // that save is in flight is held back. Nothing reloads after a refusal, so it is applied once the
     // save is refused: left unapplied, the field kept 700,000 beside the other phone's 800,000, for
