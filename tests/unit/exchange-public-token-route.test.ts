@@ -44,6 +44,7 @@ vi.mock('@/lib/app-env', async (importOriginal) => ({
 }))
 
 import { AuthRetryableFetchError, type AuthError } from '@supabase/supabase-js'
+import { AxiosError } from 'axios'
 import { POST, maxDuration } from '@/app/api/plaid/exchange-public-token/route'
 import { EXCHANGE_TIMEOUT_MS } from '@/components/plaid-link-context'
 import { GATEWAY_502, NO_ANSWER, REFUSED_5XX } from '../stubs/no-answer'
@@ -272,19 +273,45 @@ describe('POST /api/plaid/exchange-public-token: the bank', () => {
   })
 
   // Connected and stored: reporting a failure here would invite a duplicate link.
-  it('answers ok with a warning when the first balances or transactions do not arrive', async () => {
-    makeStandIns({ inserts: [STORED('row-1'), STORED('row-1')] })
+  it('answers ok with a warning when the first balances do not arrive', async () => {
+    makeStandIns()
     storeAccounts.mockRejectedValueOnce(new Error('accounts down'))
     expect(await (await link()).json()).toEqual({
       ok: true,
       warning: 'Bank connected, but its balances have not arrived yet. Press Refresh in a moment.',
     })
-    syncAndStore.mockRejectedValueOnce(new Error('sync down'))
-    expect(await (await link()).json()).toEqual({
-      ok: true,
-      warning:
-        'Bank connected. Transactions can take a few minutes to a few hours to arrive on a first connection — press Refresh again shortly. Do not re-link.',
-    })
+    expect(syncAndStore).not.toHaveBeenCalled()
+  })
+})
+
+// Connected and stored as above, so a failed first pull of transactions is answered ok with a
+// warning, never as a failure. The warning says whose failure it was (#192): Plaid's first pull can
+// take hours, but it said so of a failed write of this app's own too. Each says what Refresh will
+// do, as LinkButton is on Settings too, which has no Refresh button.
+describe('POST /api/plaid/exchange-public-token: the first transactions (#192)', () => {
+  const LATER =
+    'Bank connected. Transactions can take a few minutes to a few hours to arrive on a first connection. Refresh will fetch them. Do not re-link.'
+  const NOT_SAVED = "Bank connected, but this app couldn't save its transactions. Refresh will try again. Do not re-link."
+
+  it.each([
+    ['Plaid refuses the pull', { response: { status: 400, data: { error_code: 'PRODUCT_NOT_READY' } } }],
+    ["a gateway's page answers for Plaid", { response: { status: 502, data: '<html>Bad Gateway</html>' } }],
+    // As the SDK's axios throws it: no answer, so no response and no code.
+    ['nothing answers', new AxiosError('timeout of 60000ms exceeded', 'ECONNABORTED')],
+  ])('says transactions can take a while when %s', async (_, error) => {
+    makeStandIns()
+    syncAndStore.mockRejectedValue(error)
+    expect(await (await link()).json()).toEqual({ ok: true, warning: LATER })
+  })
+
+  it.each([
+    ['its transactions', 'transactions upsert failed: canceling statement due to statement timeout'],
+    ['its cursor', 'cursor update failed: TypeError: fetch failed'],
+  ])("says this app couldn't save them when the write of %s fails, and logs which", async (_, message) => {
+    makeStandIns()
+    syncAndStore.mockRejectedValue(new Error(message))
+    expect(await (await link()).json()).toEqual({ ok: true, warning: NOT_SAVED })
+    expect(logs).toContainEqual(['[plaid] initial sync failed', 'row-1', message])
   })
 })
 
