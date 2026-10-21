@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { isAuthRetryableFetchError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
+import { unknownIfLost } from '@/lib/lost-reply'
 
 // Budgets → Save budgets (BudgetEditor): one bulk save. A category with a limit above zero is
 // upserted for the caller's household; one set to 0 or left blank has its limit deleted. Every
@@ -63,21 +64,23 @@ export async function POST(req: Request) {
     else toDelete.push(it.category)
   }
 
-  // 3. Write. The upsert goes first, so if it fails nothing has been written.
+  // 3. Write. The upsert goes first, so if it is refused nothing has been written. Either write the
+  //    database never answered may have landed, so its outcome is unknown (lib/lost-reply.ts): the
+  //    upsert's, with the delete not run, or the delete's, with the limits above zero saved.
   if (toUpsert.length) {
-    const { error } = await supabase.from('budgets').upsert(toUpsert, { onConflict: 'household_id,category' })
+    const { error, status } = await supabase.from('budgets').upsert(toUpsert, { onConflict: 'household_id,category' })
     if (error) {
       console.error('[budgets] upsert failed', { household_id, code: error.code, message: error.message })
-      return fail(500, TRY_AGAIN)
+      return unknownIfLost(status) ?? fail(500, TRY_AGAIN)
     }
   }
-  // Scoped to the household the upsert wrote to, not left to RLS alone. If this fails, the limits
-  // above zero have already saved, so the message names the part that did not (#162).
+  // Scoped to the household the upsert wrote to, not left to RLS alone. If this is refused, the
+  // limits above zero have already saved, so the message names the part that did not (#162).
   if (toDelete.length) {
-    const { error } = await supabase.from('budgets').delete().eq('household_id', household_id).in('category', toDelete)
+    const { error, status } = await supabase.from('budgets').delete().eq('household_id', household_id).in('category', toDelete)
     if (error) {
       console.error('[budgets] delete failed', { household_id, code: error.code, message: error.message })
-      return fail(500, 'The limits you cleared could not be removed. Please try again.')
+      return unknownIfLost(status) ?? fail(500, 'The limits you cleared could not be removed. Please try again.')
     }
   }
   // When both writes were done, by the server's clock: BudgetEditor refills what it sent only from a

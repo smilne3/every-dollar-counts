@@ -19,7 +19,9 @@ vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 
 import { AuthRetryableFetchError, type AuthError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
+import { MAY_NOT_HAVE_SAVED } from '@/lib/save-response'
 import { PATCH } from '@/app/api/reimbursable/route'
+import { NO_ANSWER } from '../stubs/no-answer'
 
 type Row = Record<string, unknown>
 type DbError = { code?: string; message: string } | null
@@ -283,6 +285,15 @@ describe('PATCH /api/reimbursable', () => {
       '[reimbursable] update failed',
       { id: 'txn-1', code: '42501', message: 'new row violates row-level security policy' },
     ])
+  })
+
+  // #173: the mark may have been written, so the outcome is unknown, never a refusal.
+  it('answers that it may not have saved when the database never answers the write, and logs it', async () => {
+    makeSupabase({ update: NO_ANSWER })
+    const res = await mark()
+    expect(res.status).toBe(502)
+    expect(await res.json()).toEqual({ error: MAY_NOT_HAVE_SAVED, unknown: true })
+    expect(logs).toContainEqual(['[reimbursable] update failed', { id: 'txn-1', code: '', message: 'TypeError: fetch failed' }])
   })
 
   // The row changed between the read and the write, or the update policy is missing (#73). Either

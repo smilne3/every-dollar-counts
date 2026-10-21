@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { assertEnvMatchesDatabase, envGuardResponse } from '@/lib/app-env'
+import { unknownIfLost } from '@/lib/lost-reply'
 
 async function household(supabase: Awaited<ReturnType<typeof createClient>>) {
   const {
@@ -41,10 +42,12 @@ export async function POST(req: Request) {
     .single()
   const sort_order = (top?.sort_order ?? 0) + 1
 
-  const { error } = await supabase
+  const { error, status } = await supabase
     .from('categories')
     .insert({ household_id: hid, name: clean, pfc_primary: null, sort_order })
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  // An add the database never answered may have landed, so its outcome is unknown
+  // (lib/lost-reply.ts). Names are unique per household, so adding it again cannot make two.
+  if (error) return unknownIfLost(status) ?? NextResponse.json({ error: error.message }, { status: 400 })
   return NextResponse.json({ ok: true })
 }
 
@@ -63,8 +66,11 @@ export async function PATCH(req: Request) {
   if (!cat) return NextResponse.json({ error: 'not found' }, { status: 404 })
   const oldName = cat.name
 
-  const { error } = await supabase.from('categories').update({ name: clean }).eq('id', id)
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+  const { error, status } = await supabase.from('categories').update({ name: clean }).eq('id', id)
+  // A rename the database never answered may have landed, so its outcome is unknown
+  // (lib/lost-reply.ts), and the cascades below do not run. Their own errors are never read (#100),
+  // so a lost reply there still answers ok.
+  if (error) return unknownIfLost(status) ?? NextResponse.json({ error: error.message }, { status: 400 })
   await supabase.from('transactions').update({ user_category: clean }).eq('user_category', oldName)
   await supabase.from('budgets').update({ category: clean }).eq('category', oldName)
   return NextResponse.json({ ok: true })
@@ -96,6 +102,8 @@ export async function DELETE(req: Request) {
   if (!cat) return NextResponse.json({ error: 'not found' }, { status: 404 })
   const name = cat.name
 
+  // None of these three reads its error, so a refusal answers ok as well as a lost reply does (#100).
+  // Once they do, a delete the database never answered is unknown (lib/lost-reply.ts), as above.
   await supabase.from('categories').delete().eq('id', id)
   await supabase.from('transactions').update({ user_category: null }).eq('user_category', name)
   await supabase.from('budgets').delete().eq('category', name)

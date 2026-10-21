@@ -3,6 +3,7 @@ import { isAuthRetryableFetchError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
 import { assertEnvMatchesDatabase, envGuardResponse } from '@/lib/app-env'
 import { buildKindContext, kindOf } from '@/lib/category-rules'
+import { unknownIfLost } from '@/lib/lost-reply'
 
 // Settings → Category rules: Change (PATCH) and Remove (DELETE). #28 spec §6.2. No POST: creating a
 // rule from scratch is out of scope; rules come from the seed and from a first pick (spec §6.1 step 8).
@@ -106,7 +107,7 @@ export async function PATCH(req: Request) {
 
   // No update trigger on this table (precedent: app/api/manual-assets/route.ts), so updated_at is
   // set here. Filtered on the category the client saw, so a concurrent Change cannot be overwritten.
-  const { error, count } = await supabase
+  const { error, count, status } = await supabase
     .from('category_rules')
     .update({ category_id: categoryId, updated_at: new Date().toISOString() }, { count: 'exact' })
     .eq('id', id)
@@ -118,7 +119,9 @@ export async function PATCH(req: Request) {
   }
   if (error) {
     console.error('[category-rules] change failed', { id, code: error.code, message: error.message })
-    return fail(500, TRY_AGAIN)
+    // A Change the database never answered may have landed, so its outcome is unknown
+    // (lib/lost-reply.ts). Tried again after it did, it would match nothing and say the rule changed.
+    return unknownIfLost(status) ?? fail(500, TRY_AGAIN)
   }
   if (!count) return fail(409, RULE_CHANGED)
   console.log('[category-rules] changed', { id, from: current.name, to: target.name })
@@ -137,14 +140,15 @@ export async function DELETE(req: Request) {
   if (auth instanceof NextResponse) return auth
   const { supabase } = auth
 
-  const { error, count } = await supabase
+  const { error, count, status } = await supabase
     .from('category_rules')
     .delete({ count: 'exact' })
     .eq('id', id)
     .eq('category_id', expectedCategoryId)
   if (error) {
     console.error('[category-rules] remove failed', { id, code: error.code, message: error.message })
-    return fail(500, TRY_AGAIN)
+    // As for a Change: never answered, the rule may be gone, so the outcome is unknown.
+    return unknownIfLost(status) ?? fail(500, TRY_AGAIN)
   }
   if (!count) return fail(409, RULE_CHANGED)
   console.log('[category-rules] removed', { id, categoryId: expectedCategoryId })

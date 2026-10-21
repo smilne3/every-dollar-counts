@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { isAuthRetryableFetchError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
+import { unknownIfLost } from '@/lib/lost-reply'
 
 // Add an email to the household's invite allowlist. They join on their first
 // sign-in (Google or email link) — no invite email is sent.
@@ -48,11 +49,13 @@ export async function POST(req: Request) {
   if (!mine) return fail(403, "Your account isn't part of this household.")
 
   // 4. Write. An upsert that RLS refuses errors rather than matching nothing, so there is no count
-  //    to check (see app/api/manual-assets/route.ts).
-  const { error } = await supabase.from('invites').upsert({ email, household_id }, { onConflict: 'email' })
+  //    to check (see app/api/manual-assets/route.ts). One the database never answered may have
+  //    added the email, so its outcome is unknown (lib/lost-reply.ts). Inviting again is safe: the
+  //    allowlist is keyed on the email.
+  const { error, status } = await supabase.from('invites').upsert({ email, household_id }, { onConflict: 'email' })
   if (error) {
     console.error('[household/invite] upsert failed', { household_id, code: error.code, message: error.message })
-    return fail(500, TRY_AGAIN)
+    return unknownIfLost(status) ?? fail(500, TRY_AGAIN)
   }
 
   return NextResponse.json({ ok: true })

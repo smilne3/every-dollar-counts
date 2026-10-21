@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { isAuthRetryableFetchError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
 import { isValidTimeZone } from '@/lib/clock'
+import { unknownIfLost } from '@/lib/lost-reply'
 
 // Set the household's timezone (TimezoneCard). The household is resolved server-side from
 // memberships (the client sends only the zone). Every message here may be shown verbatim
@@ -40,7 +41,7 @@ export async function POST(req: Request) {
   if (!m) return fail(403, "Your account isn't part of a household.")
   const household_id = m.household_id as string
 
-  const { error, count } = await supabase
+  const { error, count, status } = await supabase
     .from('households')
     .update({ timezone: tz }, { count: 'exact' })
     .eq('id', household_id)
@@ -48,10 +49,11 @@ export async function POST(req: Request) {
   // Two failures, and the second is the interesting one. Before #73 households had only a select
   // policy, so an update matched zero rows and Supabase reported SUCCESS — a save that appeared to
   // work, refreshed, and showed the old value forever. Checking the row count is what stops that
-  // being invisible if the policy ever goes missing again.
+  // being invisible if the policy ever goes missing again. An update the database never answered is
+  // neither: it may have written the zone, so its outcome is unknown (lib/lost-reply.ts).
   if (error) {
     console.error('[household/timezone] update failed', { household_id, code: error.code, message: error.message })
-    return fail(500, TRY_AGAIN)
+    return unknownIfLost(status) ?? fail(500, TRY_AGAIN)
   }
   if (!count) {
     console.error('[household/timezone] update matched no rows — is the update policy present?', { household_id })

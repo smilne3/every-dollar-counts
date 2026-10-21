@@ -28,7 +28,9 @@ vi.mock('@/lib/category-rules', async (importOriginal) => {
 import { AuthApiError, AuthRetryableFetchError, AuthSessionMissingError, type AuthError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
 import { EnvMismatchError } from '@/lib/app-env'
+import { MAY_NOT_HAVE_SAVED } from '@/lib/save-response'
 import { POST } from '@/app/api/transactions/categorize/route'
+import { NO_ANSWER } from '../stubs/no-answer'
 
 type Row = Record<string, unknown>
 type Err = { message: string } | null
@@ -308,6 +310,18 @@ describe('POST /api/transactions/categorize', () => {
     const res = await post({ transactionId: 'txn-1', category: 'Grocery' })
     expect(res.status).toBe(500)
     expect((await res.json()).error).toBe('That could not be saved. Please try again.')
+  })
+
+  // #173: the pick may have landed, so the outcome is unknown, never a refusal. Only a saved pick
+  // teaches, so nothing is learned from it, and the change log records only what was written.
+  it('answers that it may not have saved when the database never answers the write, and learns nothing', async () => {
+    const calls = makeSupabase({ row: ROW, update: NO_ANSWER })
+    const res = await post({ transactionId: 'txn-1', category: 'Grocery' })
+    expect(res.status).toBe(502)
+    expect(await res.json()).toEqual({ error: MAY_NOT_HAVE_SAVED, unknown: true })
+    expect(calls.upserts).toHaveLength(0)
+    expect(logs).toContainEqual(['[categorize] update failed', 'TypeError: fetch failed'])
+    expect(logs.some((l) => l[0] === '[categorize] changed')).toBe(false)
   })
 
   // The row changed between the read and the write: Plaid removed or re-tagged it.

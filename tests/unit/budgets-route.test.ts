@@ -8,12 +8,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 // - the membership read only resolves through .limit(1).maybeSingle(), so .single(), which errors
 //   on no row and would turn "no household" into a failed read, cannot pass;
 // - the delete is not thenable until it is narrowed to the household and then to the categories
-//   being cleared, so a delete missing either filter cannot produce a result.
+//   being cleared, so a delete missing either filter cannot produce a result;
+// - either write can go unanswered, as postgrest-js reports a request lost in flight (#173).
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 
 import { AuthRetryableFetchError, type AuthError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
+import { MAY_NOT_HAVE_SAVED } from '@/lib/save-response'
 import { POST } from '@/app/api/budgets/route'
+import { NO_ANSWER } from '../stubs/no-answer'
 
 type Row = Record<string, unknown>
 type DbError = { code?: string; message: string } | null
@@ -24,6 +27,8 @@ function makeSupabase({
   membership = { data: { household_id: 'hh-1' } as Row | null, error: null as DbError },
   upsertError = null as DbError,
   deleteError = null as DbError,
+  // The write the database never answers.
+  noAnswer = undefined as 'upsert' | 'delete' | undefined,
   // Called as each write is done, so a test can move the clock on.
   onWrite = () => {},
 } = {}) {
@@ -54,7 +59,7 @@ function makeSupabase({
           upsert: (rows: Row[], options: unknown) => {
             calls.upserts.push({ rows, options })
             onWrite()
-            return Promise.resolve({ error: upsertError })
+            return Promise.resolve(noAnswer === 'upsert' ? NO_ANSWER : { error: upsertError })
           },
           delete: () => {
             const entry = { filters: [] as unknown[][] }
@@ -66,7 +71,7 @@ function makeSupabase({
                   in: (col2: string, vals: unknown[]) => {
                     entry.filters.push(['in', col2, vals])
                     onWrite()
-                    return Promise.resolve({ error: deleteError })
+                    return Promise.resolve(noAnswer === 'delete' ? NO_ANSWER : { error: deleteError })
                   },
                 }
               },
@@ -230,5 +235,23 @@ describe('POST /api/budgets', () => {
       '[budgets] delete failed',
       { household_id: 'hh-1', code: '42501', message: 'permission denied for table budgets' },
     ])
+  })
+
+  // #173: either write the database never answered may have landed, so the save's outcome is
+  // unknown, never a refusal. After an upsert with no answer, the delete does not run.
+  it('answers that it may not have saved when the database never answers the upsert, logs it and deletes nothing', async () => {
+    const calls = makeSupabase({ noAnswer: 'upsert' })
+    const res = await save()
+    expect(res.status).toBe(502)
+    expect(await res.json()).toEqual({ error: MAY_NOT_HAVE_SAVED, unknown: true })
+    expect(logs).toContainEqual(['[budgets] upsert failed', { household_id: 'hh-1', code: '', message: 'TypeError: fetch failed' }])
+    expect(calls.deletes).toHaveLength(0)
+  })
+
+  it('answers that it may not have saved when the database never answers the delete', async () => {
+    makeSupabase({ noAnswer: 'delete' })
+    const res = await save()
+    expect(res.status).toBe(502)
+    expect(await res.json()).toEqual({ error: MAY_NOT_HAVE_SAVED, unknown: true })
   })
 })

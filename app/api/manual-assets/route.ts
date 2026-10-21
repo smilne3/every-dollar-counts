@@ -3,6 +3,7 @@ import { isAuthRetryableFetchError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
 import { plaidEnv } from '@/lib/plaid'
 import { assertEnvMatchesDatabase, envGuardResponse } from '@/lib/app-env'
+import { unknownIfLost } from '@/lib/lost-reply'
 
 // Upsert the household's home value. One manual asset named 'Home' per household (unique constraint
 // on household_id, name), so re-saving updates it and refreshes updated_at — which drives the
@@ -61,8 +62,9 @@ export async function POST(req: Request) {
 
   // 3. Write. Unlike a plain update (app/api/household/timezone/route.ts), an upsert that RLS
   //    refuses errors rather than matching nothing: Postgres never silently skips its update half.
-  //    So there is no count to check.
-  const { error } = await supabase.from('manual_assets').upsert(
+  //    So there is no count to check. One the database never answered may have written the value,
+  //    so its outcome is unknown (lib/lost-reply.ts).
+  const { error, status } = await supabase.from('manual_assets').upsert(
     {
       household_id,
       name: 'Home',
@@ -74,7 +76,7 @@ export async function POST(req: Request) {
   )
   if (error) {
     console.error('[manual-assets] upsert failed', { household_id, code: error.code, message: error.message })
-    return fail(500, TRY_AGAIN)
+    return unknownIfLost(status) ?? fail(500, TRY_AGAIN)
   }
   // When the value was written, by the server's clock: HomeValueCard refills what it sent only from a
   // page that read the value after this, so the time is taken after the write, not before (#174).

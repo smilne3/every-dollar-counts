@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { isAuthRetryableFetchError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
+import { unknownIfLost } from '@/lib/lost-reply'
 
 // Goals (GoalsList): add a goal, update the amount saved toward one, delete one. Every message here
 // may be shown verbatim (GoalsList does), so none carries the database's words; those go to the
@@ -53,11 +54,14 @@ export async function POST(req: Request) {
   if (!m) return fail(403, "Your account isn't part of a household.")
   const household_id = m.household_id as string
 
-  // 3. Write.
-  const { error } = await supabase.from('goals').insert({ household_id, name, target_amount: target, saved_amount: 0 })
+  // 3. Write. An add the database never answered may have landed, so its outcome is unknown
+  //    (lib/lost-reply.ts), never a refusal: refused, GoalsList keeps the form filled, and goal names
+  //    are not unique, so another Add would make the goal twice. Told it is unknown, GoalsList
+  //    clears the form and reloads to show whether it landed.
+  const { error, status } = await supabase.from('goals').insert({ household_id, name, target_amount: target, saved_amount: 0 })
   if (error) {
     console.error('[goals] add failed', { household_id, code: error.code, message: error.message })
-    return fail(500, TRY_AGAIN)
+    return unknownIfLost(status) ?? fail(500, TRY_AGAIN)
   }
   return NextResponse.json({ ok: true })
 }
@@ -92,10 +96,11 @@ export async function PATCH(req: Request) {
 
   // `count` is what tells "updated it" from "matched nothing". Without it, a goal deleted on the
   // other phone, or a missing update policy (#73), read as saved.
-  const { error, count } = await supabase.from('goals').update(patch, { count: 'exact' }).eq('id', id)
+  const { error, count, status } = await supabase.from('goals').update(patch, { count: 'exact' }).eq('id', id)
   if (error) {
     console.error('[goals] update failed', { id, code: error.code, message: error.message })
-    return fail(500, TRY_AGAIN)
+    // As for an add: never answered, the amount may have been written, so the outcome is unknown.
+    return unknownIfLost(status) ?? fail(500, TRY_AGAIN)
   }
   if (!count) {
     // A stale-list refusal: GoalsList reloads on a 404 to show the latest.
@@ -117,10 +122,11 @@ export async function DELETE(req: Request) {
   if (supabase instanceof NextResponse) return supabase
 
   // As the update: a delete that matched nothing did not delete anything.
-  const { error, count } = await supabase.from('goals').delete({ count: 'exact' }).eq('id', id)
+  const { error, count, status } = await supabase.from('goals').delete({ count: 'exact' }).eq('id', id)
   if (error) {
     console.error('[goals] delete failed', { id, code: error.code, message: error.message })
-    return fail(500, 'That goal could not be deleted. Please try again.')
+    // As for an add: never answered, the goal may be gone, so the outcome is unknown.
+    return unknownIfLost(status) ?? fail(500, 'That goal could not be deleted. Please try again.')
   }
   if (!count) {
     // Gone already, most likely deleted on the other phone: what was asked for is done, so there is

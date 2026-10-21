@@ -2,8 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // #28 spec §6.3: deleting a category now deletes its rules through the FK, in the database every
 // environment shares. So DELETE is environment-guarded, before ANY read or write.
-const { calls, getUser, assertEnvMatchesDatabase } = vi.hoisted(() => ({
+//
+// The stand-in is permissive (#100 tracks making it strict): every chain resolves to { error: null }
+// unless a test gives one write, by table and method, a reply of its own (`replies`), as the add and
+// the rename's tests do for a database that never answered (#173).
+const { calls, replies, getUser, assertEnvMatchesDatabase } = vi.hoisted(() => ({
   calls: [] as string[],
+  replies: new Map<string, unknown>(),
   getUser: vi.fn(),
   assertEnvMatchesDatabase: vi.fn(),
 }))
@@ -12,10 +17,12 @@ vi.mock('@/lib/supabase/server', () => ({
     auth: { getUser },
     from: (table: string) => {
       calls.push(table)
+      let write = ''
       const chain: Record<string, unknown> = {}
-      for (const m of ['select', 'eq', 'update', 'delete']) chain[m] = () => chain
-      chain.single = async () => ({ data: { name: 'Grocery' }, error: null })
-      chain.then = (resolve: (v: unknown) => unknown) => Promise.resolve({ error: null }).then(resolve)
+      for (const m of ['select', 'eq', 'limit', 'order']) chain[m] = () => chain
+      for (const m of ['insert', 'update', 'delete']) chain[m] = () => ((write = `${table}.${m}`), chain)
+      chain.single = async () => ({ data: table === 'memberships' ? { household_id: 'hh-1' } : { name: 'Grocery', sort_order: 3 }, error: null })
+      chain.then = (resolve: (v: unknown) => unknown) => Promise.resolve(replies.get(write) ?? { error: null }).then(resolve)
       return chain
     },
   }),
@@ -28,13 +35,19 @@ vi.mock('@/lib/app-env', async (importOriginal) => ({
 }))
 
 import { EnvMismatchError } from '@/lib/app-env'
-import { DELETE } from '@/app/api/categories/route'
+import { MAY_NOT_HAVE_SAVED } from '@/lib/save-response'
+import { DELETE, PATCH, POST } from '@/app/api/categories/route'
+import { NO_ANSWER } from '../stubs/no-answer'
 
-const del = () =>
-  DELETE(new Request('http://localhost/api/categories', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: 'c-grocery' }) }))
+const send = (handler: (req: Request) => Promise<Response>, method: string, body: unknown) =>
+  handler(new Request('http://localhost/api/categories', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
+const del = () => send(DELETE, 'DELETE', { id: 'c-grocery' })
+const add = () => send(POST, 'POST', { name: 'Pets' })
+const rename = () => send(PATCH, 'PATCH', { id: 'c-grocery', name: 'Groceries' })
 
 beforeEach(() => {
   calls.length = 0
+  replies.clear()
   getUser.mockResolvedValue({ data: { user: { id: 'u1' } } })
   assertEnvMatchesDatabase.mockReset().mockResolvedValue(undefined)
 })
@@ -55,5 +68,36 @@ describe('DELETE /api/categories environment guard', () => {
   it('deletes as before once the guard passes', async () => {
     expect((await del()).status).toBe(200)
     expect(calls).toEqual(['categories', 'categories', 'transactions', 'budgets'])
+  })
+})
+
+// #173: an add or a rename the database never answered may have landed, so the answer is that it
+// may not have saved, not a 400 carrying the fetch error's words. A refusal is answered as before.
+describe('POST and PATCH /api/categories: a write the database never answered', () => {
+  it('adds and renames as before when the database answers', async () => {
+    expect(await (await add()).json()).toEqual({ ok: true })
+    expect(await (await rename()).json()).toEqual({ ok: true })
+  })
+
+  it('answers that an add may not have saved', async () => {
+    replies.set('categories.insert', NO_ANSWER)
+    const res = await add()
+    expect(res.status).toBe(502)
+    expect(await res.json()).toEqual({ error: MAY_NOT_HAVE_SAVED, unknown: true })
+  })
+
+  it('answers that a rename may not have saved, and moves no picks or budgets onto the new name', async () => {
+    replies.set('categories.update', NO_ANSWER)
+    const res = await rename()
+    expect(res.status).toBe(502)
+    expect(await res.json()).toEqual({ error: MAY_NOT_HAVE_SAVED, unknown: true })
+    expect(calls).toEqual(['categories', 'categories'])
+  })
+
+  it('still refuses an add the database refused', async () => {
+    replies.set('categories.insert', { error: { code: '23505', message: 'duplicate key value violates unique constraint' }, status: 409 })
+    const res = await add()
+    expect(res.status).toBe(400)
+    expect(await res.json()).not.toHaveProperty('unknown')
   })
 })

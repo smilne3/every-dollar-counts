@@ -7,7 +7,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 // The stand-in is strict, as in tests/unit/budgets-route.test.ts (#99, #101): the membership read
 // resolves only through .select().limit(1).maybeSingle() and projects the fixture to the columns it
 // asks for, so .single() (which errors on no row) or a narrowed select cannot pass, and the upsert
-// records exactly what it was given.
+// records exactly what it was given, and can go unanswered, as postgrest-js reports a request lost
+// in flight (#173).
 const { assertEnvMatchesDatabase } = vi.hoisted(() => ({ assertEnvMatchesDatabase: vi.fn() }))
 
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
@@ -20,7 +21,9 @@ vi.mock('@/lib/app-env', async (importOriginal) => ({
 
 import { AuthRetryableFetchError, type AuthError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
+import { MAY_NOT_HAVE_SAVED } from '@/lib/save-response'
 import { POST } from '@/app/api/manual-assets/route'
+import { NO_ANSWER } from '../stubs/no-answer'
 
 type Row = Record<string, unknown>
 type DbError = { code?: string; message: string } | null
@@ -37,6 +40,8 @@ function makeSupabase({
   authError = null as AuthError | null,
   membership = { data: { household_id: 'hh-1' } as Row | null, error: null as DbError },
   upsertError = null as DbError,
+  // The database never answers the upsert.
+  noAnswer = false,
   // Called as the upsert is done, so a test can move the clock on.
   onWrite = () => {},
 } = {}) {
@@ -63,7 +68,7 @@ function makeSupabase({
           upsert: (row: Row, options: unknown) => {
             calls.upserts.push({ row, options })
             onWrite()
-            return Promise.resolve({ error: upsertError })
+            return Promise.resolve(noAnswer ? NO_ANSWER : { error: upsertError })
           },
         }
       }
@@ -204,5 +209,14 @@ describe('POST /api/manual-assets', () => {
       '[manual-assets] upsert failed',
       { household_id: 'hh-1', code: '42501', message: 'new row violates row-level security policy' },
     ])
+  })
+
+  // #173: the value may have been written, so the outcome is unknown, never a refusal.
+  it('answers that it may not have saved when the database never answers the upsert, and logs it', async () => {
+    makeSupabase({ noAnswer: true })
+    const res = await save()
+    expect(res.status).toBe(502)
+    expect(await res.json()).toEqual({ error: MAY_NOT_HAVE_SAVED, unknown: true })
+    expect(logs).toContainEqual(['[manual-assets] upsert failed', { household_id: 'hh-1', code: '', message: 'TypeError: fetch failed' }])
   })
 })

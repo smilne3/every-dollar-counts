@@ -9,12 +9,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 //   cannot pass;
 // - an update or delete records every filter and runs only when awaited after the whole chain,
 //   against the goals that match each filter's column and value;
-// - a write returns a count only when { count: 'exact' } is asked for, as PostgREST does.
+// - a write returns a count only when { count: 'exact' } is asked for, as PostgREST does;
+// - any one write can go unanswered, as postgrest-js reports a request lost in flight (#173).
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 
 import { AuthRetryableFetchError, type AuthError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
+import { MAY_NOT_HAVE_SAVED } from '@/lib/save-response'
 import { POST, PATCH, DELETE } from '@/app/api/goals/route'
+import { NO_ANSWER } from '../stubs/no-answer'
 
 type Row = Record<string, unknown>
 type DbError = { code?: string; message: string } | null
@@ -38,6 +41,8 @@ function makeSupabase({
   membership = { data: { household_id: 'hh-1' } as Row | null, error: null as DbError },
   insertError = null as DbError,
   writeError = null as DbError,
+  // The write the database never answers.
+  noAnswer = undefined as 'insert' | 'update' | 'delete' | undefined,
   // Called as an update or delete is done, so a test can move the clock on.
   onWrite = () => {},
 } = {}) {
@@ -50,6 +55,7 @@ function makeSupabase({
       eq: (col: string, val: unknown) => (entry.filters.push(['eq', col, val]), builder),
       then: (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) => {
         onWrite()
+        if (noAnswer === entry.op) return Promise.resolve(NO_ANSWER).then(resolve, reject)
         const matched = GOALS.filter((g) => entry.filters.every(([, col, val]) => g[col as string] === val)).length
         const result = writeError ? { error: writeError, count: null } : { error: null, count: matched }
         const counted = (entry.options as { count?: string } | undefined)?.count === 'exact'
@@ -79,7 +85,7 @@ function makeSupabase({
         return {
           insert: (row: Row) => {
             calls.inserts.push(row)
-            return Promise.resolve({ error: insertError })
+            return Promise.resolve(noAnswer === 'insert' ? NO_ANSWER : { error: insertError })
           },
           update: (payload: Row, options?: unknown) => write({ op: 'update', payload, options, filters: [] }),
           delete: (options?: unknown) => write({ op: 'delete', options, filters: [] }),
@@ -204,6 +210,17 @@ describe('POST /api/goals', () => {
       { household_id: 'hh-1', code: '42501', message: 'new row violates row-level security policy' },
     ])
   })
+
+  // #173: the goal may have been added. Answered as a refusal, GoalsList keeps the form filled, and
+  // goal names are not unique, so another Add would make the goal twice.
+  it('answers that it may not have saved when the database never answers the insert, and logs it', async () => {
+    const calls = makeSupabase({ noAnswer: 'insert' })
+    const res = await add()
+    expect(res.status).toBe(502)
+    expect(await res.json()).toEqual({ error: MAY_NOT_HAVE_SAVED, unknown: true })
+    expect(calls.inserts).toHaveLength(1)
+    expect(logs).toContainEqual(['[goals] add failed', { household_id: 'hh-1', code: '', message: 'TypeError: fetch failed' }])
+  })
 })
 
 describe('PATCH /api/goals', () => {
@@ -283,6 +300,14 @@ describe('PATCH /api/goals', () => {
     expect(await errorOf(res)).toBe(TRY_AGAIN)
     expect(logs).toContainEqual(['[goals] update failed', { id: 'g-1', code: '42501', message: 'permission denied for table goals' }])
   })
+
+  // #173: the amount may have been written.
+  it('answers that it may not have saved when the database never answers the update', async () => {
+    makeSupabase({ noAnswer: 'update' })
+    const res = await update()
+    expect(res.status).toBe(502)
+    expect(await res.json()).toEqual({ error: MAY_NOT_HAVE_SAVED, unknown: true })
+  })
 })
 
 describe('DELETE /api/goals', () => {
@@ -324,5 +349,13 @@ describe('DELETE /api/goals', () => {
     expect(res.status).toBe(500)
     expect(await errorOf(res)).toBe('That goal could not be deleted. Please try again.')
     expect(logs).toContainEqual(['[goals] delete failed', { id: 'g-1', code: '42501', message: 'permission denied for table goals' }])
+  })
+
+  // #173: the goal may be gone.
+  it('answers that it may not have saved when the database never answers the delete', async () => {
+    makeSupabase({ noAnswer: 'delete' })
+    const res = await remove()
+    expect(res.status).toBe(502)
+    expect(await res.json()).toEqual({ error: MAY_NOT_HAVE_SAVED, unknown: true })
   })
 })

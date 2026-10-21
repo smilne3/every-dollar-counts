@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { isCardPaymentRow, CREDIT_CARD_PAYMENT_DETAILED, type Category } from '@/lib/categories'
 import { buildKindContext, learnableRule } from '@/lib/category-rules'
 import { assertEnvMatchesDatabase, EnvMismatchError } from '@/lib/app-env'
+import { unknownIfLost } from '@/lib/lost-reply'
 
 // Sets the category on ONE transaction (#28 spec §6.1). Runs as the user, so RLS decides WHOSE rows;
 // the guards below decide WHICH writes are coherent. Every message here may be shown to a person
@@ -108,7 +109,7 @@ export async function POST(req: Request) {
   //    rows whose pfc_detailed is null. `count` is what tells "wrote it" from "matched nothing";
   //    without it a write that matches no row reads as success, the way the households update
   //    policy that silently matched nothing went unseen (#73; see app/api/household/timezone/route.ts).
-  const { error, count } = await supabase
+  const { error, count, status } = await supabase
     .from('transactions')
     .update({ user_category: picked.name }, { count: 'exact' })
     .eq('id', transactionId)
@@ -116,7 +117,9 @@ export async function POST(req: Request) {
     .or(`pfc_detailed.is.null,pfc_detailed.neq.${CREDIT_CARD_PAYMENT_DETAILED}`)
   if (error) {
     console.error('[categorize] update failed', error.message)
-    return NextResponse.json({ error: SAVE_FAILED }, { status: 500 })
+    // A pick the database never answered may have landed, so its outcome is unknown
+    // (lib/lost-reply.ts). Nothing is learned from it: only a saved pick can teach (step 8).
+    return unknownIfLost(status) ?? NextResponse.json({ error: SAVE_FAILED }, { status: 500 })
   }
   if (!count) {
     // Usually the row changed underneath us. A missing update policy would also land here, which is
@@ -187,7 +190,10 @@ async function learn(
       )
       .select('id')
     if (error) {
-      // 23503 here is the category deleted between the read and the insert.
+      // 23503 here is the category deleted between the read and the insert. One the database never
+      // answered (code '', lib/lost-reply.ts) may have made the rule, and still reads 'failed': the
+      // pick is saved either way, nothing here reaches the person, and the merchant's next pick
+      // finds the rule if it was made.
       console.error('[categorize] learn failed', {
         ...context,
         code: error.code,

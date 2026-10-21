@@ -3,6 +3,7 @@ import { isAuthRetryableFetchError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
 import { clampReimbursable } from '@/lib/reimbursements'
 import { isCreditCardPayment } from '@/lib/categories'
+import { unknownIfLost } from '@/lib/lost-reply'
 
 // Mark how much of a transaction is coming back, or clear the mark. One route, one column — there is
 // no claim to create, no person to name, and no second row to keep in step with this one.
@@ -83,10 +84,12 @@ export async function PATCH(req: Request) {
     .eq('removed', false)
   write = txn.pfc_detailed === null ? write.is('pfc_detailed', null) : write.eq('pfc_detailed', txn.pfc_detailed)
   write = txn.user_category === null ? write.is('user_category', null) : write.eq('user_category', txn.user_category)
-  const { error, count } = await write
+  const { error, count, status } = await write
   if (error) {
     console.error('[reimbursable] update failed', { id: transactionId, code: error.code, message: error.message })
-    return fail(500, TRY_AGAIN)
+    // A mark the database never answered may have been written, so its outcome is unknown
+    // (lib/lost-reply.ts): the editors say so and reload.
+    return unknownIfLost(status) ?? fail(500, TRY_AGAIN)
   }
   if (!count) {
     // A stale-card refusal: the editors reload on a 409 to show the latest.
