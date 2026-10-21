@@ -186,7 +186,7 @@ export default async function DashboardPage({
   // so a partial fix could have had the label and the amount naming different months.
   const thisMonthLabel = monthNameLong(months[months.length - 1].key)
   const chartFlows = flows.slice(-6)
-  const avgSaved = savedAverage(flows, months[months.length - 1].key, await historyStart(), items)
+  const avgSaved = savedAverage(flows, months[months.length - 1].key, await historyStart(), items, accounts)
 
   const { data: budgetRows, error: budgetsError } = await supabase
     .from('budgets')

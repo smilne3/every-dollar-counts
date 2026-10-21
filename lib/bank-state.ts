@@ -16,6 +16,15 @@ export function bySync<T extends { status: string }>(items: T[]): { syncing: T[]
   return { syncing: items.filter((i) => !behind.includes(i)), behind }
 }
 
+// The banks with no accounts yet (#170): connected, but their first balance pull failed (#164), so
+// none of their balances are in. Net worth and cash on hand are sums over accounts, so they leave
+// these banks out, however many other banks have accounts. By the accounts' own plaid_item_id, so a
+// bank counts as arrived with any account at all: one with only a mortgage has its balance in.
+export function withoutAccounts<T extends { id: string }>(items: T[], accounts: { plaid_item_id: string }[]): T[] {
+  const arrived = new Set(accounts.map((a) => a.plaid_item_id))
+  return items.filter((i) => !arrived.has(i.id))
+}
+
 // What to say about banks that are connected but have no accounts yet (#164). The exchange route
 // keeps a bank whose first balance pull failed, and tells the person to press Refresh; until the
 // balances arrive it has no accounts rows. Read as "no banks", that state invited linking the same

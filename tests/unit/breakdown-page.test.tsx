@@ -117,6 +117,19 @@ const SAFEWAY_RULE = { id: 'r-safeway', household_id: 'hh-1', merchant_key: 'saf
 
 const render = (metric: string) => BreakdownPage({ params: Promise.resolve({ metric }) })
 
+// An account as the accounts table stores it, at the bank `plaid_item_id`.
+const account = (plaid_item_id: string, over: Record<string, unknown> = {}) => ({
+  id: `acct-${plaid_item_id}`,
+  account_id: `plaid-acct-${plaid_item_id}`,
+  plaid_item_id,
+  name: 'Checking',
+  type: 'depository',
+  subtype: 'checking',
+  current_balance: 100,
+  iso_currency_code: 'USD',
+  ...over,
+})
+
 beforeEach(() => {
   vi.useFakeTimers()
   calls.gte = []
@@ -278,6 +291,7 @@ describe('Saved breakdown: average per month (#126)', () => {
       data: [storedItem(), storedItem({ id: 'item-2', institution_name: 'Amex', created_at: '2026-07-15T09:00:00Z' })],
       error: null,
     }
+    results.accounts = { data: [account('item-1'), account('item-2', { type: 'credit', subtype: 'credit card' })], error: null }
     results.categories = { data: [{ id: 'c1', name: 'Income', pfc_primary: 'INCOME', sort_order: 0 }], error: null }
     results.transactions = {
       data: [
@@ -330,6 +344,17 @@ describe('Saved breakdown: average per month (#126)', () => {
     expect(textOf(blocks(await render('saved')).at(-1)!)).toBe(
       "The average is waiting for Amex's transaction history to arrive."
     )
+  })
+
+  // #170: a bank whose first balance pull failed has no accounts, so no transactions either, and
+  // every month here is short of it. historyStart can't see it, since it finds banks through their
+  // accounts, so this is the bank list against the page's own accounts.
+  it("waits for a bank whose balances haven't arrived, and names it", async () => {
+    history.value = { kind: 'ready', month: '2026-05' }
+    results.accounts = { data: [account('item-1')], error: null }
+    const tree = await render('saved')
+    expect(lists(tree)).toHaveLength(1)
+    expect(textOf(blocks(tree).at(-1)!)).toBe("The average is waiting for Amex's transaction history to arrive.")
   })
 
   // #135: August would be missing a broken bank's transactions from the day it broke, and still be

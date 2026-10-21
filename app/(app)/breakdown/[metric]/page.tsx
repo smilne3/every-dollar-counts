@@ -205,10 +205,10 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
       ]
       total = { label: 'Saved this month', amount: m.income - m.spending, currency }
 
-      // The same window (AVERAGE_SAVED_MONTHS + 1), savedAverage, historyStart and banks as the
-      // dashboard tile, so the two cannot disagree. While a bank isn't syncing, its reason takes the
-      // average's place (#135).
-      const avg = savedAverage(flows, thisKey, await historyStart(), items)
+      // The same window (AVERAGE_SAVED_MONTHS + 1), savedAverage, historyStart, banks and accounts
+      // as the dashboard tile, so the two cannot disagree. While a bank isn't syncing, or has no
+      // accounts yet, its reason takes the average's place (#135, #170).
+      const avg = savedAverage(flows, thisKey, await historyStart(), items, accounts)
       average = avg.kind === 'unavailable' ? { reason: avg.reason } : {
         rows: [...avg.months].reverse().map((mo) => ({
           key: mo.key,

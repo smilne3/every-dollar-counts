@@ -222,8 +222,9 @@ beforeEach(() => {
   vi.setSystemTime(REPORTED)
   tz.value = 'America/New_York'
   presentation.stampLabel = false
-  // One account, so the page renders the money tiles rather than the empty state.
-  results.accounts = { data: [{ id: 'a1', type: 'depository', current_balance: 100 }], error: null }
+  // One account, so the page renders the money tiles rather than the empty state. It is at
+  // storedItem()'s bank, so that bank's balances are in (#170).
+  results.accounts = { data: [{ id: 'a1', plaid_item_id: 'item-1', type: 'depository', current_balance: 100 }], error: null }
   results.memberships = { data: { household_id: 'hh-1' }, error: null }
   results.categories = { data: [], error: null }
   results.category_rules = { data: [], error: null }
@@ -567,6 +568,30 @@ describe('Dashboard average savings (#126)', () => {
     results.transactions = fixture()
     history.value = { kind: 'ready', month: '2026-02' }
     results.plaid_items = { data: [storedItem(), ...FOREIGN_ITEMS], error: null }
+    expect((await avgLine())!.props.children).toBe('Avg $3,000/mo · 6 mo')
+  })
+
+  // #170: a second bank whose first balance pull failed has no accounts, so none of its
+  // transactions either, and every month is short of it. Neither layout has room to say why; the
+  // saved breakdown it links to does. The average comes back once the bank has an account.
+  it("shows no average while a bank's balances haven't arrived, on the tile or the phone row", async () => {
+    results.categories = income
+    results.transactions = fixture()
+    history.value = { kind: 'ready', month: '2026-02' }
+    results.plaid_items = {
+      data: [storedItem(), storedItem({ id: 'item-2', institution_name: 'Amex', created_at: '2026-07-15T09:00:00Z' })],
+      error: null,
+    }
+    expect(await avgLine()).toBeUndefined()
+    expect(textOf((await phoneRows()).rows[2].foot)).not.toContain('Avg')
+
+    results.accounts = {
+      data: [
+        { id: 'a1', plaid_item_id: 'item-1', type: 'depository', current_balance: 100 },
+        { id: 'a2', plaid_item_id: 'item-2', type: 'credit', current_balance: 0 },
+      ],
+      error: null,
+    }
     expect((await avgLine())!.props.children).toBe('Avg $3,000/mo · 6 mo')
   })
 

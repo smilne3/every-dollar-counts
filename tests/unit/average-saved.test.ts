@@ -83,14 +83,17 @@ describe('averageSaved', () => {
 })
 
 // The pages show the average, or say why there is none, from the history state (lib/history-start)
-// and the household's banks. One function, so the tile and the drill-down cannot word it differently.
+// and the household's banks and accounts. One function, so the tile and the drill-down cannot word
+// it differently.
 describe('savedAverage', () => {
   const flows = [flow('2026-08', 9000, 6000), flow('2026-09', 9000, 4000), flow('2026-10', 0, 900)]
   const bank = (id: string, institution_name: string | null, status = 'ok') => ({ id, institution_name, status })
   const syncing = [bank('capone', 'Capital One'), bank('amex', 'Amex')]
+  // Both banks' accounts are in.
+  const arrived = [{ plaid_item_id: 'capone' }, { plaid_item_id: 'amex' }]
 
   it('averages once every bank\'s history is in', () => {
-    const r = savedAverage(flows, '2026-10', { kind: 'ready', month: '2026-07' }, syncing)
+    const r = savedAverage(flows, '2026-10', { kind: 'ready', month: '2026-07' }, syncing, arrived)
     expect(r).toMatchObject({ kind: 'average', average: 4000 })
   })
 
@@ -100,7 +103,7 @@ describe('savedAverage', () => {
     ['capone', "The average is waiting for Capital One's transaction history to arrive."],
     ['amex', "The average is waiting for Amex's transaction history to arrive."],
   ])('names the bank it is waiting for, %s, from the bank list', (itemId, reason) => {
-    expect(savedAverage(flows, '2026-10', { kind: 'pending', itemId }, syncing)).toEqual({ kind: 'unavailable', reason })
+    expect(savedAverage(flows, '2026-10', { kind: 'pending', itemId }, syncing, arrived)).toEqual({ kind: 'unavailable', reason })
   })
 
   // Still waiting: a bank missing from the list, or with no name, is still missing from the months.
@@ -108,20 +111,57 @@ describe('savedAverage', () => {
     ['is not in the bank list', [bank('amex', 'Amex')]],
     ['has no name', [bank('capone', null), bank('amex', 'Amex')]],
   ])('waits for "a newly linked bank" when the bank %s', (_, banks) => {
-    expect(savedAverage(flows, '2026-10', { kind: 'pending', itemId: 'capone' }, banks)).toEqual({
+    expect(savedAverage(flows, '2026-10', { kind: 'pending', itemId: 'capone' }, banks, arrived)).toEqual({
       kind: 'unavailable',
       reason: "The average is waiting for a newly linked bank's transaction history to arrive.",
     })
   })
 
   it('says when history is in but no full month has followed it yet', () => {
-    const r = savedAverage(flows, '2026-10', { kind: 'ready', month: '2026-09' }, syncing)
+    const r = savedAverage(flows, '2026-10', { kind: 'ready', month: '2026-09' }, syncing, arrived)
     expect(r).toEqual({ kind: 'unavailable', reason: expect.stringMatching(/not enough history yet/i) })
   })
 
   it('says when there are no transactions at all', () => {
-    const r = savedAverage(flows, '2026-10', { kind: 'none' }, [])
+    const r = savedAverage(flows, '2026-10', { kind: 'none' }, [], [])
     expect(r).toEqual({ kind: 'unavailable', reason: expect.stringMatching(/no transactions yet/i) })
+  })
+
+  // #170: a bank whose first balance pull failed has no accounts, and its transactions can't arrive
+  // before they do. So every month is missing it, as with a bank whose accounts have no history yet.
+  describe('while a bank has no accounts yet (#170)', () => {
+    const ready = { kind: 'ready', month: '2026-07' } as const
+
+    it("waits for it, by name, though every other bank's history is in", () => {
+      expect(savedAverage(flows, '2026-10', ready, syncing, [{ plaid_item_id: 'capone' }])).toEqual({
+        kind: 'unavailable',
+        reason: "The average is waiting for Amex's transaction history to arrive.",
+      })
+    })
+
+    // "No transactions yet" would say nothing is coming, with a bank on its way.
+    it('waits for it when no bank has any transactions yet', () => {
+      expect(savedAverage(flows, '2026-10', { kind: 'none' }, syncing, [])).toEqual({
+        kind: 'unavailable',
+        reason: "The average is waiting for Capital One's transaction history to arrive.",
+      })
+    })
+
+    it('says "a newly linked bank" when it has no name', () => {
+      expect(savedAverage(flows, '2026-10', ready, [bank('capone', 'Capital One'), bank('amex', null)], [{ plaid_item_id: 'capone' }])).toEqual({
+        kind: 'unavailable',
+        reason: "The average is waiting for a newly linked bank's transaction history to arrive.",
+      })
+    })
+
+    // A bank that isn't syncing is the reason the reader can act on, as it is ahead of history.
+    it("gives a bank that isn't syncing as the reason, ahead of one with no accounts", () => {
+      const banks = [bank('capone', 'Capital One'), bank('amex', 'Amex', 'needs_reconnect')]
+      expect(savedAverage(flows, '2026-10', ready, banks, [{ plaid_item_id: 'amex' }])).toEqual({
+        kind: 'unavailable',
+        reason: "No average while Amex isn't syncing.",
+      })
+    })
   })
 
   // #135: a bank that stopped syncing on 20 August leaves August, and every month after it, short of
@@ -131,7 +171,7 @@ describe('savedAverage', () => {
     const ready = { kind: 'ready', month: '2026-07' } as const
 
     it('has no average, and names the bank', () => {
-      const r = savedAverage(flows, '2026-10', ready, [bank('amex', 'Amex'), bank('capone', 'Capital One', 'needs_reconnect')])
+      const r = savedAverage(flows, '2026-10', ready, [bank('amex', 'Amex'), bank('capone', 'Capital One', 'needs_reconnect')], arrived)
       expect(r).toEqual({ kind: 'unavailable', reason: "No average while Capital One isn't syncing." })
     })
 
@@ -139,7 +179,7 @@ describe('savedAverage', () => {
     it.each(['action_at_bank', 'temporarily_unavailable', 'config_error', 'something_new'])(
       'has no average while a bank is %s',
       (status) => {
-        expect(savedAverage(flows, '2026-10', ready, [bank('capone', 'Capital One', status)]).kind).toBe('unavailable')
+        expect(savedAverage(flows, '2026-10', ready, [bank('capone', 'Capital One', status)], arrived).kind).toBe('unavailable')
       }
     )
 
@@ -147,19 +187,19 @@ describe('savedAverage', () => {
       const r = savedAverage(flows, '2026-10', ready, [
         bank('capone', 'Capital One', 'needs_reconnect'),
         bank('amex', 'Amex', 'temporarily_unavailable'),
-      ])
+      ], arrived)
       expect(r).toEqual({ kind: 'unavailable', reason: "No average while 2 banks aren't syncing." })
     })
 
     it('says "a bank" when the bank has no name', () => {
-      const r = savedAverage(flows, '2026-10', ready, [bank('capone', null, 'needs_reconnect')])
+      const r = savedAverage(flows, '2026-10', ready, [bank('capone', null, 'needs_reconnect')], arrived)
       expect(r).toEqual({ kind: 'unavailable', reason: "No average while a bank isn't syncing." })
     })
 
     // A bank whose first sync broke is not merely late: the reader has to reconnect it, so that is
     // the reason given.
     it('gives the broken bank as the reason, ahead of history still arriving', () => {
-      const r = savedAverage(flows, '2026-10', { kind: 'pending', itemId: 'capone' }, [bank('capone', 'Capital One', 'needs_reconnect')])
+      const r = savedAverage(flows, '2026-10', { kind: 'pending', itemId: 'capone' }, [bank('capone', 'Capital One', 'needs_reconnect')], arrived)
       expect(r).toEqual({ kind: 'unavailable', reason: "No average while Capital One isn't syncing." })
     })
   })
