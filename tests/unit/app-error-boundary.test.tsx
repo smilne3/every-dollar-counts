@@ -3,6 +3,7 @@ import type { ComponentType } from 'react'
 import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import type { ErrorInfo } from 'next/dist/client/components/error-boundary'
 import AppSegmentError from '@/app/(app)/error'
+import RootError from '@/app/error'
 
 afterEach(() => {
   cleanup()
@@ -48,5 +49,74 @@ describe('app/(app)/error.tsx', () => {
     expect(screen.getByText(/^Something went wrong/).textContent).toBe(
       'Something went wrong fetching this data. Try again, or come back in a moment.'
     )
+  })
+
+})
+
+// An error a server component threw, as the browser receives it in production: the message
+// replaced, the digest kept.
+function serverError(digest: string) {
+  return Object.assign(new Error('Minified React error #441'), { digest })
+}
+
+// The boundary above app/(app)/layout.tsx, for its sign-in check (#143). A server error carries a
+// digest, and the layout's sign-in check is the one server component it sits over.
+describe('app/error.tsx', () => {
+  it('takes only props Next renders an error boundary with', () => {
+    const asNextRendersIt: ComponentType<NextErrorProps> = RootError
+    expect(asNextRendersIt).toBe(RootError)
+  })
+
+  it('says sign-in could not be checked when the server threw, and shows the digest in small print', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const props: NextErrorProps = { error: serverError('1638223470'), reset: vi.fn(), retry: vi.fn() }
+    render(<RootError {...props} />)
+    expect(screen.getByRole('heading').textContent).toBe("Couldn't check your sign-in")
+    expect(screen.getByText(/^Something went wrong/).textContent).toBe(
+      'Something went wrong reaching the sign-in service. Try again, or come back in a moment.'
+    )
+    expect(screen.getByText('Error ID 1638223470').className).toContain('text-xs')
+  })
+
+  // A crash in the browser, on /login or /plaid/oauth say, has nothing to do with the sign-in check.
+  it('says only that the page could not load for an error from the browser, which has no digest', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const props: NextErrorProps = {
+      error: new TypeError("Cannot read properties of undefined (reading 'name')"),
+      reset: vi.fn(),
+      retry: vi.fn(),
+    }
+    render(<RootError {...props} />)
+    expect(screen.getByRole('heading').textContent).toBe("This page couldn't load")
+    expect(screen.getByText(/^Something went wrong/).textContent).toBe('Something went wrong. Try again, or come back in a moment.')
+    expect(screen.queryByText(/sign-in/)).toBeNull()
+    expect(screen.queryByText(/^Error ID/)).toBeNull()
+  })
+
+  // Anything can be thrown in the browser, not only an Error (Next's error.js docs).
+  it('still renders for a thrown value that is not an Error', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const props: NextErrorProps = { error: null as unknown as Error, reset: vi.fn(), retry: vi.fn() }
+    render(<RootError {...props} />)
+    expect(screen.getByRole('heading').textContent).toBe("This page couldn't load")
+  })
+
+  it('"Try again" runs the check again through the retry prop', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const retry = vi.fn()
+    const reset = vi.fn()
+    const props: NextErrorProps = { error: serverError('1638223470'), reset, retry }
+    render(<RootError {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(retry).toHaveBeenCalledTimes(1)
+    // reset() re-renders without re-fetching, so the layout would not check again.
+    expect(reset).not.toHaveBeenCalled()
+  })
+
+  it('logs what it caught, as app/(app)/error.tsx does', () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const props: NextErrorProps = { error: serverError('1638223470'), reset: vi.fn(), retry: vi.fn() }
+    render(<RootError {...props} />)
+    expect(logged).toHaveBeenCalledWith(props.error)
   })
 })
