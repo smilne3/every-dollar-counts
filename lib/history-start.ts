@@ -2,34 +2,25 @@ import 'server-only'
 import { createClient } from '@/lib/supabase/server'
 import { isCashFlowAccount } from '@/lib/account-types'
 
-// Where the household's history is complete enough to average (#126):
-// - `ready`: from `month` ('YYYY-MM') every bank's history has begun. That month is itself partial,
-//   so the average-savings figure counts only the months after it;
-// - `pending`: the bank `itemId` (its plaid_items id, as accounts.plaid_item_id holds it) is linked
-//   but its first sync has not landed. Averaging without it would count months missing a whole
-//   bank, so there is no figure until it arrives. savedAverage (lib/dashboard.ts) names it from the
-//   household's bank list: this reads with the signed-in client, which RLS gives no plaid_items rows
-//   at all, so the name it used to read here was always missing (#169);
-// - `none`: no cash-flow accounts with transactions at all.
-export type HistoryStart =
-  | { kind: 'ready'; month: string }
-  | { kind: 'pending'; itemId: string }
-  | { kind: 'none' }
-
-// Each bank supplies a different amount of history when it is linked: on 2026-10-06 Amex went back
-// to 2025-10-18 and Capital One only to 2026-04-27. Until Capital One's history begins, checking
-// (where income lands) is missing entirely, so April 2026 reads as $2,820 in against a usual
-// $17,000-plus. So the start is the LAST bank's first month.
+// Each bank's first transaction date ('YYYY-MM-DD'), by its plaid_items id as accounts.plaid_item_id
+// holds it, or null while none of its accounts has one: its first sync has not landed. Only a bank
+// with a cash-flow account is in it, so a household with none has an empty map.
 //
+// savedAverage (lib/dashboard.ts) decides from it where the household's history is complete enough
+// to average (#126). It names a bank from the household's bank list, and leaves out one that never
+// syncs transactions (#170): this reads with the signed-in client, which RLS gives no plaid_items
+// rows at all (#169), so it can see neither a bank's name nor what it was linked for.
+export type HistoryStarts = ReadonlyMap<string, string | null>
+
 // Per bank, not per account: a bank's history starts at its earliest account. A card opened last
 // month at a bank already linked is new activity, not missing history, and must not move the start
 // (it would hide the average for months). A whole bank linked later, with only recent history, does
 // move it, because before then that bank's spending is genuinely missing.
 //
-// Loans and investments carry no transactions (migration 020) and are not waited for. One small
-// read per account; a household has a handful. A failed or empty read throws, so it can never pass
-// for "no history yet" (#46).
-export async function historyStart(): Promise<HistoryStart> {
+// Loans and investments carry no transactions (migration 020) and are not read. One small read per
+// account; a household has a handful. A failed or empty read throws, so it can never pass for "no
+// history yet" (#46).
+export async function historyStart(): Promise<HistoryStarts> {
   const supabase = await createClient()
 
   const { data: accounts, error } = await supabase.from('accounts').select('account_id, type, plaid_item_id')
@@ -58,11 +49,5 @@ export async function historyStart(): Promise<HistoryStart> {
     const seen = byBank.get(bank) ?? null
     byBank.set(bank, first === null ? seen : seen === null || first < seen ? first : seen)
   }
-  if (!byBank.size) return { kind: 'none' }
-
-  const waiting = [...byBank].find(([, start]) => start === null)
-  if (waiting) return { kind: 'pending', itemId: waiting[0] }
-
-  const latest = [...byBank.values()].sort().pop() as string
-  return { kind: 'ready', month: latest.slice(0, 7) }
+  return byBank
 }

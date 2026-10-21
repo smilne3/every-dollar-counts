@@ -4,7 +4,7 @@ import { monthKey } from './budget'
 import { spendableAmount } from './reimbursements'
 import type { SpendContext } from './spend-context'
 import { MONTH_LABELS } from './format'
-import type { HistoryStart } from './history-start'
+import type { HistoryStarts } from './history-start'
 import { notSyncing, withoutAccounts } from './bank-state'
 import { shouldSyncTransactions } from './sync-policy'
 
@@ -137,9 +137,9 @@ export const AVERAGE_SAVED_MONTHS = 6
 // Two kinds of month are left out, because each would answer the question wrongly:
 // - the current month (`currentKey`), still in progress: its spending is in, its last paycheck may
 //   not be (#65);
-// - the month the last bank's history begins (`historyStartKey`, from historyStart in
-//   lib/history-start.ts) and everything before it: that month is partial, and earlier months are
-//   missing a whole bank, which is not the same as a $0 month.
+// - the month the last bank's history begins (`historyStartKey`, worked out by savedAverage below)
+//   and everything before it: that month is partial, and earlier months are missing a whole bank,
+//   which is not the same as a $0 month.
 //
 // `historyStartKey` is null when there is no history; the result is then null too.
 //
@@ -161,30 +161,36 @@ export type SavedAverage =
   | { kind: 'average'; average: number; months: { key: string; label: string; saved: number }[] }
   | { kind: 'unavailable'; reason: string }
 
-// The average, or why there is none, from the history state and the household's banks. The
-// dashboard tile and the saved breakdown both come through here, so they cannot disagree about the
-// figure or word its absence differently. Each reason is a different situation, and says so: a
-// household waiting on one bank is not a household with no history.
+// The average, or why there is none, from each bank's history start (`starts`, from historyStart in
+// lib/history-start.ts) and the household's banks and accounts. The dashboard tile and the saved
+// breakdown both come through here, so they cannot disagree about the figure or word its absence
+// differently. Each reason is a different situation, and says so: a household waiting on one bank
+// is not a household with no history.
 //
 // While any bank isn't syncing there is no average at all (#135). Every month since it broke is
 // missing that bank's transactions, and when it broke is not stored, so there is no telling which
 // months to leave out. That reason comes first: it is the one the reader can act on, and it is true
 // whatever the history says.
 //
-// `banks` is the list lib/plaid-items.ts reads with the service-role client, the only one that can
-// see plaid_items. The bank the history waits for is named from it by id (#169). One that isn't in
-// it, or has no name, is still waited for, as "a newly linked bank".
+// Otherwise the average covers the months after the LAST bank's first month (#126). Each bank
+// supplies a different amount of history when it is linked: on 2026-10-06 Amex went back to
+// 2025-10-18 and Capital One only to 2026-04-27. Until Capital One's history begins, checking (where
+// income lands) is missing entirely, so April 2026 reads as $2,820 in against a usual $17,000-plus.
+// While a bank's history hasn't begun at all there is no average, since every month is missing it,
+// and that includes a bank with no accounts yet (#170): its transactions can't arrive before them.
 //
-// A bank with no accounts yet (#170) is waited for too, if it syncs transactions
-// (lib/sync-policy.ts). Its first balance pull failed, and its transactions can't arrive before its
-// accounts do, so every month is missing it. One linked for investments only sends none, so there
-// is nothing to wait for. It is found here, from `banks` and the page's own `accounts`, not in
-// historyStart: that finds banks only through their accounts, and can't read plaid_items to find
-// the rest (#169).
+// Only a bank that syncs transactions is waited for (shouldSyncTransactions, as the sync route
+// decides). One linked for investments only never sends any, even for a cash account Plaid types
+// depository, so waiting for it would never end (#170). A bank that isn't in `banks` is waited
+// for, as before: nothing says it won't send any.
+//
+// `banks` is the list lib/plaid-items.ts reads with the service-role client, the only one that can
+// see plaid_items. The bank the average waits for is named from it by id (#169); one that isn't in
+// it, or has no name, is "one of your banks".
 export function savedAverage(
   flows: { key: string; label: string; spending: number; income: number }[],
   currentKey: string,
-  start: HistoryStart,
+  starts: HistoryStarts,
   banks: { id: string; institution_name: string | null; status: string; products: string[] }[],
   accounts: { plaid_item_id: string }[]
 ): SavedAverage {
@@ -200,15 +206,22 @@ export function savedAverage(
   }
   const waitingFor = (bank: { institution_name: string | null } | undefined): SavedAverage => ({
     kind: 'unavailable',
-    reason: `The average is waiting for ${bank?.institution_name ?? 'a newly linked bank'}'s transaction history to arrive.`,
+    reason: `The average is waiting for ${bank?.institution_name ? `${bank.institution_name}'s` : "one of your banks'"} transaction history to arrive.`,
   })
   const bare = withoutAccounts(banks, accounts).filter((b) => shouldSyncTransactions(b))
   if (bare.length) return waitingFor(bare[0])
-  if (start.kind === 'none') {
+  const syncsTransactions = (id: string) => {
+    const bank = banks.find((b) => b.id === id)
+    return bank === undefined || shouldSyncTransactions(bank)
+  }
+  const counted = [...starts].filter(([id]) => syncsTransactions(id))
+  if (!counted.length) {
     return { kind: 'unavailable', reason: 'No transactions yet, so there is no average.' }
   }
-  if (start.kind === 'pending') return waitingFor(banks.find((b) => b.id === start.itemId))
-  const avg = averageSaved(flows, { currentKey, historyStartKey: start.month })
+  const waiting = counted.find(([, first]) => first === null)
+  if (waiting) return waitingFor(banks.find((b) => b.id === waiting[0]))
+  const latest = counted.map(([, first]) => first as string).sort().pop() as string
+  const avg = averageSaved(flows, { currentKey, historyStartKey: latest.slice(0, 7) })
   if (!avg) {
     return {
       kind: 'unavailable',

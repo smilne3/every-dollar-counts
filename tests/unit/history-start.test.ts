@@ -56,15 +56,15 @@ beforeEach(() => {
 
 describe('historyStart', () => {
   // The live household on 2026-10-06: Amex supplied about eleven months of history, Capital One
-  // about 90 days. Before Capital One's begins, checking (where income lands) is missing entirely.
-  it("is ready from the month the LAST bank's history begins", async () => {
+  // about 90 days. Each bank's own start, for savedAverage to take the later one.
+  it("gives each bank its first transaction's date", async () => {
     db.tables.accounts = [acct('platinum', 'amex', 'credit'), acct('venture', 'capone', 'credit'), acct('checking', 'capone')]
     db.tables.transactions = [
       txn('platinum', '2025-10-18'), txn('platinum', '2026-09-01'),
       txn('venture', '2026-04-27'), txn('venture', '2026-10-01'),
       txn('checking', '2026-04-28'),
     ]
-    expect(await historyStart()).toEqual({ kind: 'ready', month: '2026-04' })
+    expect(await historyStart()).toEqual(new Map([['amex', '2025-10-18'], ['capone', '2026-04-27']]))
   })
 
   // A bank's history starts at its EARLIEST account. A card opened last month, or a savings account
@@ -73,41 +73,48 @@ describe('historyStart', () => {
   it('is not moved by a new account at a bank whose history is already in', async () => {
     db.tables.accounts = [acct('checking', 'capone'), acct('new-card', 'capone', 'credit')]
     db.tables.transactions = [txn('checking', '2026-04-28'), txn('new-card', '2026-09-14')]
-    expect(await historyStart()).toEqual({ kind: 'ready', month: '2026-04' })
+    expect(await historyStart()).toEqual(new Map([['capone', '2026-04-28']]))
   })
 
-  // Linked, but the first sync has not landed. Averaging without it would count months missing a
-  // whole bank, so the answer is "waiting", not a figure. The bank comes back by its id, for
-  // savedAverage to name from the bank list: this client cannot read the name (#169).
-  it('is pending, on that bank, when a bank has cash-flow accounts and no transactions yet', async () => {
+  // Linked, but the first sync has not landed. The bank comes back by its id, for savedAverage to
+  // name from the bank list: this client cannot read the name (#169).
+  it('gives a bank with cash-flow accounts and no transactions yet no start', async () => {
     db.tables.accounts = [acct('platinum', 'amex', 'credit'), acct('checking', 'capone')]
     db.tables.transactions = [txn('platinum', '2025-10-18')]
-    expect(await historyStart()).toEqual({ kind: 'pending', itemId: 'capone' })
+    expect(await historyStart()).toEqual(new Map([['amex', '2025-10-18'], ['capone', null]]))
   })
 
-  // Loans and investments never carry transactions (migration 020), so they are not waited for.
+  // An investments-only bank's cash account is typed depository, so it is read like any other.
+  // This client can't see what a bank was linked for (#169); savedAverage, which can, leaves it out.
+  it('gives a cash account at a bank linked for investments only no start either', async () => {
+    db.tables.accounts = [acct('checking', 'capone'), acct('brokerage', 'fidelity', 'investment'), acct('cash', 'fidelity')]
+    db.tables.transactions = [txn('checking', '2026-04-28')]
+    expect(await historyStart()).toEqual(new Map([['capone', '2026-04-28'], ['fidelity', null]]))
+  })
+
+  // Loans and investments never carry transactions (migration 020), so they are not read.
   it('ignores loan and investment accounts', async () => {
     db.tables.accounts = [acct('checking', 'capone'), acct('mortgage', 'amex', 'loan'), acct('brokerage', 'amex', 'investment')]
     db.tables.transactions = [txn('checking', '2026-04-28')]
-    expect(await historyStart()).toEqual({ kind: 'ready', month: '2026-04' })
+    expect(await historyStart()).toEqual(new Map([['capone', '2026-04-28']]))
   })
 
   it('reads each account oldest first', async () => {
     db.tables.accounts = [acct('checking', 'capone')]
     db.tables.transactions = [txn('checking', '2026-10-01'), txn('checking', '2026-04-28'), txn('checking', '2026-07-01')]
-    expect(await historyStart()).toEqual({ kind: 'ready', month: '2026-04' })
+    expect(await historyStart()).toEqual(new Map([['capone', '2026-04-28']]))
   })
 
   // A Plaid-removed row is not history: a removed pending charge must not move the start earlier.
   it('ignores removed transactions', async () => {
     db.tables.accounts = [acct('checking', 'capone')]
     db.tables.transactions = [txn('checking', '2026-01-03', true), txn('checking', '2026-04-28')]
-    expect(await historyStart()).toEqual({ kind: 'ready', month: '2026-04' })
+    expect(await historyStart()).toEqual(new Map([['capone', '2026-04-28']]))
   })
 
-  it('is none when the household has no cash-flow accounts', async () => {
+  it('is empty when the household has no cash-flow accounts', async () => {
     db.tables.accounts = [acct('mortgage', 'amex', 'loan')]
-    expect(await historyStart()).toEqual({ kind: 'none' })
+    expect(await historyStart()).toEqual(new Map())
   })
 
   // #46: a failed read must not pass for "no history yet".

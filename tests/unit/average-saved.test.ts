@@ -82,9 +82,9 @@ describe('averageSaved', () => {
   })
 })
 
-// The pages show the average, or say why there is none, from the history state (lib/history-start)
-// and the household's banks and accounts. One function, so the tile and the drill-down cannot word
-// it differently.
+// The pages show the average, or say why there is none, from each bank's history start
+// (lib/history-start) and the household's banks and accounts. One function, so the tile and the
+// drill-down cannot word it differently.
 describe('savedAverage', () => {
   const flows = [flow('2026-08', 9000, 6000), flow('2026-09', 9000, 4000), flow('2026-10', 0, 900)]
   const bank = (id: string, institution_name: string | null, status = 'ok', products = ['transactions']) => ({
@@ -96,10 +96,24 @@ describe('savedAverage', () => {
   const syncing = [bank('capone', 'Capital One'), bank('amex', 'Amex')]
   // Both banks' accounts are in.
   const arrived = [{ plaid_item_id: 'capone' }, { plaid_item_id: 'amex' }]
+  // Each bank's first transaction, by id, as historyStart gives them; null while none has arrived.
+  const starts = (firsts: Record<string, string | null>) => new Map(Object.entries(firsts))
+  // Both banks' history in, Capital One's from July: August and September count.
+  const ready = starts({ amex: '2026-03-01', capone: '2026-07-02' })
 
   it('averages once every bank\'s history is in', () => {
-    const r = savedAverage(flows, '2026-10', { kind: 'ready', month: '2026-07' }, syncing, arrived)
+    const r = savedAverage(flows, '2026-10', ready, syncing, arrived)
     expect(r).toMatchObject({ kind: 'average', average: 4000 })
+  })
+
+  // The live household on 2026-10-06: Amex went back to 2025-10-18, Capital One only to 2026-04-27.
+  // Before Capital One's history begins, checking (where income lands) is missing entirely, so the
+  // months that count start after the LATER bank's first month. From Amex's, June and July would be
+  // averaged short of a bank: (1,000 + 2,000 + 3,000 + 5,000) / 4.
+  it("averages the months after the last bank's history begins", () => {
+    const longer = [flow('2026-06', 9000, 8000), flow('2026-07', 9000, 7000), ...flows]
+    const r = savedAverage(longer, '2026-10', starts({ amex: '2025-10-18', capone: '2026-07-02' }), syncing, arrived)
+    expect(r).toMatchObject({ kind: 'average', average: 4000, months: [{ key: '2026-08' }, { key: '2026-09' }] })
   })
 
   // #169: historyStart can't read a bank's name (RLS gives its client no plaid_items rows), so it
@@ -107,38 +121,66 @@ describe('savedAverage', () => {
   it.each([
     ['capone', "The average is waiting for Capital One's transaction history to arrive."],
     ['amex', "The average is waiting for Amex's transaction history to arrive."],
-  ])('names the bank it is waiting for, %s, from the bank list', (itemId, reason) => {
-    expect(savedAverage(flows, '2026-10', { kind: 'pending', itemId }, syncing, arrived)).toEqual({ kind: 'unavailable', reason })
+  ])('names the bank it is waiting for, %s, from the bank list', (waiting, reason) => {
+    const r = savedAverage(flows, '2026-10', starts({ amex: '2026-03-01', capone: '2026-07-02', [waiting]: null }), syncing, arrived)
+    expect(r).toEqual({ kind: 'unavailable', reason })
   })
 
   // Still waiting: a bank missing from the list, or with no name, is still missing from the months.
   it.each([
     ['is not in the bank list', [bank('amex', 'Amex')]],
     ['has no name', [bank('capone', null), bank('amex', 'Amex')]],
-  ])('waits for "a newly linked bank" when the bank %s', (_, banks) => {
-    expect(savedAverage(flows, '2026-10', { kind: 'pending', itemId: 'capone' }, banks, arrived)).toEqual({
+  ])('waits for "one of your banks" when the bank %s', (_, banks) => {
+    expect(savedAverage(flows, '2026-10', starts({ amex: '2026-03-01', capone: null }), banks, arrived)).toEqual({
       kind: 'unavailable',
-      reason: "The average is waiting for a newly linked bank's transaction history to arrive.",
+      reason: "The average is waiting for one of your banks' transaction history to arrive.",
     })
   })
 
   it('says when history is in but no full month has followed it yet', () => {
-    const r = savedAverage(flows, '2026-10', { kind: 'ready', month: '2026-09' }, syncing, arrived)
+    const r = savedAverage(flows, '2026-10', starts({ amex: '2026-03-01', capone: '2026-09-02' }), syncing, arrived)
     expect(r).toEqual({ kind: 'unavailable', reason: expect.stringMatching(/not enough history yet/i) })
   })
 
   it('says when there are no transactions at all', () => {
-    const r = savedAverage(flows, '2026-10', { kind: 'none' }, [], [])
+    const r = savedAverage(flows, '2026-10', new Map(), [], [])
     expect(r).toEqual({ kind: 'unavailable', reason: expect.stringMatching(/no transactions yet/i) })
+  })
+
+  // #170: "Add investment account" links a bank for investments alone, and the sync route never asks
+  // it for transactions (lib/sync-policy.ts). Plaid types its cash account depository, so
+  // historyStart has it with no start. Waiting for it would never end.
+  describe('a bank linked for investments only (#170)', () => {
+    const fidelity = bank('fidelity', 'Fidelity', 'ok', ['investments'])
+
+    it('does not hold the average, though its cash account has no transactions', () => {
+      const r = savedAverage(flows, '2026-10', starts({ capone: '2026-07-02', fidelity: null }), [bank('capone', 'Capital One'), fidelity], [
+        { plaid_item_id: 'capone' },
+        { plaid_item_id: 'fidelity' },
+      ])
+      expect(r).toMatchObject({ kind: 'average', average: 4000 })
+    })
+
+    it('does not hold the average before its balances arrive either', () => {
+      const r = savedAverage(flows, '2026-10', starts({ capone: '2026-07-02' }), [bank('capone', 'Capital One'), fidelity], [{ plaid_item_id: 'capone' }])
+      expect(r).toMatchObject({ kind: 'average', average: 4000 })
+    })
+
+    it('leaves "no transactions yet" when it is the only bank', () => {
+      expect(savedAverage(flows, '2026-10', starts({ fidelity: null }), [fidelity], [{ plaid_item_id: 'fidelity' }])).toEqual({
+        kind: 'unavailable',
+        reason: 'No transactions yet, so there is no average.',
+      })
+    })
   })
 
   // #170: a bank whose first balance pull failed has no accounts, and its transactions can't arrive
   // before they do. So every month is missing it, as with a bank whose accounts have no history yet.
   describe('while a bank has no accounts yet (#170)', () => {
-    const ready = { kind: 'ready', month: '2026-07' } as const
+    const capitalOnes = starts({ capone: '2026-07-02' })
 
     it("waits for it, by name, though every other bank's history is in", () => {
-      expect(savedAverage(flows, '2026-10', ready, syncing, [{ plaid_item_id: 'capone' }])).toEqual({
+      expect(savedAverage(flows, '2026-10', capitalOnes, syncing, [{ plaid_item_id: 'capone' }])).toEqual({
         kind: 'unavailable',
         reason: "The average is waiting for Amex's transaction history to arrive.",
       })
@@ -146,26 +188,16 @@ describe('savedAverage', () => {
 
     // "No transactions yet" would say nothing is coming, with a bank on its way.
     it('waits for it when no bank has any transactions yet', () => {
-      expect(savedAverage(flows, '2026-10', { kind: 'none' }, syncing, [])).toEqual({
+      expect(savedAverage(flows, '2026-10', new Map(), syncing, [])).toEqual({
         kind: 'unavailable',
         reason: "The average is waiting for Capital One's transaction history to arrive.",
       })
     })
 
-    it('says "a newly linked bank" when it has no name', () => {
-      expect(savedAverage(flows, '2026-10', ready, [bank('capone', 'Capital One'), bank('amex', null)], [{ plaid_item_id: 'capone' }])).toEqual({
+    it('says "one of your banks" when it has no name', () => {
+      expect(savedAverage(flows, '2026-10', capitalOnes, [bank('capone', 'Capital One'), bank('amex', null)], [{ plaid_item_id: 'capone' }])).toEqual({
         kind: 'unavailable',
-        reason: "The average is waiting for a newly linked bank's transaction history to arrive.",
-      })
-    })
-
-    // Linked for investments only, it never sends transactions (lib/sync-policy.ts), so there is
-    // nothing to wait for. Its missing balances are for the note on the balance pages to say.
-    it('does not wait for a bank linked for investments only', () => {
-      const banks = [bank('capone', 'Capital One'), bank('fidelity', 'Fidelity', 'ok', ['investments'])]
-      expect(savedAverage(flows, '2026-10', ready, banks, [{ plaid_item_id: 'capone' }])).toMatchObject({
-        kind: 'average',
-        average: 4000,
+        reason: "The average is waiting for one of your banks' transaction history to arrive.",
       })
     })
 
@@ -183,7 +215,6 @@ describe('savedAverage', () => {
   // that bank's transactions, and the date it broke is not stored. So no month can be trusted, and
   // there is no figure, rather than one that counts a short month as complete.
   describe("while a bank isn't syncing (#135)", () => {
-    const ready = { kind: 'ready', month: '2026-07' } as const
 
     it('has no average, and names the bank', () => {
       const r = savedAverage(flows, '2026-10', ready, [bank('amex', 'Amex'), bank('capone', 'Capital One', 'needs_reconnect')], arrived)
@@ -214,7 +245,7 @@ describe('savedAverage', () => {
     // A bank whose first sync broke is not merely late: the reader has to reconnect it, so that is
     // the reason given.
     it('gives the broken bank as the reason, ahead of history still arriving', () => {
-      const r = savedAverage(flows, '2026-10', { kind: 'pending', itemId: 'capone' }, [bank('capone', 'Capital One', 'needs_reconnect')], arrived)
+      const r = savedAverage(flows, '2026-10', starts({ capone: null }), [bank('capone', 'Capital One', 'needs_reconnect')], arrived)
       expect(r).toEqual({ kind: 'unavailable', reason: "No average while Capital One isn't syncing." })
     })
   })

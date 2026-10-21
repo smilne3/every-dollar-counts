@@ -8,7 +8,7 @@ const { results, tz, presentation, paged, history, selects } = vi.hoisted(() => 
   // What lib/history-start answers. Mocked so these tests can tell a page that takes the history
   // start from historyStart apart from one that guesses it from its own transaction read: this
   // stub serves the whole fixture to every query, so the two would otherwise always agree.
-  history: { value: { kind: 'none' } as { kind: 'ready'; month: string } | { kind: 'pending'; itemId: string } | { kind: 'none' } },
+  history: { value: new Map() as ReadonlyMap<string, string | null> },
   results: {} as Record<string, { data: unknown; error: { message: string } | null }>,
   // When set, `transactions` is served by a PostgREST-like stub that caps each response at 1,000
   // rows, so the test can tell a paged read from a plain one (#69).
@@ -141,6 +141,11 @@ const render = () => DashboardPage({ searchParams: Promise.resolve({}) })
 const A1 = { id: 'a1', plaid_item_id: 'item-1', type: 'depository', current_balance: 100 }
 const A2 = { id: 'a2', plaid_item_id: 'item-2', type: 'credit', current_balance: 0 }
 
+// What historyStart answers: each bank's first transaction, by id. `since` has storedItem()'s bank's
+// history beginning in `month`; `waitingOn` has a bank whose first transactions haven't landed.
+const since = (month: string): ReadonlyMap<string, string | null> => new Map([['item-1', `${month}-10`]])
+const waitingOn = (itemId: string): ReadonlyMap<string, string | null> => new Map([[itemId, null]])
+
 // The exact moment from the #73 screenshot: 8:10pm on Wednesday 2 September in US Eastern, which
 // is already Thursday 3 September in UTC.
 const REPORTED = new Date('2026-09-03T00:10:00Z')
@@ -238,7 +243,7 @@ beforeEach(() => {
   results.manual_assets = { data: [], error: null }
   results.plaid_items = { data: [], error: null }
   paged.transactions = null
-  history.value = { kind: 'none' }
+  history.value = new Map()
   for (const k of Object.keys(selects)) delete selects[k]
   vi.unstubAllEnvs()
 })
@@ -504,7 +509,7 @@ describe('Dashboard average savings (#126)', () => {
   it('shows the mean over the complete months, and how many', async () => {
     results.categories = income
     results.transactions = fixture()
-    history.value = { kind: 'ready', month: '2026-02' }
+    history.value = since('2026-02')
     expect((await avgLine())!.props.children).toBe('Avg $3,000/mo · 6 mo')
   })
 
@@ -513,15 +518,15 @@ describe('Dashboard average savings (#126)', () => {
   it('starts where historyStart says, not at the earliest transaction it read', async () => {
     results.categories = income
     results.transactions = fixture()
-    history.value = { kind: 'ready', month: '2026-05' }
+    history.value = since('2026-05')
     expect((await avgLine())!.props.children).toBe('Avg $2,000/mo · 3 mo')
   })
 
   it.each([
-    ['history is in but no full month has followed it', { kind: 'ready', month: '2026-08' }],
-    ['a bank has not delivered its history yet', { kind: 'pending', itemId: 'item-1' }],
-    ['there are no transactions', { kind: 'none' }],
-  ] as const)('shows no line when %s', async (_, state) => {
+    ['history is in but no full month has followed it', since('2026-08')],
+    ['a bank has not delivered its history yet', waitingOn('item-1')],
+    ['there are no transactions', new Map()],
+  ])('shows no line when %s', async (_, state) => {
     results.categories = income
     results.transactions = fixture()
     history.value = state
@@ -530,7 +535,7 @@ describe('Dashboard average savings (#126)', () => {
 
   it('is coral when the household loses money on average, and only then', async () => {
     results.categories = income
-    history.value = { kind: 'ready', month: '2026-02' }
+    history.value = since('2026-02')
     results.transactions = fixture({ '03': -2000, '04': -2000, '05': -2000, '06': -2000, '07': -2000, '08': -2000 })
     const losing = (await avgLine())!
     expect(losing.props.children).toBe('Avg -$2,000/mo · 6 mo')
@@ -543,7 +548,7 @@ describe('Dashboard average savings (#126)', () => {
   // A few cents below zero rounds to "$0"; a red $0 would be noise.
   it('is not coral when the average rounds to zero', async () => {
     results.categories = income
-    history.value = { kind: 'ready', month: '2026-07' }
+    history.value = since('2026-07')
     results.transactions = fixture({ '08': -0.3 })
     const line = (await avgLine())!
     expect(line.props.className).not.toContain('text-coral')
@@ -554,7 +559,7 @@ describe('Dashboard average savings (#126)', () => {
   it('agrees with the saved breakdown it links to', async () => {
     results.categories = income
     results.transactions = fixture({ '05': 3100, '07': -450.4 })
-    history.value = { kind: 'ready', month: '2026-03' }
+    history.value = since('2026-03')
     const tile = (await avgLine())!.props.children
     const breakdown = await BreakdownPage({ params: Promise.resolve({ metric: 'saved' }) })
     const lists: { total?: { amount: number }; rows: unknown[] }[] = []
@@ -587,7 +592,7 @@ describe('Dashboard average savings (#126)', () => {
   it('gives the phone rows the same figures and links as the tiles', async () => {
     results.categories = income
     results.transactions = fixture()
-    history.value = { kind: 'ready', month: '2026-02' }
+    history.value = since('2026-02')
     const { tree, rows } = await phoneRows()
     const tiles = findStatCards(tree).filter((c) => c.props.label !== 'Net worth')
     expect(rows.map((r) => [r.label, r.amount])).toEqual(tiles.map((t) => [t.props.label, t.props.amount]))
@@ -597,10 +602,10 @@ describe('Dashboard average savings (#126)', () => {
   it('puts the average in the Saved row, and money in and out when there is no average', async () => {
     results.categories = income
     results.transactions = fixture()
-    history.value = { kind: 'ready', month: '2026-02' }
+    history.value = since('2026-02')
     expect(textOf((await phoneRows()).rows[2].foot)).toContain('Avg $3,000/mo · 6 mo')
 
-    history.value = { kind: 'pending', itemId: 'item-1' }
+    history.value = waitingOn('item-1')
     const foot = textOf((await phoneRows()).rows[2].foot)
     expect(foot).not.toContain('Avg')
     expect(foot.replace(/\s+/g, ' ')).toContain('$0 in · $5,000 out')
@@ -612,7 +617,7 @@ describe('Dashboard average savings (#126)', () => {
   it("shows no average while a bank isn't syncing, on the tile or the phone row", async () => {
     results.categories = income
     results.transactions = fixture()
-    history.value = { kind: 'ready', month: '2026-02' }
+    history.value = since('2026-02')
     results.accounts = { data: [A1, A2], error: null }
     results.plaid_items = { data: [storedItem({ status: 'needs_reconnect' }), storedItem({ id: 'item-2', institution_name: 'Amex' })], error: null }
     expect(await avgLine()).toBeUndefined()
@@ -625,7 +630,7 @@ describe('Dashboard average savings (#126)', () => {
   it("keeps the average when only another household's bank, or one from the other environment, is broken", async () => {
     results.categories = income
     results.transactions = fixture()
-    history.value = { kind: 'ready', month: '2026-02' }
+    history.value = since('2026-02')
     results.plaid_items = { data: [storedItem(), ...FOREIGN_ITEMS], error: null }
     expect((await avgLine())!.props.children).toBe('Avg $3,000/mo · 6 mo')
   })
@@ -637,7 +642,7 @@ describe('Dashboard average savings (#126)', () => {
   it("shows no average while a bank's balances haven't arrived, on the tile or the phone row", async () => {
     results.categories = income
     results.transactions = fixture()
-    history.value = { kind: 'ready', month: '2026-02' }
+    history.value = since('2026-02')
     results.plaid_items = {
       data: [storedItem(), storedItem({ id: 'item-2', institution_name: 'Amex', created_at: '2026-07-15T09:00:00Z' })],
       error: null,

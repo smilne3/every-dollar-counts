@@ -6,7 +6,7 @@ const { results, calls, tz, history, selects } = vi.hoisted(() => ({
   // Every `.select()` the page sends, per table, so a test can pin the suggestion embed (§7.4).
   selects: {} as Record<string, string[]>,
   // What lib/history-start answers; see tests/unit/dashboard-page.test.tsx for why it is mocked.
-  history: { value: { kind: 'none' } as { kind: 'ready'; month: string } | { kind: 'pending'; itemId: string } | { kind: 'none' } },
+  history: { value: new Map() as ReadonlyMap<string, string | null> },
   results: {} as Record<string, { data: unknown; error: { message: string } | null }>,
   calls: { gte: [] as string[] },
   tz: { value: 'America/New_York' },
@@ -117,6 +117,11 @@ const GROCERY = { id: 'c-grocery', name: 'Grocery', pfc_primary: null, sort_orde
 const SAFEWAY_RULE = { id: 'r-safeway', household_id: 'hh-1', merchant_key: 'safeway', merchant_label: 'Safeway', category_id: 'c-grocery', origin: 'seeded' }
 
 const render = (metric: string) => BreakdownPage({ params: Promise.resolve({ metric }) })
+
+// What historyStart answers: each bank's first transaction, by id. `since` has storedItem()'s bank's
+// history beginning in `month`; `waitingOn` has a bank whose first transactions haven't landed.
+const since = (month: string): ReadonlyMap<string, string | null> => new Map([['item-1', `${month}-10`]])
+const waitingOn = (itemId: string): ReadonlyMap<string, string | null> => new Map([[itemId, null]])
 
 // An account as the accounts table stores it, at the bank `plaid_item_id`.
 const account = (plaid_item_id: string, over: Record<string, unknown> = {}) => ({
@@ -377,7 +382,7 @@ describe('Saved breakdown: average per month (#126)', () => {
   })
 
   it('lists each complete month and their mean, newest first, linking to each month', async () => {
-    history.value = { kind: 'ready', month: '2026-05' }
+    history.value = since('2026-05')
     const tree = await render('saved')
     const avg = lists(tree)[1] as { rows: { label: string; amount: number; href: string }[]; total: unknown }
     expect(avg.rows.map((r) => [r.label, r.amount, r.href])).toEqual([
@@ -390,7 +395,7 @@ describe('Saved breakdown: average per month (#126)', () => {
   })
 
   it('starts where historyStart says, and names a single month as one', async () => {
-    history.value = { kind: 'ready', month: '2026-07' }
+    history.value = since('2026-07')
     const tree = await render('saved')
     expect(lists(tree)[1].rows.map((r) => r.label)).toEqual(['August'])
     expect(textOf(tree)).toContain('last 1 month')
@@ -398,10 +403,10 @@ describe('Saved breakdown: average per month (#126)', () => {
   })
 
   it.each([
-    ['no full month has followed the history start', { kind: 'ready', month: '2026-08' }, /not enough history yet/i],
-    ['a bank is still delivering its history', { kind: 'pending', itemId: 'item-1' }, /waiting for Capital One's/],
-    ['there are no transactions', { kind: 'none' }, /no transactions yet/i],
-  ] as const)('says why there is no average when %s', async (_, state, reason) => {
+    ['no full month has followed the history start', since('2026-08'), /not enough history yet/i],
+    ['a bank is still delivering its history', waitingOn('item-1'), /waiting for Capital One's/],
+    ['there are no transactions', new Map(), /no transactions yet/i],
+  ])('says why there is no average when %s', async (_, state, reason) => {
     history.value = state
     const tree = await render('saved')
     expect(lists(tree)).toHaveLength(1)
@@ -411,7 +416,7 @@ describe('Saved breakdown: average per month (#126)', () => {
   // #169: historyStart says which bank by id; its name comes from the bank list this page reads
   // with the service-role client, the one read that can see plaid_items.
   it('names the bank the average is waiting for, from the bank list', async () => {
-    history.value = { kind: 'pending', itemId: 'item-2' }
+    history.value = waitingOn('item-2')
     expect(textOf(blocks(await render('saved')).at(-1)!)).toBe(
       "The average is waiting for Amex's transaction history to arrive."
     )
@@ -421,7 +426,7 @@ describe('Saved breakdown: average per month (#126)', () => {
   // every month here is short of it. historyStart can't see it, since it finds banks through their
   // accounts, so this is the bank list against the page's own accounts.
   it("waits for a bank whose balances haven't arrived, and names it", async () => {
-    history.value = { kind: 'ready', month: '2026-05' }
+    history.value = since('2026-05')
     results.accounts = { data: [account('item-1')], error: null }
     const tree = await render('saved')
     expect(lists(tree)).toHaveLength(1)
@@ -431,7 +436,7 @@ describe('Saved breakdown: average per month (#126)', () => {
   // Linked for investments only, a bank sends no transactions, so the average has nothing to wait
   // for, though its balances are missing too.
   it("keeps the average for a bank linked for investments only, whose balances haven't arrived", async () => {
-    history.value = { kind: 'ready', month: '2026-05' }
+    history.value = since('2026-05')
     results.plaid_items = {
       data: [storedItem(), storedItem({ id: 'item-3', institution_name: 'Fidelity', products: ['investments'] })],
       error: null,
@@ -440,10 +445,22 @@ describe('Saved breakdown: average per month (#126)', () => {
     expect(lists(await render('saved'))).toHaveLength(2)
   })
 
+  // Nor once they arrive: Plaid types its cash account depository, so historyStart has the bank
+  // with no first transaction, and none will ever come (#170).
+  it('keeps the average for a bank linked for investments only, once its cash account is in', async () => {
+    history.value = new Map([['item-1', '2026-05-10'], ['item-3', null]])
+    results.plaid_items = {
+      data: [storedItem(), storedItem({ id: 'item-3', institution_name: 'Fidelity', products: ['investments'] })],
+      error: null,
+    }
+    results.accounts = { data: [account('item-1'), account('item-3', { subtype: 'cash management' })], error: null }
+    expect(lists(await render('saved'))).toHaveLength(2)
+  })
+
   // #135: August would be missing a broken bank's transactions from the day it broke, and still be
   // averaged as a full month. So the average goes, and one line says why, where it would have been.
   it("has no average while a bank isn't syncing, and says why in its place", async () => {
-    history.value = { kind: 'ready', month: '2026-05' }
+    history.value = since('2026-05')
     results.plaid_items = { data: [storedItem({ status: 'needs_reconnect' }), storedItem({ id: 'item-2', institution_name: 'Amex' })], error: null }
     const tree = await render('saved')
     expect(lists(tree)).toHaveLength(1)
@@ -454,14 +471,14 @@ describe('Saved breakdown: average per month (#126)', () => {
 
   // This month's own money in and out still show: the banner above says they may be out of date.
   it("still shows this month's money in and out while a bank isn't syncing", async () => {
-    history.value = { kind: 'ready', month: '2026-05' }
+    history.value = since('2026-05')
     results.plaid_items = { data: [storedItem({ status: 'needs_reconnect' })], error: null }
     expect(lists(await render('saved'))[0].rows.map((r) => r.label)).toEqual(['Money in (income)', 'Money out (spending)'])
   })
 
   // Only this household's banks count: a broken bank elsewhere leaves the average alone.
   it("keeps the average when only another household's bank, or one from the other environment, is broken", async () => {
-    history.value = { kind: 'ready', month: '2026-05' }
+    history.value = since('2026-05')
     results.plaid_items = { data: [storedItem(), ...FOREIGN_ITEMS], error: null }
     expect(lists(await render('saved'))).toHaveLength(2)
   })
