@@ -1,23 +1,32 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { checkSignIn } from '@/lib/auth-check'
 import { assertEnvMatchesDatabase, envGuardResponse } from '@/lib/app-env'
 import { unknownIfLost } from '@/lib/lost-reply'
 
-async function household(supabase: Awaited<ReturnType<typeof createClient>>) {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return null
+type Supabase = Awaited<ReturnType<typeof createClient>>
+
+const TRY_AGAIN = 'That could not be saved. Please try again.'
+
+// Sign-in, by the rule in lib/auth-check.ts (#143): a 503 when Supabase Auth could not be asked,
+// in words CategoryManager shows as they stand, and a 401 when the session has ended. Null when
+// signed in. Every handler runs it before touching the database.
+async function refusedSignIn(supabase: Supabase, unchecked: string): Promise<NextResponse | null> {
+  const signIn = await checkSignIn(supabase, '[categories]')
+  if (signIn.state === 'unknown') return NextResponse.json({ error: unchecked }, { status: 503 })
+  if (signIn.state === 'ended') return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  return null
+}
+
+async function household(supabase: Supabase) {
   const { data: m } = await supabase.from('memberships').select('household_id').limit(1).single()
   return m?.household_id ?? null
 }
 
 export async function GET() {
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  const refused = await refusedSignIn(supabase, 'Your categories could not be loaded. Please try again.')
+  if (refused) return refused
   const { data } = await supabase
     .from('categories')
     .select('id, name, pfc_primary, sort_order')
@@ -31,6 +40,8 @@ export async function POST(req: Request) {
   const clean = (name ?? '').trim()
   if (!clean) return NextResponse.json({ error: 'name required' }, { status: 400 })
   const supabase = await createClient()
+  const refused = await refusedSignIn(supabase, TRY_AGAIN)
+  if (refused) return refused
   const hid = await household(supabase)
   if (!hid) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
@@ -57,10 +68,8 @@ export async function PATCH(req: Request) {
   const clean = (name ?? '').trim()
   if (!id || !clean) return NextResponse.json({ error: 'id and name required' }, { status: 400 })
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  const refused = await refusedSignIn(supabase, TRY_AGAIN)
+  if (refused) return refused
 
   const { data: cat } = await supabase.from('categories').select('name').eq('id', id).single()
   if (!cat) return NextResponse.json({ error: 'not found' }, { status: 404 })
@@ -81,10 +90,8 @@ export async function DELETE(req: Request) {
   const { id } = await req.json()
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  const refused = await refusedSignIn(supabase, 'That category could not be deleted. Please try again.')
+  if (refused) return refused
   // Guarded because deleting a category now deletes its rules too (category_rules' FK, #28 spec
   // §6.3). PATCH also rewrites picks and budgets in the shared database but touches no rule; whether
   // to guard it is #148.

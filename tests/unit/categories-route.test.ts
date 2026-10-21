@@ -34,8 +34,9 @@ vi.mock('@/lib/app-env', async (importOriginal) => ({
   assertEnvMatchesDatabase,
 }))
 
+import { AuthApiError, AuthRetryableFetchError, AuthSessionMissingError } from '@supabase/supabase-js'
 import { EnvMismatchError } from '@/lib/app-env'
-import { DELETE, PATCH, POST } from '@/app/api/categories/route'
+import { DELETE, GET, PATCH, POST } from '@/app/api/categories/route'
 import { NO_ANSWER, REFUSED_5XX } from '../stubs/no-answer'
 import { answerOf, UNKNOWN_ANSWER } from './helpers/route-answers'
 
@@ -48,8 +49,53 @@ const rename = () => send(PATCH, 'PATCH', { id: 'c-grocery', name: 'Groceries' }
 beforeEach(() => {
   calls.length = 0
   replies.clear()
-  getUser.mockResolvedValue({ data: { user: { id: 'u1' } } })
+  getUser.mockResolvedValue({ data: { user: { id: 'u1' } }, error: null })
   assertEnvMatchesDatabase.mockReset().mockResolvedValue(undefined)
+})
+
+// #143: every handler answered 401 'unauthorized' when getUser found no user, including when
+// Supabase Auth could not be asked, so an outage read as a signed-out person. getUser answers as
+// supabase-js does: no user and the error, in auth-js's own classes.
+describe('/api/categories sign-in', () => {
+  const handlers = [
+    ['GET', () => GET(), 'Your categories could not be loaded. Please try again.'],
+    ['POST', add, 'That could not be saved. Please try again.'],
+    ['PATCH', rename, 'That could not be saved. Please try again.'],
+    ['DELETE', del, 'That category could not be deleted. Please try again.'],
+  ] as const
+
+  it.each(handlers)('%s answers 503 in words, logs it, and touches nothing when Supabase Auth cannot be asked', async (_, send, words) => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    getUser.mockResolvedValue({ data: { user: null }, error: new AuthRetryableFetchError('fetch failed', 0) })
+    const res = await send()
+    expect(res.status).toBe(503)
+    expect(await res.json()).toEqual({ error: words })
+    expect(logged).toHaveBeenCalledWith('[categories] auth check failed', { status: 0, message: 'fetch failed' })
+    expect(calls).toEqual([])
+    expect(assertEnvMatchesDatabase).not.toHaveBeenCalled()
+    logged.mockRestore()
+  })
+
+  it.each(handlers)('%s answers 401 and touches nothing when the session has ended', async (_, send) => {
+    for (const error of [
+      new AuthSessionMissingError(),
+      new AuthApiError('Invalid Refresh Token: Refresh Token Not Found', 400, 'refresh_token_not_found'),
+    ]) {
+      calls.length = 0
+      getUser.mockResolvedValue({ data: { user: null }, error })
+      const res = await send()
+      expect(res.status).toBe(401)
+      expect(await res.json()).toEqual({ error: 'unauthorized' })
+      expect(calls).toEqual([])
+      expect(assertEnvMatchesDatabase).not.toHaveBeenCalled()
+    }
+  })
+
+  it.each(handlers)('%s goes on to the database when signed in', async (method, send) => {
+    const res = await send()
+    expect(res.status).toBe(200)
+    expect(calls[0]).toBe(method === 'POST' ? 'memberships' : 'categories')
+  })
 })
 
 describe('DELETE /api/categories environment guard', () => {
