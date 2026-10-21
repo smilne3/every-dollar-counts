@@ -38,4 +38,15 @@ describe('app/(app)/error.tsx', () => {
     // reset() re-renders without re-fetching, so a failed server read would only fail again.
     expect(reset).not.toHaveBeenCalled()
   })
+
+  // It used to add "Your other pages are unaffected". A failed read of the bank list, which every
+  // money page makes for the "isn't syncing" banner (#171), takes them all down at once.
+  it('says what to do, and promises nothing about the other pages', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const props: NextErrorProps = { error: new Error('could not read linked banks: timeout'), reset: vi.fn(), retry: vi.fn() }
+    render(<AppSegmentError {...props} />)
+    expect(screen.getByText(/^Something went wrong/).textContent).toBe(
+      'Something went wrong fetching this data. Try again, or come back in a moment.'
+    )
+  })
 })

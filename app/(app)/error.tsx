@@ -12,7 +12,9 @@ import { Card } from '@/components/ui/Card'
 // This does NOT swallow or disguise the error — that would defeat the reason fetchReceivable throws
 // in the first place. It only shrinks the blast radius: the sidebar and nav (rendered by
 // app/(app)/layout.tsx, which sits above this boundary and is unaffected) stay usable, and the failed
-// section shows a plain "couldn't load" message with a retry instead of a blank/crashed page.
+// section shows a plain "couldn't load" message with a retry instead of a blank/crashed page. It
+// makes no promise about the other pages: a read most of them share, like the bank list behind the
+// "isn't syncing" banner (#171), fails on every one of them at once.
 // `retry`, not `unstable_retry`: Next 16.3 made the prop stable under its new name, and the old one is
 // never passed, so a button calling it does nothing. tests/unit/app-error-boundary.test.tsx holds these
 // props to the ones Next's error boundary passes (its ErrorInfo type).
@@ -34,8 +36,7 @@ export default function AppSegmentError({
       <Card className="max-w-sm p-8 text-center">
         <h2 className="text-lg font-semibold text-ink">This section couldn&apos;t load</h2>
         <p className="mt-2 text-sm text-muted">
-          Something went wrong fetching this data. Your other pages are unaffected — retry, or come
-          back in a moment.
+          Something went wrong fetching this data. Try again, or come back in a moment.
         </p>
         {error.message && (
           <p className="mt-3 break-words text-xs text-coral" role="alert">
