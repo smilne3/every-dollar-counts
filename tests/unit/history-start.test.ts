@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // A small in-memory database that applies the filters, ordering and limit a query asks for, so a
 // read that sorts the wrong way or forgets `removed` gets the wrong answer here as it would live.
+// It is the signed-in client, so it refuses plaid_items, which RLS gives it no rows of (#169).
 type Row = Record<string, unknown>
 const { db } = vi.hoisted(() => ({
   db: {
@@ -10,33 +11,37 @@ const { db } = vi.hoisted(() => ({
     emptyBody: null as null | string,
   },
 }))
-vi.mock('@/lib/supabase/server', () => ({
-  createClient: async () => ({
-    from: (table: string) => {
-      const eqs: [string, unknown][] = []
-      let order: { col: string; asc: boolean } | null = null
-      let limit = Infinity
-      const run = () => {
-        if (db.fail === table) return { data: null, error: { message: 'timeout' } }
-        if (db.emptyBody === table) return { data: null, error: null }
-        let rows = (db.tables[table] ?? []).filter((r) => eqs.every(([c, v]) => r[c] === v))
-        if (order) {
-          const { col, asc } = order
-          rows = [...rows].sort((a, b) => (String(a[col]) < String(b[col]) ? -1 : 1) * (asc ? 1 : -1))
+vi.mock('@/lib/supabase/server', async () => {
+  const { refuseSignedInPlaidItems } = await import('../stubs/plaid-items')
+  return {
+    createClient: async () => ({
+      from: (table: string) => {
+        refuseSignedInPlaidItems(table)
+        const eqs: [string, unknown][] = []
+        let order: { col: string; asc: boolean } | null = null
+        let limit = Infinity
+        const run = () => {
+          if (db.fail === table) return { data: null, error: { message: 'timeout' } }
+          if (db.emptyBody === table) return { data: null, error: null }
+          let rows = (db.tables[table] ?? []).filter((r) => eqs.every(([c, v]) => r[c] === v))
+          if (order) {
+            const { col, asc } = order
+            rows = [...rows].sort((a, b) => (String(a[col]) < String(b[col]) ? -1 : 1) * (asc ? 1 : -1))
+          }
+          return { data: rows.slice(0, limit), error: null }
         }
-        return { data: rows.slice(0, limit), error: null }
-      }
-      const chain: Record<string, unknown> = {
-        select: () => chain,
-        eq: (c: string, v: unknown) => (eqs.push([c, v]), chain),
-        order: (col: string, o?: { ascending?: boolean }) => ((order = { col, asc: o?.ascending !== false }), chain),
-        limit: (n: number) => ((limit = n), chain),
-        then: (resolve: (v: unknown) => unknown) => Promise.resolve(run()).then(resolve),
-      }
-      return chain
-    },
-  }),
-}))
+        const chain: Record<string, unknown> = {
+          select: () => chain,
+          eq: (c: string, v: unknown) => (eqs.push([c, v]), chain),
+          order: (col: string, o?: { ascending?: boolean }) => ((order = { col, asc: o?.ascending !== false }), chain),
+          limit: (n: number) => ((limit = n), chain),
+          then: (resolve: (v: unknown) => unknown) => Promise.resolve(run()).then(resolve),
+        }
+        return chain
+      },
+    }),
+  }
+})
 
 import { historyStart } from '@/lib/history-start'
 
@@ -46,14 +51,7 @@ const txn = (account_id: string, date: string, removed = false) => ({ account_id
 beforeEach(() => {
   db.fail = null
   db.emptyBody = null
-  db.tables = {
-    plaid_items: [
-      { id: 'amex', institution_name: 'American Express' },
-      { id: 'capone', institution_name: 'Capital One' },
-    ],
-    accounts: [],
-    transactions: [],
-  }
+  db.tables = { accounts: [], transactions: [] }
 })
 
 describe('historyStart', () => {
@@ -79,11 +77,12 @@ describe('historyStart', () => {
   })
 
   // Linked, but the first sync has not landed. Averaging without it would count months missing a
-  // whole bank, so the answer is "waiting", by name, not a figure.
-  it('is pending, naming the bank, when a bank has cash-flow accounts and no transactions yet', async () => {
+  // whole bank, so the answer is "waiting", not a figure. The bank comes back by its id, for
+  // savedAverage to name from the bank list: this client cannot read the name (#169).
+  it('is pending, on that bank, when a bank has cash-flow accounts and no transactions yet', async () => {
     db.tables.accounts = [acct('platinum', 'amex', 'credit'), acct('checking', 'capone')]
     db.tables.transactions = [txn('platinum', '2025-10-18')]
-    expect(await historyStart()).toEqual({ kind: 'pending', bank: 'Capital One' })
+    expect(await historyStart()).toEqual({ kind: 'pending', itemId: 'capone' })
   })
 
   // Loans and investments never carry transactions (migration 020), so they are not waited for.
@@ -112,7 +111,7 @@ describe('historyStart', () => {
   })
 
   // #46: a failed read must not pass for "no history yet".
-  it.each(['accounts', 'transactions', 'plaid_items'])('throws when the %s read fails', async (table) => {
+  it.each(['accounts', 'transactions'])('throws when the %s read fails', async (table) => {
     db.tables.accounts = [acct('platinum', 'amex', 'credit'), acct('checking', 'capone')]
     db.tables.transactions = [txn('platinum', '2025-10-18')]
     db.fail = table
@@ -120,7 +119,7 @@ describe('historyStart', () => {
   })
 
   // postgrest-js reports an empty-body response as no data and no error.
-  it.each(['accounts', 'transactions', 'plaid_items'])('throws when the %s read returns no data and no error', async (table) => {
+  it.each(['accounts', 'transactions'])('throws when the %s read returns no data and no error', async (table) => {
     db.tables.accounts = [acct('platinum', 'amex', 'credit'), acct('checking', 'capone')]
     db.tables.transactions = [txn('platinum', '2025-10-18')]
     db.emptyBody = table

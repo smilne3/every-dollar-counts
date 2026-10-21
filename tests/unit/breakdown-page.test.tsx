@@ -6,7 +6,7 @@ const { results, calls, tz, history, selects } = vi.hoisted(() => ({
   // Every `.select()` the page sends, per table, so a test can pin the suggestion embed (§7.4).
   selects: {} as Record<string, string[]>,
   // What lib/history-start answers; see tests/unit/dashboard-page.test.tsx for why it is mocked.
-  history: { value: { kind: 'none' } as { kind: 'ready'; month: string } | { kind: 'pending'; bank: string } | { kind: 'none' } },
+  history: { value: { kind: 'none' } as { kind: 'ready'; month: string } | { kind: 'pending'; itemId: string } | { kind: 'none' } },
   results: {} as Record<string, { data: unknown; error: { message: string } | null }>,
   calls: { gte: [] as string[] },
   tz: { value: 'America/New_York' },
@@ -43,9 +43,18 @@ const chainFor = (table: string) => {
   return chain
 }
 
-vi.mock('@/lib/supabase/server', () => ({
-  createClient: async () => ({ from: (table: string) => chainFor(table) }),
-}))
+// The signed-in client refuses plaid_items, which RLS gives it no rows of (#169).
+vi.mock('@/lib/supabase/server', async () => {
+  const { refuseSignedInPlaidItems } = await import('../stubs/plaid-items')
+  return {
+    createClient: async () => ({
+      from: (table: string) => {
+        refuseSignedInPlaidItems(table)
+        return chainFor(table)
+      },
+    }),
+  }
+})
 // The service-role client answers from `results` too, so lib/manual-assets.ts and
 // lib/plaid-items.ts run for real and a failed read reaches the page as it would in production
 // (#91). plaid_items goes through the strict stand-in in tests/stubs/plaid-items.ts, which applies
@@ -265,6 +274,10 @@ describe('Saved breakdown: average per month (#126)', () => {
   })
   beforeEach(() => {
     vi.setSystemTime(new Date('2026-09-15T16:00:00Z'))
+    results.plaid_items = {
+      data: [storedItem(), storedItem({ id: 'item-2', institution_name: 'Amex', created_at: '2026-07-15T09:00:00Z' })],
+      error: null,
+    }
     results.categories = { data: [{ id: 'c1', name: 'Income', pfc_primary: 'INCOME', sort_order: 0 }], error: null }
     results.transactions = {
       data: [
@@ -301,13 +314,22 @@ describe('Saved breakdown: average per month (#126)', () => {
 
   it.each([
     ['no full month has followed the history start', { kind: 'ready', month: '2026-08' }, /not enough history yet/i],
-    ['a bank is still delivering its history', { kind: 'pending', bank: 'Capital One' }, /waiting for Capital One's/],
+    ['a bank is still delivering its history', { kind: 'pending', itemId: 'item-1' }, /waiting for Capital One's/],
     ['there are no transactions', { kind: 'none' }, /no transactions yet/i],
   ] as const)('says why there is no average when %s', async (_, state, reason) => {
     history.value = state
     const tree = await render('saved')
     expect(lists(tree)).toHaveLength(1)
     expect(textOf(tree)).toMatch(reason)
+  })
+
+  // #169: historyStart says which bank by id; its name comes from the bank list this page reads
+  // with the service-role client, the one read that can see plaid_items.
+  it('names the bank the average is waiting for, from the bank list', async () => {
+    history.value = { kind: 'pending', itemId: 'item-2' }
+    expect(textOf(blocks(await render('saved')).at(-1)!)).toBe(
+      "The average is waiting for Amex's transaction history to arrive."
+    )
   })
 
   // #135: August would be missing a broken bank's transactions from the day it broke, and still be

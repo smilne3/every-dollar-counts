@@ -169,11 +169,15 @@ export type SavedAverage =
 // missing that bank's transactions, and when it broke is not stored, so there is no telling which
 // months to leave out. That reason comes first: it is the one the reader can act on, and it is true
 // whatever the history says.
+//
+// `banks` is the list lib/plaid-items.ts reads with the service-role client, the only one that can
+// see plaid_items. The bank the history waits for is named from it by id (#169). One that isn't in
+// it, or has no name, is still waited for, as "a newly linked bank".
 export function savedAverage(
   flows: { key: string; label: string; spending: number; income: number }[],
   currentKey: string,
   start: HistoryStart,
-  banks: { institution_name: string | null; status: string }[]
+  banks: { id: string; institution_name: string | null; status: string }[]
 ): SavedAverage {
   const behind = notSyncing(banks)
   if (behind.length) {
@@ -189,9 +193,10 @@ export function savedAverage(
     return { kind: 'unavailable', reason: 'No transactions yet, so there is no average.' }
   }
   if (start.kind === 'pending') {
+    const bank = banks.find((b) => b.id === start.itemId)
     return {
       kind: 'unavailable',
-      reason: `The average is waiting for ${start.bank}'s transaction history to arrive.`,
+      reason: `The average is waiting for ${bank?.institution_name ?? 'a newly linked bank'}'s transaction history to arrive.`,
     }
   }
   const avg = averageSaved(flows, { currentKey, historyStartKey: start.month })

@@ -5,12 +5,15 @@ import { isCashFlowAccount } from '@/lib/account-types'
 // Where the household's history is complete enough to average (#126):
 // - `ready`: from `month` ('YYYY-MM') every bank's history has begun. That month is itself partial,
 //   so the average-savings figure counts only the months after it;
-// - `pending`: `bank` is linked but its first sync has not landed. Averaging without it would count
-//   months missing a whole bank, so there is no figure until it arrives;
+// - `pending`: the bank `itemId` (its plaid_items id, as accounts.plaid_item_id holds it) is linked
+//   but its first sync has not landed. Averaging without it would count months missing a whole
+//   bank, so there is no figure until it arrives. savedAverage (lib/dashboard.ts) names it from the
+//   household's bank list: this reads with the signed-in client, which RLS gives no plaid_items rows
+//   at all, so the name it used to read here was always missing (#169);
 // - `none`: no cash-flow accounts with transactions at all.
 export type HistoryStart =
   | { kind: 'ready'; month: string }
-  | { kind: 'pending'; bank: string }
+  | { kind: 'pending'; itemId: string }
   | { kind: 'none' }
 
 // Each bank supplies a different amount of history when it is linked: on 2026-10-06 Amex went back
@@ -58,16 +61,7 @@ export async function historyStart(): Promise<HistoryStart> {
   if (!byBank.size) return { kind: 'none' }
 
   const waiting = [...byBank].find(([, start]) => start === null)
-  if (waiting) {
-    const { data: item, error: itemError } = await supabase
-      .from('plaid_items')
-      .select('institution_name')
-      .eq('id', waiting[0])
-      .limit(1)
-    if (itemError) throw new Error(`could not read the bank: ${itemError.message}`)
-    if (!item) throw new Error('could not read the bank: no data and no error')
-    return { kind: 'pending', bank: (item[0]?.institution_name as string | undefined) ?? 'A bank' }
-  }
+  if (waiting) return { kind: 'pending', itemId: waiting[0] }
 
   const latest = [...byBank.values()].sort().pop() as string
   return { kind: 'ready', month: latest.slice(0, 7) }

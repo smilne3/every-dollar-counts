@@ -36,6 +36,19 @@ export const FOREIGN_ITEMS: Row[] = [
   storedItem({ id: 'item-production', plaid_env: 'production', institution_name: 'Wells Fargo', status: 'needs_reconnect' }),
 ]
 
+// The signed-in client's side. plaid_items holds the encrypted access token, so RLS is on with no
+// policy for a signed-in person (db/migrations/006_rls_policies.sql): through createClient() every
+// read of it answers no rows and no error. Nothing fails, and the bank is missing, which is how the
+// savings average came to wait for "A bank" whatever the bank was called (#169). The per-user
+// stand-ins call this on every from(), so such a read fails its test, by name, instead.
+export function refuseSignedInPlaidItems(table: string): void {
+  if (table === 'plaid_items') {
+    throw new Error(
+      'plaid_items read through the signed-in client, which RLS answers with no rows: read it through lib/plaid-items.ts (#169)'
+    )
+  }
+}
+
 // One `supabaseAdmin.from('plaid_items')` query over `reply`'s rows. Call it once per from().
 export function plaidItemsQuery(reply: Reply): Record<string, unknown> {
   const filters: [string, unknown][] = []

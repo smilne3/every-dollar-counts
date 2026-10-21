@@ -8,7 +8,7 @@ const { results, tz, presentation, paged, history, selects } = vi.hoisted(() => 
   // What lib/history-start answers. Mocked so these tests can tell a page that takes the history
   // start from historyStart apart from one that guesses it from its own transaction read: this
   // stub serves the whole fixture to every query, so the two would otherwise always agree.
-  history: { value: { kind: 'none' } as { kind: 'ready'; month: string } | { kind: 'pending'; bank: string } | { kind: 'none' } },
+  history: { value: { kind: 'none' } as { kind: 'ready'; month: string } | { kind: 'pending'; itemId: string } | { kind: 'none' } },
   results: {} as Record<string, { data: unknown; error: { message: string } | null }>,
   // When set, `transactions` is served by a PostgREST-like stub that caps each response at 1,000
   // rows, so the test can tell a paged read from a plain one (#69).
@@ -43,12 +43,18 @@ const chainFor = (table: string) => {
   return chain
 }
 
-vi.mock('@/lib/supabase/server', () => ({
-  createClient: async () => ({
-    from: (table: string) =>
-      table === 'transactions' && paged.transactions ? paged.transactions.query() : chainFor(table),
-  }),
-}))
+// The signed-in client refuses plaid_items, which RLS gives it no rows of (#169).
+vi.mock('@/lib/supabase/server', async () => {
+  const { refuseSignedInPlaidItems } = await import('../stubs/plaid-items')
+  return {
+    createClient: async () => ({
+      from: (table: string) => {
+        refuseSignedInPlaidItems(table)
+        return table === 'transactions' && paged.transactions ? paged.transactions.query() : chainFor(table)
+      },
+    }),
+  }
+})
 // The service-role client answers from `results` too, so lib/manual-assets.ts and
 // lib/plaid-items.ts run for real and a failed read reaches the page as it would in production
 // (#91). plaid_items goes through the strict stand-in in tests/stubs/plaid-items.ts, which applies
@@ -454,7 +460,7 @@ describe('Dashboard average savings (#126)', () => {
 
   it.each([
     ['history is in but no full month has followed it', { kind: 'ready', month: '2026-08' }],
-    ['a bank has not delivered its history yet', { kind: 'pending', bank: 'Capital One' }],
+    ['a bank has not delivered its history yet', { kind: 'pending', itemId: 'item-1' }],
     ['there are no transactions', { kind: 'none' }],
   ] as const)('shows no line when %s', async (_, state) => {
     results.categories = income
@@ -535,7 +541,7 @@ describe('Dashboard average savings (#126)', () => {
     history.value = { kind: 'ready', month: '2026-02' }
     expect(textOf((await phoneRows()).rows[2].foot)).toContain('Avg $3,000/mo · 6 mo')
 
-    history.value = { kind: 'pending', bank: 'Capital One' }
+    history.value = { kind: 'pending', itemId: 'item-1' }
     const foot = textOf((await phoneRows()).rows[2].foot)
     expect(foot).not.toContain('Avg')
     expect(foot.replace(/\s+/g, ' ')).toContain('$0 in · $5,000 out')
