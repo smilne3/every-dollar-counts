@@ -101,9 +101,10 @@ export async function syncAndStore(item: {
   const nonCashFlow = new Set(
     (acctRows ?? []).filter((a) => !isCashFlowAccount(a.type)).map((a) => a.account_id)
   )
+  const onCashFlowAccount = (t: { account_id: string }) => !nonCashFlow.has(t.account_id)
 
   const upserts = [...added, ...modified]
-    .filter((t) => !nonCashFlow.has(t.account_id))
+    .filter(onCashFlowAccount)
     .map((t) => transactionUpsertRow(t, item.household_id))
 
   // A `modified` transaction can arrive with a SMALLER amount than the one already stored (an
@@ -157,5 +158,7 @@ export async function syncAndStore(item: {
     .eq('id', item.id)
   if (cursorErr) throw new Error(`cursor update failed: ${cursorErr.message}`)
 
-  return { added: added.length, modified: modified.length, removed: removed.length }
+  // `added` counts what was stored, not everything Plaid sent: Refresh says "· N new" from it, and a
+  // loan's or brokerage account's transaction, dropped above, never shows on Transactions (#178).
+  return { added: added.filter(onCashFlowAccount).length, modified: modified.length, removed: removed.length }
 }

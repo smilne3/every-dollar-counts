@@ -170,6 +170,24 @@ describe('syncAndStore drops non-cash-flow transactions', () => {
     expect(state.upserted.map((r) => r.plaid_transaction_id)).toEqual(['unknown-acct-txn'])
   })
 
+  // #178: Refresh says "· N new" from this count. A loan account's transaction is never stored, so it
+  // never shows on Transactions, and is not in it.
+  it('counts only the added transactions it stores', async () => {
+    const state = freshState([
+      { account_id: 'mortgage-1', type: 'loan' },
+      { account_id: 'checking-1', type: 'depository' },
+    ])
+    installAdmin(state)
+    syncItem.mockResolvedValue({
+      added: [plaidTxn('escrow-tax', 'mortgage-1'), plaidTxn('paycheck', 'checking-1')],
+      modified: [],
+      removed: [],
+      next_cursor: 'c1',
+    })
+
+    expect(await syncAndStore(ITEM)).toEqual({ added: 1, modified: 0, removed: 0 })
+  })
+
   it('still advances the cursor when every transaction was dropped', async () => {
     const state = freshState([{ account_id: 'mortgage-1', type: 'loan' }])
     installAdmin(state)
