@@ -13,9 +13,9 @@ vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 
 import { AuthRetryableFetchError, type AuthError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
-import { MAY_NOT_HAVE_SAVED } from '@/lib/save-response'
 import { POST } from '@/app/api/household/invite/route'
 import { NO_ANSWER } from '../stubs/no-answer'
+import { answerOf, UNKNOWN_ANSWER } from './helpers/route-answers'
 
 type Row = Record<string, unknown>
 type DbError = { code?: string; message: string } | null
@@ -184,8 +184,7 @@ describe('POST /api/household/invite', () => {
   it('answers that it may not have saved when the database never answers the upsert, and logs it', async () => {
     makeSupabase({ noAnswer: true })
     const res = await invite()
-    expect(res.status).toBe(502)
-    expect(await res.json()).toEqual({ error: MAY_NOT_HAVE_SAVED, unknown: true })
+    expect(await answerOf(res)).toEqual(UNKNOWN_ANSWER)
     expect(logs).toContainEqual(['[household/invite] upsert failed', { household_id: 'hh-1', code: '', message: 'TypeError: fetch failed' }])
   })
 })

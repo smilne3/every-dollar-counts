@@ -28,9 +28,9 @@ vi.mock('@/lib/category-rules', async (importOriginal) => {
 import { AuthApiError, AuthRetryableFetchError, AuthSessionMissingError, type AuthError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
 import { EnvMismatchError } from '@/lib/app-env'
-import { MAY_NOT_HAVE_SAVED } from '@/lib/save-response'
 import { POST } from '@/app/api/transactions/categorize/route'
 import { NO_ANSWER } from '../stubs/no-answer'
+import { answerOf, UNKNOWN_ANSWER } from './helpers/route-answers'
 
 type Row = Record<string, unknown>
 type Err = { message: string } | null
@@ -317,8 +317,7 @@ describe('POST /api/transactions/categorize', () => {
   it('answers that it may not have saved when the database never answers the write, and learns nothing', async () => {
     const calls = makeSupabase({ row: ROW, update: NO_ANSWER })
     const res = await post({ transactionId: 'txn-1', category: 'Grocery' })
-    expect(res.status).toBe(502)
-    expect(await res.json()).toEqual({ error: MAY_NOT_HAVE_SAVED, unknown: true })
+    expect(await answerOf(res)).toEqual(UNKNOWN_ANSWER)
     expect(calls.upserts).toHaveLength(0)
     expect(logs).toContainEqual(['[categorize] update failed', 'TypeError: fetch failed'])
     expect(logs.some((l) => l[0] === '[categorize] changed')).toBe(false)

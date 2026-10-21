@@ -15,9 +15,9 @@ vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 
 import { AuthRetryableFetchError, type AuthError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
-import { MAY_NOT_HAVE_SAVED } from '@/lib/save-response'
 import { POST, PATCH, DELETE } from '@/app/api/goals/route'
 import { NO_ANSWER } from '../stubs/no-answer'
+import { answerOf, UNKNOWN_ANSWER } from './helpers/route-answers'
 
 type Row = Record<string, unknown>
 type DbError = { code?: string; message: string } | null
@@ -216,8 +216,7 @@ describe('POST /api/goals', () => {
   it('answers that it may not have saved when the database never answers the insert, and logs it', async () => {
     const calls = makeSupabase({ noAnswer: 'insert' })
     const res = await add()
-    expect(res.status).toBe(502)
-    expect(await res.json()).toEqual({ error: MAY_NOT_HAVE_SAVED, unknown: true })
+    expect(await answerOf(res)).toEqual(UNKNOWN_ANSWER)
     expect(calls.inserts).toHaveLength(1)
     expect(logs).toContainEqual(['[goals] add failed', { household_id: 'hh-1', code: '', message: 'TypeError: fetch failed' }])
   })
@@ -305,8 +304,7 @@ describe('PATCH /api/goals', () => {
   it('answers that it may not have saved when the database never answers the update', async () => {
     makeSupabase({ noAnswer: 'update' })
     const res = await update()
-    expect(res.status).toBe(502)
-    expect(await res.json()).toEqual({ error: MAY_NOT_HAVE_SAVED, unknown: true })
+    expect(await answerOf(res)).toEqual(UNKNOWN_ANSWER)
   })
 })
 
@@ -355,7 +353,6 @@ describe('DELETE /api/goals', () => {
   it('answers that it may not have saved when the database never answers the delete', async () => {
     makeSupabase({ noAnswer: 'delete' })
     const res = await remove()
-    expect(res.status).toBe(502)
-    expect(await res.json()).toEqual({ error: MAY_NOT_HAVE_SAVED, unknown: true })
+    expect(await answerOf(res)).toEqual(UNKNOWN_ANSWER)
   })
 })

@@ -51,9 +51,9 @@ vi.mock('@/lib/app-env', async (importOriginal) => ({
 }))
 
 import { EnvMismatchError } from '@/lib/app-env'
-import { MAY_NOT_HAVE_SAVED } from '@/lib/save-response'
 import { PATCH, DELETE } from '@/app/api/category-rules/route'
 import { NO_ANSWER } from '../stubs/no-answer'
+import { answerOf, UNKNOWN_ANSWER } from './helpers/route-answers'
 
 const CATS = [
   { id: 'c-food', name: 'Food & Drink', pfc_primary: 'FOOD_AND_DRINK', sort_order: 0 },
@@ -147,8 +147,7 @@ describe('PATCH /api/category-rules (Change)', () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     db.write = NO_ANSWER
     const res = await change()
-    expect(res.status).toBe(502)
-    expect(await res.json()).toEqual({ error: MAY_NOT_HAVE_SAVED, unknown: true })
+    expect(await answerOf(res)).toEqual(UNKNOWN_ANSWER)
     log.mockRestore()
   })
 
@@ -215,8 +214,7 @@ describe('DELETE /api/category-rules (Remove)', () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     db.write = NO_ANSWER
     const res = await remove()
-    expect(res.status).toBe(502)
-    expect(await res.json()).toEqual({ error: MAY_NOT_HAVE_SAVED, unknown: true })
+    expect(await answerOf(res)).toEqual(UNKNOWN_ANSWER)
     log.mockRestore()
   })
 

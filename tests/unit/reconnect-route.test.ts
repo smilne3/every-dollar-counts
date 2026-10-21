@@ -30,9 +30,9 @@ vi.mock('@/lib/app-env', async (importOriginal) => ({
 
 import { AuthRetryableFetchError, type AuthError } from '@supabase/supabase-js'
 import { EnvMismatchError } from '@/lib/app-env'
-import { MAY_NOT_HAVE_SAVED } from '@/lib/save-response'
 import { POST } from '@/app/api/plaid/reconnect/route'
 import { NO_ANSWER } from '../stubs/no-answer'
+import { answerOf, UNKNOWN_ANSWER } from './helpers/route-answers'
 
 type Row = Record<string, unknown>
 type DbError = { code?: string; message: string } | null
@@ -259,8 +259,7 @@ describe('POST /api/plaid/reconnect: the reconnect', () => {
   it('answers that it may not have saved when the database never answers the status write, and pulls nothing', async () => {
     makeStandIns({ noAnswer: true })
     const res = await reconnect()
-    expect(res.status).toBe(502)
-    expect(await res.json()).toEqual({ error: MAY_NOT_HAVE_SAVED, unknown: true })
+    expect(await answerOf(res)).toEqual(UNKNOWN_ANSWER)
     expect(logs).toContainEqual(['[plaid] reconnect status write failed', { itemId: 'item-1', code: '', message: 'TypeError: fetch failed' }])
     expect(storeAccounts).not.toHaveBeenCalled()
   })

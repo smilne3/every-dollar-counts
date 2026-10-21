@@ -19,9 +19,9 @@ vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 
 import { AuthRetryableFetchError, type AuthError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
-import { MAY_NOT_HAVE_SAVED } from '@/lib/save-response'
 import { PATCH } from '@/app/api/reimbursable/route'
 import { NO_ANSWER } from '../stubs/no-answer'
+import { answerOf, UNKNOWN_ANSWER } from './helpers/route-answers'
 
 type Row = Record<string, unknown>
 type DbError = { code?: string; message: string } | null
@@ -291,8 +291,7 @@ describe('PATCH /api/reimbursable', () => {
   it('answers that it may not have saved when the database never answers the write, and logs it', async () => {
     makeSupabase({ update: NO_ANSWER })
     const res = await mark()
-    expect(res.status).toBe(502)
-    expect(await res.json()).toEqual({ error: MAY_NOT_HAVE_SAVED, unknown: true })
+    expect(await answerOf(res)).toEqual(UNKNOWN_ANSWER)
     expect(logs).toContainEqual(['[reimbursable] update failed', { id: 'txn-1', code: '', message: 'TypeError: fetch failed' }])
   })
 

@@ -35,9 +35,9 @@ vi.mock('@/lib/app-env', async (importOriginal) => ({
 }))
 
 import { EnvMismatchError } from '@/lib/app-env'
-import { MAY_NOT_HAVE_SAVED } from '@/lib/save-response'
 import { DELETE, PATCH, POST } from '@/app/api/categories/route'
 import { NO_ANSWER } from '../stubs/no-answer'
+import { answerOf, UNKNOWN_ANSWER } from './helpers/route-answers'
 
 const send = (handler: (req: Request) => Promise<Response>, method: string, body: unknown) =>
   handler(new Request('http://localhost/api/categories', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }))
@@ -82,15 +82,13 @@ describe('POST and PATCH /api/categories: a write the database never answered', 
   it('answers that an add may not have saved', async () => {
     replies.set('categories.insert', NO_ANSWER)
     const res = await add()
-    expect(res.status).toBe(502)
-    expect(await res.json()).toEqual({ error: MAY_NOT_HAVE_SAVED, unknown: true })
+    expect(await answerOf(res)).toEqual(UNKNOWN_ANSWER)
   })
 
   it('answers that a rename may not have saved, and moves no picks or budgets onto the new name', async () => {
     replies.set('categories.update', NO_ANSWER)
     const res = await rename()
-    expect(res.status).toBe(502)
-    expect(await res.json()).toEqual({ error: MAY_NOT_HAVE_SAVED, unknown: true })
+    expect(await answerOf(res)).toEqual(UNKNOWN_ANSWER)
     expect(calls).toEqual(['categories', 'categories'])
   })
 

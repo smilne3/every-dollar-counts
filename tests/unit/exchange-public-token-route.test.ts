@@ -42,8 +42,8 @@ vi.mock('@/lib/app-env', async (importOriginal) => ({
 import { AuthRetryableFetchError, type AuthError } from '@supabase/supabase-js'
 import { POST, maxDuration } from '@/app/api/plaid/exchange-public-token/route'
 import { EXCHANGE_TIMEOUT_MS } from '@/components/plaid-link-context'
-import { MAY_NOT_HAVE_SAVED } from '@/lib/save-response'
 import { NO_ANSWER } from '../stubs/no-answer'
+import { answerOf, UNKNOWN_ANSWER } from './helpers/route-answers'
 
 type Row = Record<string, unknown>
 type DbError = { code?: string; message: string } | null
@@ -232,8 +232,7 @@ describe('POST /api/plaid/exchange-public-token: the bank', () => {
   it('keeps the bank at Plaid, answers that it may not have saved, and logs the Item, when the database never answers the insert', async () => {
     const calls = makeStandIns({ insertResult: NO_ANSWER })
     const res = await link()
-    expect(res.status).toBe(502)
-    expect(await res.json()).toEqual({ error: MAY_NOT_HAVE_SAVED, unknown: true })
+    expect(await answerOf(res)).toEqual(UNKNOWN_ANSWER)
     expect(calls.inserts).toHaveLength(1)
     expect(itemRemove).not.toHaveBeenCalled()
     expect(logs).toContainEqual([
