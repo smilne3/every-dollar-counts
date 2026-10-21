@@ -87,7 +87,12 @@ describe('averageSaved', () => {
 // it differently.
 describe('savedAverage', () => {
   const flows = [flow('2026-08', 9000, 6000), flow('2026-09', 9000, 4000), flow('2026-10', 0, 900)]
-  const bank = (id: string, institution_name: string | null, status = 'ok') => ({ id, institution_name, status })
+  const bank = (id: string, institution_name: string | null, status = 'ok', products = ['transactions']) => ({
+    id,
+    institution_name,
+    status,
+    products,
+  })
   const syncing = [bank('capone', 'Capital One'), bank('amex', 'Amex')]
   // Both banks' accounts are in.
   const arrived = [{ plaid_item_id: 'capone' }, { plaid_item_id: 'amex' }]
@@ -151,6 +156,16 @@ describe('savedAverage', () => {
       expect(savedAverage(flows, '2026-10', ready, [bank('capone', 'Capital One'), bank('amex', null)], [{ plaid_item_id: 'capone' }])).toEqual({
         kind: 'unavailable',
         reason: "The average is waiting for a newly linked bank's transaction history to arrive.",
+      })
+    })
+
+    // Linked for investments only, it never sends transactions (lib/sync-policy.ts), so there is
+    // nothing to wait for. Its missing balances are for the note on the balance pages to say.
+    it('does not wait for a bank linked for investments only', () => {
+      const banks = [bank('capone', 'Capital One'), bank('fidelity', 'Fidelity', 'ok', ['investments'])]
+      expect(savedAverage(flows, '2026-10', ready, banks, [{ plaid_item_id: 'capone' }])).toMatchObject({
+        kind: 'average',
+        average: 4000,
       })
     })
 

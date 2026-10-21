@@ -272,6 +272,19 @@ describe("Breakdown before a bank's balances arrive (#170)", () => {
     })
   })
 
+  // A bank linked for investments only is as missing from net worth as any other, though the
+  // average does not wait for it (see 'Saved breakdown' below).
+  it('notes on net-worth a bank linked for investments only', async () => {
+    results.plaid_items = {
+      data: [storedItem(), storedItem({ id: 'item-3', institution_name: 'Fidelity', products: ['investments'] })],
+      error: null,
+    }
+    expect(balancesNote(await render('net-worth'))).toEqual({
+      text: "Fidelity is connected, but its balances haven't arrived yet. Press Refresh to fetch them.",
+      refresh: true,
+    })
+  })
+
   // Spent and Saved add up transactions, not balances. Saved's average says it is waiting for the
   // bank instead (see 'Saved breakdown' below).
   it.each(['spent', 'saved'])('places no note on %s', async (metric) => {
@@ -413,6 +426,18 @@ describe('Saved breakdown: average per month (#126)', () => {
     const tree = await render('saved')
     expect(lists(tree)).toHaveLength(1)
     expect(textOf(blocks(tree).at(-1)!)).toBe("The average is waiting for Amex's transaction history to arrive.")
+  })
+
+  // Linked for investments only, a bank sends no transactions, so the average has nothing to wait
+  // for, though its balances are missing too.
+  it("keeps the average for a bank linked for investments only, whose balances haven't arrived", async () => {
+    history.value = { kind: 'ready', month: '2026-05' }
+    results.plaid_items = {
+      data: [storedItem(), storedItem({ id: 'item-3', institution_name: 'Fidelity', products: ['investments'] })],
+      error: null,
+    }
+    results.accounts = { data: [account('item-1')], error: null }
+    expect(lists(await render('saved'))).toHaveLength(2)
   })
 
   // #135: August would be missing a broken bank's transactions from the day it broke, and still be

@@ -6,6 +6,7 @@ import type { SpendContext } from './spend-context'
 import { MONTH_LABELS } from './format'
 import type { HistoryStart } from './history-start'
 import { notSyncing, withoutAccounts } from './bank-state'
+import { shouldSyncTransactions } from './sync-policy'
 
 export type FlowTxn = {
   id: string
@@ -174,15 +175,17 @@ export type SavedAverage =
 // see plaid_items. The bank the history waits for is named from it by id (#169). One that isn't in
 // it, or has no name, is still waited for, as "a newly linked bank".
 //
-// A bank with no accounts yet (#170) is waited for too. Its first balance pull failed, and its
-// transactions can't arrive before its accounts do, so every month is missing it. It is found here,
-// from `banks` and the page's own `accounts`, not in historyStart: that finds banks only through
-// their accounts, and can't read plaid_items to find the rest (#169).
+// A bank with no accounts yet (#170) is waited for too, if it syncs transactions
+// (lib/sync-policy.ts). Its first balance pull failed, and its transactions can't arrive before its
+// accounts do, so every month is missing it. One linked for investments only sends none, so there
+// is nothing to wait for. It is found here, from `banks` and the page's own `accounts`, not in
+// historyStart: that finds banks only through their accounts, and can't read plaid_items to find
+// the rest (#169).
 export function savedAverage(
   flows: { key: string; label: string; spending: number; income: number }[],
   currentKey: string,
   start: HistoryStart,
-  banks: { id: string; institution_name: string | null; status: string }[],
+  banks: { id: string; institution_name: string | null; status: string; products: string[] }[],
   accounts: { plaid_item_id: string }[]
 ): SavedAverage {
   const behind = notSyncing(banks)
@@ -199,7 +202,7 @@ export function savedAverage(
     kind: 'unavailable',
     reason: `The average is waiting for ${bank?.institution_name ?? 'a newly linked bank'}'s transaction history to arrive.`,
   })
-  const bare = withoutAccounts(banks, accounts)
+  const bare = withoutAccounts(banks, accounts).filter((b) => shouldSyncTransactions(b))
   if (bare.length) return waitingFor(bare[0])
   if (start.kind === 'none') {
     return { kind: 'unavailable', reason: 'No transactions yet, so there is no average.' }
