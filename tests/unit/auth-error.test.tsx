@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 import { isInviteOnlyRejection } from '@/lib/authError'
 import AuthCodeError from '@/app/auth/auth-code-error/page'
+import SignInTryAgain from '@/app/auth/try-again/page'
 
 // Auto-cleanup only registers when vitest runs with globals; this suite does not.
 afterEach(() => {
@@ -54,5 +55,24 @@ describe('AuthCodeError page', () => {
     render(<AuthCodeError />)
     expect(screen.getByText(/invalid or expired/i)).toBeTruthy()
     expect(screen.queryByText(/invite-only/i)).toBeNull()
+  })
+})
+
+// #143: where app/auth/confirm/route.ts sends someone it could not finish signing in because
+// Supabase Auth could not be asked. Nothing showed they aren't invited, or that the link was bad.
+describe('SignInTryAgain page', () => {
+  it('says sign-in could not be completed and to try again, with the way back to sign in', () => {
+    render(<SignInTryAgain />)
+    expect(screen.getByRole('heading').textContent).toBe("Sign-in couldn't be completed")
+    expect(screen.getByText(/^Something went wrong/).textContent).toBe(
+      'Something went wrong reaching the sign-in service. Try again, or come back in a moment.'
+    )
+    expect(screen.getByRole('link', { name: 'Back to sign in' }).getAttribute('href')).toBe('/login')
+  })
+
+  it('says nothing about invites or the link', () => {
+    render(<SignInTryAgain />)
+    expect(screen.queryByText(/invite/i)).toBeNull()
+    expect(screen.queryByText(/expired|invalid/i)).toBeNull()
   })
 })
