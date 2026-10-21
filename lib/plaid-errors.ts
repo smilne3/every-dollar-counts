@@ -112,6 +112,16 @@ export function plaidErrorCode(err: unknown): string | null {
   return typeof code === 'string' ? code : null
 }
 
+// Whether a failure came from the call to Plaid: Plaid answered with an error (its error body, or a
+// gateway's page in front of it), or nothing answered, which the SDK's axios throws as its own error
+// (a reset connection, a timeout). Anything else is this app's own, such as a failed database write
+// in lib/ingest.ts, and must not be worded as the bank's (#189). Neither kind need carry a Plaid
+// error_code, so classifyPlaidError can't tell them apart.
+export function fromPlaid(err: unknown): boolean {
+  const e = err as { response?: unknown; isAxiosError?: unknown } | null
+  return e?.response != null || e?.isAxiosError === true
+}
+
 // Plaid ships user-facing wording for most Item errors. Prefer it over anything we invent.
 export function plaidDisplayMessage(err: unknown): string | null {
   const msg = (err as { response?: { data?: { display_message?: unknown } } })?.response?.data

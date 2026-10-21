@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
+import { AxiosError } from 'axios'
 import {
+  fromPlaid,
   plaidErrorCode,
   plaidDisplayMessage,
   plaidLogSafe,
@@ -113,6 +115,28 @@ describe('isReconnectError / isTemporaryError', () => {
   })
   it('is false for a bank-side action — a Reconnect button there just fails again', () => {
     expect(isReconnectError(plaidError('ITEM_LOCKED'))).toBe(false)
+  })
+})
+
+// #189: the sync route words a failure as the bank's only when it came from the call to Plaid.
+// classifyPlaidError reads every one below as 'temporary', having no code to go on.
+describe('fromPlaid', () => {
+  it('is true when Plaid answered, with its error body or without one', () => {
+    expect(fromPlaid(plaidError('INSTITUTION_DOWN'))).toBe(true)
+    expect(fromPlaid({ response: { status: 502, data: '<html>Bad Gateway</html>' } })).toBe(true)
+  })
+  // axios, which Plaid's SDK is built on and comes with it, marks every error it throws, a call that
+  // got no answer included.
+  it('is true when nothing answered the call', () => {
+    expect(fromPlaid(new AxiosError('socket hang up', 'ECONNRESET'))).toBe(true)
+    expect(fromPlaid(new AxiosError('timeout of 30000ms exceeded', 'ECONNABORTED'))).toBe(true)
+  })
+  // A Node error's own code (here a failed decrypt's) is not Plaid's.
+  it("is false for this app's own failure", () => {
+    expect(fromPlaid(new Error('transactions upsert failed: boom'))).toBe(false)
+    expect(fromPlaid(Object.assign(new RangeError('Invalid key length'), { code: 'ERR_CRYPTO_INVALID_KEYLEN' }))).toBe(false)
+    expect(fromPlaid(null)).toBe(false)
+    expect(fromPlaid(undefined)).toBe(false)
   })
 })
 

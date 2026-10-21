@@ -31,8 +31,10 @@ vi.mock('@/lib/plaid', () => ({ plaidEnv: 'sandbox' }))
 vi.mock('@/lib/category-suggest', () => ({ suggestCategories }))
 
 import { AuthRetryableFetchError, type AuthError } from '@supabase/supabase-js'
+import { AxiosError } from 'axios'
 import { POST } from '@/app/api/plaid/sync-transactions/route'
 import { NO_ANSWER } from '../stubs/no-answer'
+import { EnvMismatchError } from '@/lib/app-env'
 
 type Row = Record<string, unknown>
 type DbError = { code?: string; message: string } | null
@@ -272,5 +274,50 @@ describe('POST /api/plaid/sync-transactions: a write the database never answered
     const res = await refresh()
     expect(await res.json()).toMatchObject({ ok: true, banks: 1, added: 3, failed: 0 })
     expect(logs).toContainEqual(['[plaid] sync status write failed', { itemId: 'item-1', code: '', message: 'TypeError: fetch failed' }])
+  })
+})
+
+// #189: what a bank's failed sync is recorded as decides its line in Settings. lib/ingest.ts throws a
+// plain Error when its own database write fails, with no Plaid error_code in it, and recorded as
+// UNKNOWN_ERROR that read as "This bank didn't respond last time." A failure of this app's own is
+// APP_ERROR, still temporarily unavailable, so Refresh retries it and the banner still shows. A
+// failure in the call to Plaid stays the bank's, with or without a code.
+describe('POST /api/plaid/sync-transactions: whose failure it was (#189)', () => {
+  async function failedWith(fn: typeof storeAccounts, error: unknown) {
+    fn.mockRejectedValue(error)
+    const calls = makeStandIns()
+    const body = await (await refresh()).json()
+    return { body, writes: calls.writes }
+  }
+  const recorded = (status: string, code: string) => ({
+    body: { ok: true, banks: 1, added: 0, modified: 0, removed: 0, brokenNow: 0, failed: 1, skipped: 0, problems: [{ bank: 'Chase', status, code }] },
+    writes: [{ values: { status, status_detail: code }, filter: ['eq', 'id', 'item-1'] }],
+  })
+
+  it.each([
+    ['syncAndStore', syncAndStore, 'transactions upsert failed: canceling statement due to statement timeout'],
+    ['storeAccounts', storeAccounts, 'accounts upsert failed: permission denied for table accounts'],
+  ])("records a database write that failed in %s as this app's, and logs which", async (_name, fn, message) => {
+    expect(await failedWith(fn, new Error(message))).toEqual(recorded('temporarily_unavailable', 'APP_ERROR'))
+    expect(logs).toContainEqual(['[plaid] sync failed for item', 'item-1', 'APP_ERROR', message])
+  })
+
+  it.each([
+    // A gateway's page in front of Plaid has no error body, so no code.
+    ['Plaid answered without a code', { response: { status: 502, data: '<html>Bad Gateway</html>' } }, 'UNKNOWN_ERROR', 'http=502'],
+    // As the SDK's axios throws it: no answer, so no response and no code.
+    ['nothing answered', new AxiosError('socket hang up', 'ECONNRESET'), 'UNKNOWN_ERROR', 'net=ECONNRESET'],
+    ['Plaid said the bank is down', { response: { status: 400, data: { error_code: 'INSTITUTION_DOWN' } } }, 'INSTITUTION_DOWN', 'http=400 code=INSTITUTION_DOWN'],
+  ])("records a failed call to Plaid as the bank's when %s", async (_name, error, code, logged) => {
+    expect(await failedWith(storeAccounts, error)).toEqual(recorded('temporarily_unavailable', code))
+    expect(logs).toContainEqual(['[plaid] sync failed for item', 'item-1', code, logged])
+  })
+
+  // Also this app's own, and more exactly: config_error, which Settings never words as the bank's
+  // (010). Its own code comes first, so it isn't recorded as APP_ERROR.
+  it('records the wrong environment as config_error, not APP_ERROR', async () => {
+    const error = new EnvMismatchError('sandbox', 'production')
+    expect(await failedWith(storeAccounts, error)).toEqual(recorded('config_error', 'ENV_MISMATCH'))
+    expect(logs).toContainEqual(['[plaid] sync failed for item', 'item-1', 'ENV_MISMATCH', error.message])
   })
 })

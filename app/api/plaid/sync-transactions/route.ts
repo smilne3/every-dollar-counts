@@ -6,7 +6,7 @@ import { decrypt } from '@/lib/crypto'
 import { plaidEnv } from '@/lib/plaid'
 import { storeAccounts, syncAndStore } from '@/lib/ingest'
 import { shouldSyncTransactions } from '@/lib/sync-policy'
-import { classifyPlaidError, plaidErrorCode } from '@/lib/plaid-errors'
+import { classifyPlaidError, fromPlaid, plaidErrorCode, plaidLogSafe } from '@/lib/plaid-errors'
 import { EnvMismatchError } from '@/lib/app-env'
 import { suggestCategories } from '@/lib/category-suggest'
 
@@ -123,13 +123,21 @@ export async function POST() {
       // 'config_error' for exactly this and says never to render it as "the bank is having
       // trouble." It carries no Plaid error_code, so classifyPlaidError would fall through to its
       // unknown-codes default of 'temporary' and label every real bank temporarily unavailable.
+      // Nor is any other failure of this app's own, outside the calls to Plaid (#189): a database
+      // write in lib/ingest.ts, the app_env check that couldn't run, a failed decrypt. Recorded as
+      // UNKNOWN_ERROR, it read in Settings as "This bank didn't respond last time." APP_ERROR says
+      // whose it was. Its status stays temporarily_unavailable, classifyPlaidError's answer for an
+      // error with no code, so Refresh retries it, and the banner and the average still count the
+      // bank as behind.
       const envMismatch = e instanceof EnvMismatchError
-      const code = envMismatch ? 'ENV_MISMATCH' : (plaidErrorCode(e) ?? 'UNKNOWN_ERROR')
+      const code = envMismatch ? 'ENV_MISMATCH' : fromPlaid(e) ? (plaidErrorCode(e) ?? 'UNKNOWN_ERROR') : 'APP_ERROR'
       const status = envMismatch ? STATUS_FOR.config : STATUS_FOR[classifyPlaidError(e)]
       if (status === 'needs_reconnect') brokenNow++
       else failed++
       problems.push({ bank: item.institution_name ?? 'A bank', status, code })
-      console.error('[plaid] sync failed for item', item.id, code)
+      // With what failed, so an APP_ERROR in the log says which write. plaidLogSafe, never the raw
+      // error: an axios error carries the Plaid secret and the decrypted token.
+      console.error('[plaid] sync failed for item', item.id, code, plaidLogSafe(e))
       const { error } = await supabaseAdmin
         .from('plaid_items')
         .update({ status, status_detail: code })
