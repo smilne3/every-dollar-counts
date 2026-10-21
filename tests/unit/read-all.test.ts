@@ -73,16 +73,39 @@ describe('readAllRows', () => {
   })
 
   // A query that ignores the cursor (a broken stub, or a caller that bounded the query itself)
-  // would otherwise be read forever. It has to fail, not hang and not pass.
+  // would otherwise be read forever. It has to fail, not hang and not pass. After a few pages the
+  // stub ends the read, so a missing guard fails the expectations below by name, instead of running
+  // the worker out of memory with no test named (#144).
   it('fails if a page does not move past the rows already read', async () => {
+    let pages = 0
     const stuck = () => {
       const q: Record<string, unknown> = {}
       for (const m of ['order', 'or', 'limit']) q[m] = () => q
       q.then = (resolve: (v: unknown) => unknown) =>
-        Promise.resolve({ data: txnRows(3), error: null }).then(resolve)
+        Promise.resolve({ data: ++pages > 5 ? [] : txnRows(3), error: null }).then(resolve)
       return q
     }
     const { data, error } = await readAllRows(stuck as never)
+    expect(data).toBeNull()
+    expect(error?.message).toMatch(/did not advance/)
+  })
+
+  // A page that ends BEFORE the last row read has gone backwards too. Narrowed to a page that ends
+  // on the same row (=== for <=), or to the date alone, the guard would let it through (#144).
+  it.each([
+    ['an earlier date', [{ id: 'b', date: '2026-05-01' }]],
+    ['the same date and an earlier id', [{ id: 'a', date: '2026-05-02' }]],
+  ])('fails if a page ends before the last row read: %s', async (_, secondPage) => {
+    const pages = [[{ id: 'b', date: '2026-05-02' }], secondPage]
+    let n = 0
+    const query = () => {
+      const q: Record<string, unknown> = {}
+      for (const m of ['order', 'or', 'limit']) q[m] = () => q
+      q.then = (resolve: (v: unknown) => unknown) =>
+        Promise.resolve({ data: pages[n++] ?? [], error: null }).then(resolve)
+      return q
+    }
+    const { data, error } = await readAllRows(query as never)
     expect(data).toBeNull()
     expect(error?.message).toMatch(/did not advance/)
   })
@@ -136,6 +159,23 @@ describe('readAllById', () => {
       return chain as unknown as IdPageableQuery<{ id: string }>
     }
     const { data, error } = await readAllById(stuck)
+    expect(data).toBeNull()
+    expect(error?.message).toMatch(/did not advance/)
+  })
+
+  // As for readAllRows: a page that ends on an earlier id has gone backwards, which a guard narrowed
+  // to "ends on the same id" (=== for <=) would let through (#144).
+  it('fails if a page ends on an earlier id than the last one read', async () => {
+    const pages = [[{ id: 'r2' }], [{ id: 'r1' }]]
+    let n = 0
+    const query = () => {
+      const chain: Record<string, unknown> = {}
+      for (const m of ['order', 'gt', 'limit']) chain[m] = () => chain
+      chain.then = (resolve: (r: unknown) => unknown) =>
+        Promise.resolve({ data: pages[n++] ?? [], error: null }).then(resolve)
+      return chain as unknown as IdPageableQuery<{ id: string }>
+    }
+    const { data, error } = await readAllById(query)
     expect(data).toBeNull()
     expect(error?.message).toMatch(/did not advance/)
   })
