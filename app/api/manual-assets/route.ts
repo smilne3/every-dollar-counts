@@ -76,5 +76,7 @@ export async function POST(req: Request) {
     console.error('[manual-assets] upsert failed', { household_id, code: error.code, message: error.message })
     return fail(500, TRY_AGAIN)
   }
-  return NextResponse.json({ ok: true })
+  // When the value was written, by the server's clock: HomeValueCard refills what it sent only from a
+  // page that read the value after this, so the time is taken after the write, not before (#174).
+  return NextResponse.json({ ok: true, savedAt: Date.now() })
 }

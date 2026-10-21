@@ -37,6 +37,8 @@ function makeSupabase({
   authError = null as AuthError | null,
   membership = { data: { household_id: 'hh-1' } as Row | null, error: null as DbError },
   upsertError = null as DbError,
+  // Called as the upsert is done, so a test can move the clock on.
+  onWrite = () => {},
 } = {}) {
   const calls = { membership: [] as unknown[][], upserts: [] as { row: Row; options: unknown }[] }
   const client = {
@@ -60,6 +62,7 @@ function makeSupabase({
         return {
           upsert: (row: Row, options: unknown) => {
             calls.upserts.push({ row, options })
+            onWrite()
             return Promise.resolve({ error: upsertError })
           },
         }
@@ -91,7 +94,10 @@ beforeEach(() => {
   logs = []
   vi.spyOn(console, 'error').mockImplementation((...a) => void logs.push(a))
 })
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.useRealTimers()
+})
 
 describe('POST /api/manual-assets: validation before the database', () => {
   it.each([
@@ -121,13 +127,23 @@ describe('POST /api/manual-assets', () => {
     const calls = makeSupabase()
     const res = await save()
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ ok: true })
+    expect(await res.json()).toEqual({ ok: true, savedAt: expect.any(Number) })
     expect(calls.membership).toEqual([['select', 'household_id'], ['limit', 1]])
     expect(calls.upserts).toHaveLength(1)
     const [{ row, options }] = calls.upserts
     expect(row).toEqual({ household_id: 'hh-1', name: 'Home', value: 750000, plaid_env: 'sandbox', updated_at: expect.any(String) })
     expect(Number.isNaN(Date.parse(row.updated_at as string))).toBe(false)
     expect(options).toEqual({ onConflict: 'household_id,name' })
+  })
+
+  // #174: HomeValueCard refills what it sent only from a page that read the value after the save, so
+  // a time taken before the write would let a page read in between pass as newer.
+  it('says when the value was written, by the server clock, once the upsert is done', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(1_000)
+    makeSupabase({ onWrite: () => vi.setSystemTime(Date.now() + 1_000) })
+    const res = await save()
+    expect(await res.json()).toEqual({ ok: true, savedAt: 2_000 })
   })
 
   // What Zillow shows, verbatim; the card strips it too.
