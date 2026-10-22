@@ -7,7 +7,8 @@ import { supabaseAdmin } from '@/lib/supabase/admin'
 // both sync a bank, and both call this once a sync succeeds. Only Refresh used to, so a bank the
 // webhooks had brought up to date stayed "isn't syncing" until someone pressed it (#191).
 //
-// Never a broken login: only Reconnect clears needs_reconnect (app/api/plaid/reconnect/route.ts).
+// Never a broken login: only Reconnect clears needs_reconnect (app/api/plaid/reconnect/route.ts),
+// or the webhook once Plaid says the login was repaired outside this app (LOGIN_REPAIRED, #194).
 // Refresh skips such a bank, but the webhook still stores its accounts, and a login Plaid has said
 // will expire (PENDING_EXPIRATION, PENDING_DISCONNECT) works until it does. Cleared here, that
 // warning would go with the next routine webhook. Nor one marked broken while this sync ran, by an

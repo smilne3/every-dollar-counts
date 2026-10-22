@@ -154,8 +154,9 @@ describe('POST /api/plaid/webhook: a bank that recovers (#191)', () => {
     expect(console.error).toHaveBeenCalledExactlyOnceWith('[plaid] webhook sync failed', 'item-1', 'http=400 code=INSTITUTION_DOWN')
   })
 
-  // Only Reconnect clears a broken login. The webhook still stores its accounts, and a login Plaid
-  // has said will expire works until it does, so marked ok here, its warning would go for good.
+  // Only Reconnect clears a broken login, or Plaid saying it was repaired
+  // (tests/unit/webhook-login-repaired.test.ts). The webhook still stores its accounts, and a login
+  // Plaid has said will expire works until it does, so marked ok here, its warning would go for good.
   it.each([
     ['a login about to expire', 'PENDING_EXPIRATION'],
     ['a broken login', 'ITEM_LOGIN_REQUIRED'],

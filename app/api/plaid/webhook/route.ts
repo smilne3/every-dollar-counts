@@ -8,8 +8,9 @@ import { shouldSyncTransactions } from '@/lib/sync-policy'
 import { markRecovered } from '@/lib/item-status'
 import { suggestCategories } from '@/lib/category-suggest'
 
-// Plaid calls this — there is no user session. Two jobs:
+// Plaid calls this — there is no user session. Three jobs:
 //  - ITEM webhooks that mean "the login is broken or about to break"  -> mark the item
+//  - ITEM LOGIN_REPAIRED, "the login was fixed outside this app"      -> clear the mark, pull it
 //  - TRANSACTIONS webhooks that mean "fresh data is ready"            -> pull it
 //
 // Why this route exists (it was originally deferred): PENDING_EXPIRATION and PENDING_DISCONNECT
@@ -99,6 +100,58 @@ export async function POST(req: Request) {
         message: writeError.message,
       })
       return NextResponse.json({ error: 'could not record the item status' }, { status: 500 })
+    }
+    return NextResponse.json({ ok: true })
+  }
+
+  // The login was fixed without this app's update flow, for example in another app that uses Plaid
+  // (#194). Plaid's docs say to stop asking for a reconnect then (ItemLoginRepairedWebhook in
+  // node_modules/plaid/dist/api.d.ts). Marked ok, as Reconnect marks it, the bank counts as syncing
+  // again: Settings stops saying "Connection lost", Refresh stops skipping it, and the "isn't
+  // syncing" banner and the hidden savings average go.
+  if (webhook_type === 'ITEM' && webhook_code === 'LOGIN_REPAIRED') {
+    // Only a bank marked for a broken login, the one thing Plaid says has ended. The filters are in
+    // the write, so Postgres judges the bank as it is when the write lands, and a late or repeated
+    // delivery can't overwrite a status recorded since: a Refresh's failure after a Reconnect here,
+    // or another ITEM webhook's mark. A bank marked for another reason stays marked. A login Plaid
+    // has said will expire (PENDING_EXPIRATION, PENDING_DISCONNECT) still will, and access revoked
+    // at the bank is still revoked. Only a webhook says the first, and for a balances-only bank the
+    // second, so cleared here, the warning would be gone for good.
+    const { error: writeError } = await supabaseAdmin
+      .from('plaid_items')
+      .update({ status: 'ok', status_detail: null })
+      .eq('id', item.id)
+      .eq('status', 'needs_reconnect')
+      .eq('status_detail', 'ITEM_LOGIN_REQUIRED')
+    // Only logged, unlike the needs_reconnect write's failure above: that one, lost, would hide a
+    // broken bank, and this one leaves the bank saying to reconnect, as it did before, which is
+    // free. So Plaid isn't asked to deliver it again, and the pull below still runs.
+    if (writeError) {
+      console.error('[plaid] webhook status write failed', {
+        item_id,
+        webhook_type,
+        webhook_code,
+        code: writeError.code,
+        message: writeError.message,
+      })
+    }
+    // Then what the bank missed while its login was broken, as Reconnect pulls it. Plaid has said
+    // the login works, so the pull runs as for a bank that is ok, whatever the write found. A failed
+    // pull never fails the webhook, and a bank marked ok above stays ok, as after Reconnect: the next
+    // Refresh pulls it again.
+    try {
+      const token = decrypt(item.access_token_encrypted)
+      await storeAccounts(item.household_id, item.id, token)
+      if (shouldSyncTransactions({ products: item.products, status: 'ok' })) {
+        await syncAndStore({
+          id: item.id,
+          household_id: item.household_id,
+          access_token: token,
+          cursor: item.cursor,
+        })
+      }
+    } catch (e) {
+      console.error('[plaid] webhook sync failed', item.id, plaidLogSafe(e))
     }
     return NextResponse.json({ ok: true })
   }
