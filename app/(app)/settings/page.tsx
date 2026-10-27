@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { InvitePartnerForm } from '@/components/InvitePartnerForm'
 import { LinkButton } from '@/components/LinkButton'
 import { BankList } from '@/components/BankList'
-import { listItemsForHousehold, type ItemSummary } from '@/lib/plaid-items'
+import { listItemsForHousehold } from '@/lib/plaid-items'
 import { withoutAccounts } from '@/lib/bank-state'
 import { countSlotsUsed, LIFETIME_SLOTS } from '@/lib/plaid-slots'
 import { HomeValueCard } from '@/components/HomeValueCard'
@@ -78,15 +78,15 @@ async function readAccounts(supabase: Supabase): Promise<{ plaid_item_id: string
   return data
 }
 
-// The Banks card's first line, from the account count and the bank list. A bank can be connected
-// before its balances arrive, and has no accounts until they do (#164), so a count of zero is not
-// "no banks". Nor does the line name such banks: each one's own line in the list says its balances
-// haven't arrived, or what it needs (#186), and the card would say it twice. So with banks but no
-// accounts there is no first line. With the list unreadable, a zero count says nothing about banks
-// either, so there is no line; the card says the list didn't load.
-function banksLine(accountCount: number, items: ItemSummary[] | null): string | null {
+// The Banks card's first line, from the account count. A bank can be connected before its balances
+// arrive, and has no accounts until they do (#164), so a count of zero is not "no banks". Nor does
+// the line name such banks: each one's own line in the list says its balances haven't arrived, or
+// what it needs (#186), and the card would say it twice. So with no accounts there is no first
+// line at all; the list says "No banks connected yet." when it is empty (#200), where the banks
+// would be, so the card does not say it twice.
+function banksLine(accountCount: number): string | null {
   if (accountCount) return `${accountCount} account(s) connected.`
-  return items?.length === 0 ? 'No banks connected yet.' : null
+  return null
 }
 
 // Everything the Categories and Category rules cards need. Throws if any read fails; the page
@@ -159,7 +159,7 @@ export default async function SettingsPage() {
   const slotsUsed = household ? await countSlotsUsed(household.id) : null
   const manualAssets = household ? await readOrNull('the home value', () => listManualAssets(household.id)) : []
   const home = manualAssets?.find((a) => a.name === 'Home') ?? null
-  const firstLine = accounts === null ? null : banksLine(accounts.length, items)
+  const firstLine = accounts === null ? null : banksLine(accounts.length)
   // Four reads (see loadCategorySettings); if any fails, the Categories and Category rules cards
   // both say so.
   const categorySettings = await readOrNull('categories and rules', () => loadCategorySettings(supabase))

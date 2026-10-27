@@ -271,14 +271,29 @@ describe('Settings: a failed read says so in its own card (#91)', () => {
     expect(log).toHaveBeenCalledWith('[settings] could not load the accounts', new Error(message))
   })
 
+  // The page's own first line no longer says "No banks connected yet.": with no accounts there is
+  // no first line at all, and the line lives in the list, where the banks would be (#200).
   it.each([
-    [0, 'No banks connected yet.'],
+    [0, null],
     [3, '3 account(s) connected.'],
-  ])('says how many accounts are connected when there are %i', async (count, line) => {
+  ])('sets the right first line for a household with %i account(s)', async (count, line) => {
     results.accounts = { data: Array.from({ length: count }, (_, n) => ({ id: `acct-${n}`, plaid_item_id: 'item-1' })), error: null }
     const banks = card(await SettingsPage(), 'Banks')
-    expect(flatText(banks)).toContain(line)
+    if (line == null) expect(flatText(banks)).toBe('Banks')
+    else expect(flatText(banks)).toContain(line)
     expect(alertText(banks)).toBeNull()
+  })
+
+  // #200: with no banks, the card said "No banks connected yet." twice — once as the page's first
+  // line, once more in the list. The list owns that line (it sits where the banks would be); the
+  // page's first line no longer says it, so the card says it once.
+  it('says "No banks connected yet." once, in the list, when the household has no banks', async () => {
+    results.plaid_items = { data: [], error: null }
+    const tree = await SettingsPage()
+    const banks = card(tree, 'Banks')
+    render(<BankList {...(findProps(banks, BankList) as Parameters<typeof BankList>[0])} />)
+    const cardText = flatText(banks) + (document.body.textContent ?? '')
+    expect(cardText.match(/No banks connected yet\./g)).toHaveLength(1)
   })
 
   // #164: a bank whose first balance pull failed is connected, with no accounts until Refresh
