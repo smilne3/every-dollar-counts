@@ -29,13 +29,17 @@ jobs:
       TOKEN_ENCRYPTION_KEY: '0000000000000000000000000000000000000000000000000000000000000000'
 
     steps:
-      - uses: actions/checkout@v7
+      # Pinned by commit, not by tag (#213): a tag can be moved to other code, and a commit can't.
+      # The trailing comment is the version. Dependabot's github-actions entry reads it and keeps
+      # both pins current.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
 
+      # No dependency install scripts run here, because .npmrc sets ignore-scripts (#213).
       - run: npm ci
 
       - name: Typecheck
