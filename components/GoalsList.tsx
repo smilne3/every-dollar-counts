@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { goalProgress } from '@/lib/goal'
-import { money } from '@/lib/format'
+import { money, moneyFigure } from '@/lib/format'
 import { MAY_NOT_HAVE_SAVED, sendSave, type SaveOutcome } from '@/lib/save-response'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -251,9 +251,14 @@ function GoalCard({
     setBase(back)
   }
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const ratio = goalProgress(Number(saved || 0), goal.target_amount)
+  // Done by the figures shown, as Budgets decides "over" (#215): $999.60 of $1,000 reads "$1,000 of
+  // $1,000", so it is done. The bar and the percentage follow the same figures, so a done goal's bar
+  // is full: from the exact amounts, "$10 of $10 🎉" could sit over a bar 95% full.
+  const savedFigure = moneyFigure(Number(saved || 0))
+  const targetFigure = moneyFigure(goal.target_amount)
+  const done = savedFigure.value >= targetFigure.value
+  const ratio = done ? 1 : goalProgress(savedFigure.value, targetFigure.value)
   const pct = Math.round(ratio * 100)
-  const done = ratio >= 1
   const changed = Number(saved || 0) !== goal.saved_amount
 
   async function update() {
@@ -296,7 +301,7 @@ function GoalCard({
         />
       </div>
       <div className="mt-2 text-sm tabular-nums text-muted">
-        {money(Number(saved || 0))} of {money(goal.target_amount)}
+        {savedFigure.text} of {targetFigure.text}
         {done ? ' 🎉' : ''}
       </div>
       <div className="mt-4 flex items-center gap-2">

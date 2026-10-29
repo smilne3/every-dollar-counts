@@ -127,6 +127,32 @@ describe('GoalsList', () => {
   })
 })
 
+// #215: a goal is done by the figures it shows, as Budgets decides "over". $999.60 of $1,000 reads
+// "$1,000 of $1,000", so it is done: its 🎉, and a full bar in the darker green.
+describe('GoalsList: done by the figures shown', () => {
+  const goal = (saved_amount: number) => ({
+    initialGoals: [{ id: '1', name: 'Emergency fund', target_amount: 1000, saved_amount }],
+    readAt: 1_000,
+  })
+  const figures = () => screen.getByText(/ of \$1,000/)
+  const bar = (container: HTMLElement) =>
+    container.querySelector('[data-goal-card] .rounded-full .rounded-full') as HTMLElement
+
+  it.each([999.5, 999.6])('counts %s of 1,000 as done', (saved) => {
+    const { container } = render(<GoalsList {...goal(saved)} />)
+    expect(figures().textContent).toBe('$1,000 of $1,000 🎉')
+    expect(screen.getByText('100%')).toBeTruthy()
+    expect(bar(container).className).toContain('bg-emerald-600')
+    expect(bar(container).style.width).toBe('100%')
+  })
+
+  it('does not count 999.4 of 1,000 as done', () => {
+    const { container } = render(<GoalsList {...goal(999.4)} />)
+    expect(figures().textContent).toBe('$999 of $1,000')
+    expect(bar(container).className).not.toContain('bg-emerald-600')
+  })
+})
+
 // #165: call() never read the reply and had no try/finally, so a failed save looked done, a
 // request that threw left every goal control disabled, and the add form cleared before the reply.
 describe('GoalsList saves', () => {
