@@ -1,17 +1,50 @@
+// An amount as the app shows it: whole dollars. Everywhere but the transactions themselves and what
+// is owed back on them, which keep their cents through moneyExact (owner decision, 2026-10-23,
+// #215). Cents on a summary are digits nobody acts on, and on a phone they cost the width a figure
+// needs (#136). Being the default, a new summary is whole dollars without anyone choosing it.
+//
+// Rounding is a DISPLAY choice: what this returns is only ever shown, never stored or added into a
+// total. So rounded parts need not add up to the rounded total beside them, and nothing should make
+// them: three categories of $10.40 show as $10 each beside a $31 total.
 export function money(amount: number | null | undefined, currency = 'USD'): string {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount ?? 0)
+  return moneyFigure(amount, currency).text
 }
 
-// money() without the cents, for the dashboard's phone figures (spec §4): StatRows' figures and
-// their notes, and the saved average, which the desktop tile's note shows too. Rounding is a
-// DISPLAY choice: what this returns is only ever shown, never stored or added into a total. Intl
-// rounds half-away-from-zero, which is what a reader glancing at a figure expects.
-export function moneyWhole(amount: number | null | undefined, currency = 'USD'): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency,
-    maximumFractionDigits: 0,
-  }).format(amount ?? 0)
+// money(), with the figure it shows. Whatever an amount decides beside it, a colour or a minus sign,
+// is decided from `value`, the figure on screen, not from the amount before rounding: 30 cents below
+// zero shows "$0", which is no loss to colour coral, and 50 cents below shows "-$1", which is (#215).
+//
+// Rounded here, half away from zero, which is Intl's rule, and Intl is handed the result, so it has
+// nothing left to round and `value` and `text` cannot disagree. Negative zero becomes zero: Intl
+// prints -0 as "-$0".
+export function moneyFigure(
+  amount: number | null | undefined,
+  currency = 'USD'
+): { value: number; text: string } {
+  const exact = amount ?? 0
+  const whole = Math.sign(exact) * Math.round(Math.abs(exact))
+  // -0 === 0, so a small negative amount, rounded to -0, comes out of this as 0.
+  const value = whole === 0 ? 0 : whole
+  return {
+    value,
+    text: new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency,
+      // Both limits, not the maximum alone. Before Intl.NumberFormat v3 a maximum below the
+      // currency's own minimum (2, for USD) throws a RangeError, and the client components that
+      // call this format in the phone's own browser.
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(value),
+  }
+}
+
+// To the cent, for the transactions themselves and what is owed back on them: a transaction is
+// read against the bank's statement, and what is owed is checked against an expense report and then
+// the repayment (owner decision, 2026-10-23, #215). tests/unit/money-exact-imports.test.ts names
+// the files allowed it, so a summary cannot pick up cents by importing the wrong formatter.
+export function moneyExact(amount: number | null | undefined, currency = 'USD'): string {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount ?? 0)
 }
 
 // Compact axis tick: 1500 -> "$1.5k", 3000 -> "$3k", 250 -> "$250".

@@ -2,7 +2,7 @@
 
 import { useId, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { money } from '@/lib/format'
+import { moneyExact } from '@/lib/format'
 import { MAY_NOT_HAVE_SAVED, sendSave } from '@/lib/save-response'
 import { inputClass, labelClass } from './ui/styles'
 import { Button } from './ui/Button'
@@ -179,7 +179,7 @@ export function ReimbursableEditor({
         }
       >
         <p className="mt-1 text-sm text-muted">
-          {money(full)} on {date}
+          {moneyExact(full)} on {date}
         </p>
 
         <div className="mt-4 space-y-3">
@@ -202,7 +202,7 @@ export function ReimbursableEditor({
               <form>, so the browser's own max= message never fires — say it rather than leaving a
               dead button unexplained. */}
           <p id={limitId} className="-mt-2 text-xs text-faint">
-            Up to {money(full)}
+            Up to {moneyExact(full)}
           </p>
 
           <label className="block">

@@ -325,7 +325,7 @@ describe('GoalsList saves', () => {
       expect(alert.textContent).toBe('It may not have saved. Showing the latest.')
       expect(card(EF).contains(alert)).toBe(true)
       expect(amount(EF).value).toBe('1200')
-      expect(within(card(EF)).getByText(/\$1,200\.00 of \$3,000\.00/)).toBeTruthy()
+      expect(within(card(EF)).getByText(/\$1,200 of \$3,000/)).toBeTruthy()
       expect(within(card(EF)).getByText('40%')).toBeTruthy()
       expect(refresh).toHaveBeenCalledTimes(1)
       expect(logged).toHaveBeenCalledWith('[GoalsList] save failed', expect.anything())
@@ -484,7 +484,7 @@ describe('GoalsList saves', () => {
         // The first update's reload, read at 2,500: after it was written and before the second was.
         rerender(<GoalsList readAt={2_500} initialGoals={reloaded(1500)} />)
         expect(amount(EF).value).toBe('1700')
-        expect(within(card(EF)).getByText(/\$1,700\.00 of \$3,000\.00/)).toBeTruthy()
+        expect(within(card(EF)).getByText(/\$1,700 of \$3,000/)).toBeTruthy()
         // The second's, read at 3,500.
         rerender(<GoalsList readAt={3_500} initialGoals={reloaded(1700)} />)
         expect(amount(EF).value).toBe('1700')
@@ -570,7 +570,7 @@ describe('GoalsList saves', () => {
         await updateAndSettle('1700')
         expect(within(card(EF)).getByRole('alert').textContent).toBe('It may not have saved. Showing the latest.')
         expect(amount(EF).value).toBe('1500')
-        expect(within(card(EF)).getByText(/\$1,500\.00 of \$3,000\.00/)).toBeTruthy()
+        expect(within(card(EF)).getByText(/\$1,500 of \$3,000/)).toBeTruthy()
       })
 
       // A card holds back only what its own update sent. Held back too, another goal's change from
@@ -649,7 +649,7 @@ describe('GoalsList saves', () => {
     }
 
     // #177 review: one failure for the whole list was cleared by any save, so after another goal's
-    // save the refused card still read "50%, $1,500.00 of $3,000.00" with nothing to say the server
+    // save the refused card still read "50%, $1,500 of $3,000" with nothing to say the server
     // held $1,200. The bar follows the field as a preview; the message that stays explains it.
     it("keeps a goal's refusal, beside the amount it explains, when another goal and the add form save", async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(refused(500, TRY_AGAIN)).mockResolvedValueOnce(saved()).mockResolvedValueOnce(saved()))
@@ -666,7 +666,7 @@ describe('GoalsList saves', () => {
       expect(within(card(EF)).getByRole('alert').textContent).toBe(TRY_AGAIN)
       expect(screen.getAllByRole('alert')).toHaveLength(1)
       expect(amount(EF).value).toBe('1500')
-      expect(within(card(EF)).getByText(/\$1,500\.00 of \$3,000\.00/)).toBeTruthy()
+      expect(within(card(EF)).getByText(/\$1,500 of \$3,000/)).toBeTruthy()
       expect(within(card(EF)).getByText('50%')).toBeTruthy()
     })
 

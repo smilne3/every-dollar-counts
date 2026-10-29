@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import Link from 'next/link'
 import { Card } from './Card'
 import { ChevronRightIcon } from './icons'
-import { moneyWhole } from '@/lib/format'
+import { money } from '@/lib/format'
 
 export type StatRow = {
   label: string
@@ -22,7 +22,10 @@ export type StatRow = {
 // more room than a tile gave it (it can still wrap at the narrowest widths). The dashboard shows
 // this only below `md`; from `md` up it uses StatCard tiles.
 //
-// Figures are whole dollars, the rounding rule from spec §4.
+// Figures are whole dollars. Spec §4 rounded the phone's figures alone; since the owner's decision of
+// 2026-10-23 (#215) money() rounds every summary, the tiles from `md` up included, so the two layouts
+// show each figure the same way. The caller's `tone` should come from the figure as shown, as the
+// dashboard's does (lib/format.ts, moneyFigure).
 export function StatRows({ rows }: { rows: StatRow[] }) {
   return (
     <Card className="divide-y divide-line overflow-hidden">
@@ -42,7 +45,7 @@ export function StatRows({ rows }: { rows: StatRow[] }) {
                 tone === 'coral' ? 'text-coral' : 'text-ink'
               }`}
             >
-              {moneyWhole(amount, currency)}
+              {money(amount, currency)}
             </span>
             <ChevronRightIcon className="h-4 w-4 text-faint" />
           </div>

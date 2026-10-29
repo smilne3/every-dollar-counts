@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { money } from '@/lib/format'
+import { moneyExact } from '@/lib/format'
 import { isCreditCardPayment } from '@/lib/categories'
 import { MAY_NOT_HAVE_SAVED, sendSave } from '@/lib/save-response'
 
@@ -107,7 +107,7 @@ export function ReimbursableCheckbox({
   if (partial) {
     return (
       <span className="text-xs font-medium text-emerald" title={note ?? undefined}>
-        {money(marked)} of {money(full)}
+        {moneyExact(marked)} of {moneyExact(full)}
       </span>
     )
   }

@@ -12,6 +12,7 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import { CHART_SERIES } from '@/lib/chart-palette'
+import { money } from '@/lib/format'
 import { capCategories } from '@/lib/trends'
 import { tapTargetClass } from '@/components/ui/styles'
 import { WhenSized } from '@/components/ui/WhenSized'
@@ -64,8 +65,10 @@ export function PeriodOverPeriodChart({
               axisLine={false}
               tick={{ fill: '#5f6b64', fontSize: 12 }}
             />
+            {/* money(), as every summary is (#215). The raw value in a template printed $1,234.50
+                as "$1234.5". */}
             <Tooltip
-              formatter={(v) => `$${v}`}
+              formatter={(v) => money(Number(v))}
               cursor={{ fill: 'rgba(20,35,28,0.04)' }}
               contentStyle={{
                 borderRadius: 12,
@@ -118,7 +121,7 @@ export function PeriodOverPeriodChart({
               tick={{ fill: '#8b948c', fontSize: 11 }}
             />
             <Tooltip
-              formatter={(v) => `$${v}`}
+              formatter={(v) => money(Number(v))}
               cursor={{ fill: 'rgba(20,35,28,0.04)' }}
               contentStyle={{
                 borderRadius: 12,

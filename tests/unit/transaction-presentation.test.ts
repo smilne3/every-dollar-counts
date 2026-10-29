@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { money } from '@/lib/format'
+import { moneyExact } from '@/lib/format'
 import { presentTransaction, transactionLabel } from '@/lib/transaction-presentation'
 
 const base = {
@@ -174,11 +174,11 @@ describe('presentTransaction', () => {
   // something that can actually see it: the rendered string, and Object.is.
   it('normalises a fully-marked transaction to a share of positive zero', () => {
     const out = presentTransaction({ ...base, amount: 100, reimbursable_amount: 100 })
-    expect(money(out.shareAmount as number)).toBe('$0.00')
+    expect(moneyExact(out.shareAmount as number)).toBe('$0.00')
     expect(Object.is(out.shareAmount, -0)).toBe(false)
 
     const inflow = presentTransaction({ ...base, amount: -100, reimbursable_amount: 100 })
-    expect(money(inflow.shareAmount as number)).toBe('$0.00')
+    expect(moneyExact(inflow.shareAmount as number)).toBe('$0.00')
   })
 })
 

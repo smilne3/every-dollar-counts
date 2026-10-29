@@ -1,4 +1,4 @@
-import { money, shortDateAcrossYears } from '@/lib/format'
+import { moneyExact, shortDateAcrossYears } from '@/lib/format'
 
 // One marked expense, below `md`, where the four-column table has nowhere to put itself. Same shape
 // as the transactions card (spec §3.1): what it was and how much on the first line, the quieter
@@ -36,7 +36,7 @@ export function ReimbursementCard({
           {who ? `${shortDateAcrossYears(date, currentYear)} · ${who}` : shortDateAcrossYears(date, currentYear)}
         </div>
       </div>
-      <div className="shrink-0 whitespace-nowrap font-medium tabular-nums text-ink">{money(amount)}</div>
+      <div className="shrink-0 whitespace-nowrap font-medium tabular-nums text-ink">{moneyExact(amount)}</div>
     </div>
   )
 }

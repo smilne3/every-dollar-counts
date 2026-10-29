@@ -10,7 +10,7 @@ import {
   CartesianGrid,
   ResponsiveContainer,
 } from 'recharts'
-import { axisTick } from '@/lib/format'
+import { axisTick, money } from '@/lib/format'
 import { CHART_SERIES } from '@/lib/chart-palette'
 
 type Row = { label: string; income: number; spending: number }
@@ -41,8 +41,10 @@ export function SpendIncomeChart({ data }: { data: Row[] }) {
             width={44}
             tick={{ fill: '#8b948c', fontSize: 11 }}
           />
+          {/* money(), as every summary is (#215). The raw value in a template printed $1,234.50 as
+              "$1,234.5". */}
           <Tooltip
-            formatter={(value) => `$${Number(value).toLocaleString()}`}
+            formatter={(value) => money(Number(value))}
             contentStyle={{
               borderRadius: 12,
               border: '1px solid #e6e9e3',

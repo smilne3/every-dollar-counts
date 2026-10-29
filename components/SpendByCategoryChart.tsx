@@ -2,6 +2,7 @@
 
 import { BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer } from 'recharts'
 import { CHART_SERIES } from '@/lib/chart-palette'
+import { money } from '@/lib/format'
 
 export function SpendByCategoryChart({ data }: { data: { category: string; amount: number }[] }) {
   const rows = data.map((d) => ({ name: d.category, amount: Math.round(d.amount * 100) / 100 }))
@@ -25,8 +26,10 @@ export function SpendByCategoryChart({ data }: { data: { category: string; amoun
             axisLine={false}
             tick={{ fill: '#8b948c', fontSize: 11 }}
           />
+          {/* money(), as every summary is (#215). The raw value in a template printed $1,234.50 as
+              "$1234.5". */}
           <Tooltip
-            formatter={(v) => `$${v}`}
+            formatter={(v) => money(Number(v))}
             cursor={{ fill: 'rgba(20,35,28,0.04)' }}
             contentStyle={{
               borderRadius: 12,

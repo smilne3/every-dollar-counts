@@ -128,6 +128,7 @@ import BreakdownPage from '@/app/(app)/breakdown/[metric]/page'
 import { BreakdownList } from '@/components/BreakdownList'
 import { MissingBalancesNote } from '@/components/MissingBalancesNote'
 import { NotSyncingBanner } from '@/components/NotSyncingBanner'
+import { OwedToYouLink } from '@/components/OwedToYouLink'
 import Link from 'next/link'
 import { RefreshButton } from '@/components/RefreshButton'
 import { LinkButton } from '@/components/LinkButton'
@@ -135,7 +136,7 @@ import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { StatCard } from '@/components/ui/StatCard'
 import type { ReactNode } from 'react'
-import { moneyWhole } from '@/lib/format'
+import { money } from '@/lib/format'
 import { catalogFingerprint } from '@/lib/category-rules'
 import { sug } from './helpers/category-context'
 
@@ -579,13 +580,25 @@ describe('Dashboard average savings (#126)', () => {
     expect((await avgLine())!.props.className).not.toContain('text-coral')
   })
 
-  // A few cents below zero rounds to "$0"; a red $0 would be noise.
+  // A few cents below zero rounds to "$0"; a red $0 would be noise. And "$0", not "-$0" (#215).
   it('is not coral when the average rounds to zero', async () => {
     results.categories = income
     history.value = since('2026-07')
     results.transactions = fixture({ '08': -0.3 })
     const line = (await avgLine())!
+    expect(line.props.children).toBe('Avg $0/mo · 1 mo')
     expect(line.props.className).not.toContain('text-coral')
+  })
+
+  // #215: coloured by the figure shown. 50 cents below zero prints "-$1", half away from zero, and
+  // is coral with it. The line was coloured by Math.round, which rounds -0.5 to 0, so it was not.
+  it('is coral when the average shows as a loss of a dollar', async () => {
+    results.categories = income
+    history.value = since('2026-07')
+    results.transactions = fixture({ '08': -0.5 })
+    const line = (await avgLine())!
+    expect(line.props.children).toBe('Avg -$1/mo · 1 mo')
+    expect(line.props.className).toContain('text-coral')
   })
 
   // The tile links to /breakdown/saved, and the two must tell the same story. One fixture, one
@@ -605,7 +618,7 @@ describe('Dashboard average savings (#126)', () => {
       else if (el.props) walk(el.props.children)
     })(breakdown)
     const avg = lists[1]
-    expect(tile).toBe(`Avg ${moneyWhole(avg.total!.amount)}/mo · ${avg.rows.length} mo`)
+    expect(tile).toBe(`Avg ${money(avg.total!.amount)}/mo · ${avg.rows.length} mo`)
   })
 
   // On a phone the three figures are rows in one card (components/ui/StatRows), not tiles. Both
@@ -696,18 +709,18 @@ describe('Dashboard average savings (#126)', () => {
     expect(textOf((await phoneRows()).rows[1].foot)).toContain('$14,289 of $15,000 budgeted')
   })
 
-  // The tiles show exact cents from md up. budgetFoot takes its formatter, so handing the tile the
-  // phone's whole-dollar one is an easy slip; this is the test that catches it.
-  it('keeps the Spent and Saved tile notes exact', async () => {
+  // The tiles from md up show the same whole dollars as the phone rows (#215). Until then they were
+  // exact, so the same Spent read two ways on one day.
+  it('gives the Spent and Saved tile notes in whole dollars too', async () => {
     results.categories = { data: [{ id: 'c2', name: 'Food & Drink', pfc_primary: 'FOOD_AND_DRINK', sort_order: 1 }], error: null }
     results.budgets = { data: [{ category: 'Food & Drink', monthly_limit: 15000 }], error: null }
     results.transactions = { data: month('09', 0, 14289.44), error: null }
     const tiles = findStatCards(await render())
     expect(textOf(tiles.find((t) => t.props.label.startsWith('Spent'))!.props.foot)).toContain(
-      '$14,289.44 of $15,000.00 budgeted'
+      '$14,289 of $15,000 budgeted'
     )
     expect(textOf(tiles.find((t) => t.props.label === 'Saved this month')!.props.foot).replace(/\s+/g, ' ')).toContain(
-      '$0.00 in · $14,289.44 out'
+      '$0 in · $14,289 out'
     )
   })
 
@@ -730,6 +743,26 @@ describe('Dashboard average savings (#126)', () => {
     const saved = (await phoneRows()).rows[2]
     expect(saved.amount).toBeLessThan(0)
     expect(saved.tone).toBe('coral')
+  })
+
+  // #215: a month 30 cents short shows "$0", which is no loss, so neither the phone row nor the tile
+  // is coral. Coloured by the amount before rounding, the phone showed a coral "-$0".
+  it('does not colour a month 30 cents short coral, on the row or the tile', async () => {
+    results.categories = income
+    results.transactions = { data: month('09', 5000, 5000.3), error: null }
+    const { tree, rows } = await phoneRows()
+    expect(rows[2].amount).toBeLessThan(0)
+    expect(rows[2].tone).toBe('ink')
+    expect(findStatCards(tree).find((c) => c.props.label === 'Saved this month')!.props.tone).toBe('ink')
+  })
+
+  // 50 cents short shows "-$1", half away from zero, and is a loss.
+  it('colours a month 50 cents short coral, on the row and the tile', async () => {
+    results.categories = income
+    results.transactions = { data: month('09', 5000, 5000.5), error: null }
+    const { tree, rows } = await phoneRows()
+    expect(rows[2].tone).toBe('coral')
+    expect(findStatCards(tree).find((c) => c.props.label === 'Saved this month')!.props.tone).toBe('coral')
   })
 
   // The tiles are the md-and-up layout and the rows the phone layout; CSS picks, so both wrappers
@@ -1102,7 +1135,7 @@ describe('Dashboard reads', () => {
       seed([wholeFoods(sug(GROCERY.id, 0.99, catalogFingerprint([FOOD, GROCERY])))])
       const tree = await render()
       expect(recentItemsOf(tree)![0].category).toBe('Grocery')
-      expect(spentFoot(tree)).toContain('$30.00 of $100.00 budgeted')
+      expect(spentFoot(tree)).toContain('$30 of $100 budgeted')
     })
 
     it('leaves Whole Foods Food & Drink when suggestions are off', async () => {
@@ -1110,7 +1143,7 @@ describe('Dashboard reads', () => {
       seed([wholeFoods(sug(GROCERY.id, 0.99, catalogFingerprint([FOOD, GROCERY])))])
       const tree = await render()
       expect(recentItemsOf(tree)![0].category).toBe('Food & Drink')
-      expect(spentFoot(tree)).toContain('$0.00 of $100.00 budgeted')
+      expect(spentFoot(tree)).toContain('$0 of $100 budgeted')
     })
 
     // Review Focus 5: switching on changes nothing for rows that carry no suggestion.
@@ -1213,10 +1246,32 @@ describe('Dashboard full-width links: a 44px floor below md (#122)', () => {
     floor(controlWithText(tree, 'Your home value was last updated over a month ago — check Zillow and update it in Settings.').props.className)
   })
 
+  // The link is OwedToYouLink's (#215), so it is read off what that renders with the props the page
+  // hands it.
   it('gives Owed to you one', async () => {
     receivable.value = 20
-    const owed = controlWithText(await render(), 'Owed to you$20.00')
+    const owed = controlWithText(OwedToYouLink(await owedToYouProps()), 'Owed to you$20.00')
     expect(owed.props.href).toBe('/reimbursements')
     floor(owed.props.className)
+  })
+})
+
+// What the page hands OwedToYouLink, which keeps the dashboard's one exact figure out of the page
+// (#215).
+async function owedToYouProps() {
+  const links = elementsOf(await render()).filter((el) => el.type === OwedToYouLink)
+  expect(links).toHaveLength(1)
+  return links[0].props as Parameters<typeof OwedToYouLink>[0]
+}
+
+describe('Dashboard Owed to you (#215)', () => {
+  // The one figure on the dashboard that keeps its cents (owner decision, 2026-10-23): it is checked
+  // to the cent against an expense report and the repayment, and rounded, a 30-cent remainder would
+  // read "Owed to you $0".
+  it('hands the link what the household is owed, unrounded, in its currency', async () => {
+    receivable.value = 0.3
+    const props = await owedToYouProps()
+    expect(props).toEqual({ amount: 0.3, currency: 'USD' })
+    expect(controlWithText(OwedToYouLink(props), 'Owed to you$0.30')).toBeTruthy()
   })
 })

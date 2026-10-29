@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { progress } from '@/lib/budget'
-import { money } from '@/lib/format'
+import { moneyFigure } from '@/lib/format'
 import { MAY_NOT_HAVE_SAVED, sendSave } from '@/lib/save-response'
 import { Card } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -150,9 +150,12 @@ export function BudgetEditor({
     <div className="space-y-4">
       <Card className="p-5">
         {categoryNames.map((c) => {
-          const s = spend[c] ?? 0
           const lim = Number(limits[c] || 0)
-          const { ratio, over } = progress(s, lim)
+          // Over the limit by the figure shown, not by the spend before rounding: $500.40 against a
+          // $500 limit reads "$500 spent", which is not over, so it is not coral (#215). The limit
+          // is compared as its field shows it, cents and all.
+          const spent = moneyFigure(spend[c] ?? 0)
+          const { ratio, over } = progress(spent.value, lim)
           const barColor =
             lim <= 0 ? 'bg-line' : over ? 'bg-coral' : ratio > 0.8 ? 'bg-amber' : 'bg-emerald'
           return (
@@ -173,7 +176,7 @@ export function BudgetEditor({
               <div
                 className={`text-right text-sm tabular-nums ${lim > 0 && over ? 'text-coral' : 'text-muted'}`}
               >
-                {money(s)} spent
+                {spent.text} spent
               </div>
               <input
                 type="number"

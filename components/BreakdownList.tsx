@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { money } from '@/lib/format'
+import { money, moneyFigure } from '@/lib/format'
 
 export type BreakdownRow = {
   key: string
@@ -12,7 +12,8 @@ export type BreakdownRow = {
 }
 
 // Presentational list for a breakdown page: each row is a label + amount, optionally a drill link.
-// A liability (`owed`) renders its amount as a negative in coral, matching AccountCard.
+// A liability (`owed`) renders its amount as a negative in coral, matching AccountCard, by the
+// figure shown: one under 50 cents shows "$0", not "−$0" (#215).
 export function BreakdownList({
   rows,
   total,
@@ -26,9 +27,11 @@ export function BreakdownList({
   return (
     <ul className="divide-y divide-line">
       {rows.map((r) => {
+        const figure = moneyFigure(r.amount, r.currency)
+        const negative = r.owed && figure.value !== 0
         const amountEl = (
-          <span className={`tabular-nums ${r.owed ? 'text-coral' : 'text-ink'}`}>
-            {r.owed ? `−${money(r.amount, r.currency)}` : money(r.amount, r.currency)}
+          <span className={`tabular-nums ${negative ? 'text-coral' : 'text-ink'}`}>
+            {negative ? `−${figure.text}` : figure.text}
           </span>
         )
         const inner = (

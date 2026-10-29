@@ -1,6 +1,6 @@
 import { isCardPaymentRow } from '@/lib/categories'
 import { changedByRule, changedBySuggestion, type ResolvedCategory } from '@/lib/category-rules'
-import { money } from '@/lib/format'
+import { moneyExact } from '@/lib/format'
 import { presentTransaction, TONE_CLASS } from '@/lib/transaction-presentation'
 import { CategoryPicker } from './CategoryPicker'
 import { LearnedMarker } from './LearnedMarker'
@@ -91,7 +91,7 @@ export function TransactionRow({
       <td
         className={`px-4 py-3 text-right font-medium tabular-nums ${TONE_CLASS[tone]}`}
       >
-        {money(display)}
+        {moneyExact(display)}
         {/* ALWAYS rendered, merely hidden when unmarked. Conditionally mounting this line meant
             ticking the box added a second line to the cell, which grew the row and pushed every
             row beneath it down the page — the reader's place jumps on every tick (#50).
@@ -113,7 +113,7 @@ export function TransactionRow({
               here must fit ~19 characters — measure, do not estimate.
               An outflow's share is money out (shown negative); an inflow's untagged remainder is
               money in (shown positive) — matching the `display` convention above. */}
-          {isCC ? 'between accounts' : shareAmount !== null ? `your share ${money(shareAmount)}` : ' '}
+          {isCC ? 'between accounts' : shareAmount !== null ? `your share ${moneyExact(shareAmount)}` : ' '}
         </span>
       </td>
       {/* Its own column, under a "Reimbursable" header: the word used to be printed in every cell,

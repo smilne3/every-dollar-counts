@@ -187,6 +187,8 @@ This treats the tiles by importance rather than equally, which matches the state
 
 > **Note (#137):** Two things here and in §9 no longer hold. Rounding is still display-only, but not phone-only: since #126 the saved average is whole dollars on the desktop tile too ("Avg $3,822/mo"). And the compact tile no longer rounds: it shows only from `md` up, and since #137 its figure is exact, so §9's "rounded value in a compact slot" is now StatRows' whole-dollar figures, on the phone.
 
+> **Reversed on 2026-10-23 (owner decision, #215): net worth is whole dollars, and so is every other figure but the transactions and what is owed back on them.** The household asked to *"remove pennies completely (except from transactions/activity itself)"*. `money()` in `lib/format.ts` is now the whole-dollar formatter, so the hero, the three tiles from `md` up and their notes, and the phone rows all show one figure the same way, as do the breakdowns, Budgets, Goals, the home value and the chart tooltips. The exact formatter, `moneyExact`, is for the transactions themselves (the table, the phone cards and their sheet, Recent activity), a transaction's reimbursable part, the reimbursements page, and the dashboard's Owed to you, which the owner kept exact with the reimbursements page's own total: it is checked to the cent against an expense report and then the repayment, and rounded, a 30-cent remainder would read "Owed to you $0". `tests/unit/money-exact-imports.test.ts` names the files allowed `moneyExact`. The hero still shows every dollar at full width and is never abbreviated, so §1.3 holds. Rounding is still display-only: nothing that computes a figure changed, and rounded parts are not made to add up to their rounded total. Any colour or minus sign beside a figure now follows the figure as shown, so 30 cents below zero is a plain "$0", never a coral "-$0".
+
 The remaining dashboard sections stack in the order they already have: the spend/income chart, recent activity, then accounts. The account card list is long — 12 today — so below `md` it shows the first 4 behind a **"Show all N"** control, N being whatever the household actually has. Accounts are reference material rather than the reason the page was opened.
 
 ---
@@ -263,6 +265,8 @@ The existing suite is 338 tests and **none of them cover layout**, which is why 
 - **`StatCard` renders the exact value in the hero slot and a rounded value in a compact slot.** This is a formatting assertion, not a width one, and it is the assertion that would have caught §1.3 regressing had the tile been given a variant.
 
   > **Note (#137):** Since #137 both slots are exact: the compact tile shows only from `md` up, and the rounded figures on a phone are StatRows', which tests/unit/stat-rows.test.tsx asserts. See the note under §4's rounding rule.
+
+  > **Note (owner decision, 2026-10-23, #215):** Both slots are now whole dollars, as the phone rows are; tests/unit/stat-card.test.tsx asserts it. See the reversal under §4's rounding rule.
 - **The phone row and the desktop row derive from one source.** Both presentations must consume the same `effectiveCategory`, the same `display = -amount` convention, and the same `isCreditCardPayment` predicate. A test asserts the two render identical category, amount and card-payment state for the same transaction. **This is how §2's accepted duplication cost is contained** — the markup may differ, the meaning may not.
 - **The sheet honours the card-payment exemption.** Given a `LOAN_PAYMENTS_CREDIT_CARD_PAYMENT` transaction with no `user_category`, the sheet offers no category picker, no checkbox and no editor. This guards the $7,866.69 failure documented at `TransactionRow.tsx:48-58`.
 - **Trends caps at six categories plus Other below `md`, and Other's amount equals the sum of the remainder.** A pure function over the rows; no rendering required.
@@ -290,5 +294,7 @@ Visual verification is manual, on a real phone, per stage. Neither jsdom nor a C
 **A minimum width on the table so `overflow-x-auto` engages.** Two lines: `min-w-[800px]` plus `overflow-hidden` on cells. It would stop the overlap today. Rejected as a destination rather than a stopgap — reading a row would mean swiping sideways to see the amount, on the app's most-used screen. It remains available as a one-hour patch if the full pass stalls.
 
 **Abbreviating net worth to `$1.18M` with the exact figure on tap.** The smallest possible change; the 2×2 grid survives untouched. Rejected because the number the household opens the app to see should not be the one that is rounded.
+
+> **Note (owner decision, 2026-10-23, #215):** The reason above no longer holds as written. At the household's request net worth is now rounded to whole dollars, like every figure but the transactions and what is owed back on them (see the reversal under §4). Abbreviating it stays rejected: the hero shows every dollar, so what goes is the cents, never the digits.
 
 **Shrinking the tile type again.** The move that already failed once (§1.3). Each seven-figure increment would require another reduction.
