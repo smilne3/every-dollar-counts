@@ -49,5 +49,10 @@ preview.env
 # subagent-driven-development scratch (ledger, briefs, review packages)
 .superpowers/
 
+# Playwright MCP page snapshots and console logs, written each time an agent drives the app in a
+# browser. A snapshot holds whatever the page showed, real dollar amounts included, and this repo
+# is public (#212).
+.playwright-mcp/
+
 # Personal Claude Code settings; .claude/rules/ IS shared and tracked.
 .claude/settings.local.json
