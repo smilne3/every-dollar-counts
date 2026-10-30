@@ -1,5 +1,15 @@
-import { describe, it, expect } from 'vitest'
-import { axisTick, shortDate, monthLabel, longDate, monthNameLong, moneyWhole, shortDateAcrossYears } from '@/lib/format'
+import { describe, it, expect, afterEach, vi } from 'vitest'
+import {
+  axisTick,
+  shortDate,
+  monthLabel,
+  longDate,
+  monthNameLong,
+  money,
+  moneyExact,
+  moneyFigure,
+  shortDateAcrossYears,
+} from '@/lib/format'
 
 describe('axisTick', () => {
   it('keeps half-thousand gridlines honest', () => {
@@ -102,32 +112,127 @@ describe('monthNameLong', () => {
   })
 })
 
-describe('moneyWhole', () => {
-  // The three compact tiles round for width. Cents on a phone buy nothing and cost the
-  // characters that made §1.3 clip.
+// Whole dollars are the default since #215 (owner decision, 2026-10-23): every amount but the
+// transactions themselves and what is owed back on them.
+describe('money', () => {
+  // Cents on a summary buy nothing, and on a phone cost the characters that made §1.3 clip.
   it('drops the cents', () => {
-    expect(moneyWhole(34920.49)).toBe('$34,920')
-    expect(moneyWhole(8776.51)).toBe('$8,777')
+    expect(money(34920.49)).toBe('$34,920')
+    expect(money(8776.51)).toBe('$8,777')
   })
 
-  // Rounding is for READING. A figure that rounds to nothing must not read as nothing at all,
-  // so the currency symbol and the sign both survive.
+  // Rounding is for READING. A negative figure keeps its minus and its symbol, and one that rounds
+  // to zero is a plain "$0" (below), never an empty string.
   it('keeps the sign and the symbol on a negative figure', () => {
-    expect(moneyWhole(-5449)).toBe('-$5,449')
+    expect(money(-5449)).toBe('-$5,449')
   })
 
   it('renders zero as zero, not as an empty string', () => {
-    expect(moneyWhole(0)).toBe('$0')
+    expect(money(0)).toBe('$0')
   })
 
-  // money() already treats null as zero; the rounded form must not disagree with it.
-  it('treats null and undefined as zero, exactly as money() does', () => {
-    expect(moneyWhole(null)).toBe('$0')
-    expect(moneyWhole(undefined)).toBe('$0')
+  // moneyExact treats null as zero; the rounded form must not disagree with it.
+  it('treats null and undefined as zero, exactly as moneyExact does', () => {
+    expect(money(null)).toBe('$0')
+    expect(money(undefined)).toBe('$0')
   })
 
   it('honours a non-default currency', () => {
-    expect(moneyWhole(1200, 'EUR')).toBe('€1,200')
+    expect(money(1200, 'EUR')).toBe('€1,200')
+  })
+
+  // #215: a loss of 30 cents printed "-$0", and the phone's Saved row showed it in coral.
+  it('never prints "-$0"', () => {
+    expect(money(-0.3)).toBe('$0')
+    expect(money(-0.49)).toBe('$0')
+    expect(money(-0)).toBe('$0')
+  })
+
+  // Intl's rule, half away from zero, both ways. Math.round, which the average line coloured by,
+  // rounds -0.5 up to 0.
+  it('rounds half away from zero', () => {
+    expect(money(0.5)).toBe('$1')
+    expect(money(-0.5)).toBe('-$1')
+    expect(money(2.5)).toBe('$3')
+    expect(money(-2.5)).toBe('-$3')
+    expect(money(1234.5)).toBe('$1,235')
+  })
+
+  describe('where Intl.NumberFormat predates v3', () => {
+    afterEach(() => {
+      vi.restoreAllMocks()
+    })
+
+    // Budgets, Goals, the home value, the account cards and the charts format in the phone's own
+    // browser (#215). Before v3, which arrived in Safari 15.4, Chrome 106 and Firefox 116, a maximum
+    // below the currency's default minimum of 2 threw a RangeError rather than lowering the minimum
+    // to meet it. Node is past v3, so the old rule is put back here, around the real formatter.
+    it('still formats, as both limits are given', () => {
+      const Real = Intl.NumberFormat
+      vi.spyOn(Intl, 'NumberFormat').mockImplementation(function (
+        locales?: string | string[],
+        options: Intl.NumberFormatOptions = {}
+      ) {
+        const minimum = options.minimumFractionDigits ?? (options.style === 'currency' ? 2 : 0)
+        if (options.maximumFractionDigits !== undefined && options.maximumFractionDigits < minimum) {
+          throw new RangeError('maximumFractionDigits value is out of range.')
+        }
+        return new Real(locales, options)
+      } as never)
+      expect(money(1234.5)).toBe('$1,235')
+      expect(moneyExact(1234.5)).toBe('$1,234.50')
+    })
+  })
+})
+
+// What a colour or a minus sign beside a figure is decided from: the figure on screen, as a number
+// (#215).
+describe('moneyFigure', () => {
+  it('hands back the figure it prints', () => {
+    expect(moneyFigure(1234.5)).toEqual({ value: 1235, text: '$1,235' })
+    expect(moneyFigure(-0.5)).toEqual({ value: -1, text: '-$1' })
+    expect(moneyFigure(2.5)).toEqual({ value: 3, text: '$3' })
+    expect(moneyFigure(0.5)).toEqual({ value: 1, text: '$1' })
+  })
+
+  // `value < 0` is false for -0, so no colour would show it, but Intl prints it "-$0". toEqual
+  // compares numbers with Object.is, so it tells -0 from 0.
+  it('turns negative zero into zero', () => {
+    expect(moneyFigure(-0.3)).toEqual({ value: 0, text: '$0' })
+    expect(moneyFigure(-0)).toEqual({ value: 0, text: '$0' })
+  })
+
+  // A debt of 30 cents is still whole dollars: $0, not a figure for a minus sign to go on.
+  it('rounds a small amount either side of zero to a plain zero', () => {
+    expect(moneyFigure(0.3)).toEqual({ value: 0, text: '$0' })
+    expect(moneyFigure(0.49)).toEqual({ value: 0, text: '$0' })
+    expect(moneyFigure(-0.49).text).toBe('$0')
+  })
+
+  it('treats null and undefined as zero', () => {
+    expect(moneyFigure(null)).toEqual({ value: 0, text: '$0' })
+    expect(moneyFigure(undefined)).toEqual({ value: 0, text: '$0' })
+  })
+
+  it('honours a non-default currency', () => {
+    expect(moneyFigure(1199.5, 'EUR')).toEqual({ value: 1200, text: '€1,200' })
+  })
+})
+
+// To the cent: the transactions themselves, and what is owed back on them (#215).
+describe('moneyExact', () => {
+  it('keeps the cents', () => {
+    expect(moneyExact(1234.56)).toBe('$1,234.56')
+    expect(moneyExact(-60)).toBe('-$60.00')
+  })
+
+  it('treats null and undefined as zero', () => {
+    expect(moneyExact(null)).toBe('$0.00')
+    expect(moneyExact(undefined)).toBe('$0.00')
+  })
+
+  it('honours a non-default currency', () => {
+    expect(moneyExact(1200, 'EUR')).toBe('€1,200.00')
   })
 })
 

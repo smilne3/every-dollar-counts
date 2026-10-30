@@ -10,10 +10,11 @@ const rows = [
 ]
 
 describe('BreakdownList', () => {
+  // Whole dollars, as every summary is (#215).
   it('shows the label and the amount', () => {
     render(<BreakdownList rows={rows} />)
     expect(screen.getByText('Capital One Checking')).toBeTruthy()
-    expect(screen.getByText('$1,234.56')).toBeTruthy()
+    expect(screen.getByText('$1,235')).toBeTruthy()
   })
 
   // §3.1's shape, which §7 asks this page to match: a long label truncates rather than pushing the
@@ -46,12 +47,45 @@ describe('BreakdownList', () => {
     expect(row.className).toContain('justify-between')
     expect(row.className).toContain('items-center')
     // The amount is that row's last child, not something nested back inside the text block.
-    expect(row.lastElementChild!.textContent).toBe('$1,234.56')
+    expect(row.lastElementChild!.textContent).toBe('$1,235')
   })
 
   it('renders a liability as a negative', () => {
     render(<BreakdownList rows={rows} />)
-    expect(screen.getByText('−$78.90')).toBeTruthy()
+    expect(screen.getByText('−$79').className).toContain('text-coral')
+  })
+
+  // #215: a debt under 50 cents rounds to $0, and "−$0" in coral would be a debt of nothing. The
+  // minus sign and the colour follow the figure shown.
+  it('shows a debt that rounds to $0 as a plain $0', () => {
+    render(<BreakdownList rows={[{ ...rows[1], amount: 0.3 }]} />)
+    const amount = screen.getByText('$0')
+    expect(amount.className).not.toContain('text-coral')
+    expect(screen.queryByText('−$0')).toBeNull()
+  })
+
+  // From 50 cents, it rounds to a dollar owed, and is one.
+  it('shows a debt of 50 cents as a dollar owed', () => {
+    render(<BreakdownList rows={[{ ...rows[1], amount: 0.5 }]} />)
+    expect(screen.getByText('−$1').className).toContain('text-coral')
+  })
+
+  // A row marked exact keeps its cents: the owed-to-you total, wherever it appears (owner decision,
+  // 2026-10-30, #215). The rows beside it stay whole dollars.
+  it('keeps the cents on a row marked exact, and only there', () => {
+    render(
+      <BreakdownList
+        rows={[rows[0], { key: 'owed', label: 'Owed to you', amount: 12.34, currency: 'USD', exact: true }]}
+      />
+    )
+    expect(screen.getByText('$12.34')).toBeTruthy()
+    expect(screen.getByText('$1,235')).toBeTruthy()
+  })
+
+  // A total a few cents below zero, such as a month's saving, reads "$0", never "-$0".
+  it('never shows a total of "-$0"', () => {
+    render(<BreakdownList rows={rows} total={{ label: 'Saved this month', amount: -0.3, currency: 'USD' }} />)
+    expect(screen.getByText('Saved this month').parentElement!.lastElementChild!.textContent).toBe('$0')
   })
 
   it('says so when there is nothing to show', () => {

@@ -4,7 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { isCardPaymentRow } from '@/lib/categories'
 import { changedByRule, changedBySuggestion, type ResolvedCategory } from '@/lib/category-rules'
-import { money, shortDate } from '@/lib/format'
+import { moneyExact, shortDate } from '@/lib/format'
 import { presentTransaction, TONE_CLASS } from '@/lib/transaction-presentation'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
@@ -81,7 +81,7 @@ export function TransactionCard({
   // Jev's suggestion relabelled this row (#28 spec §14.6). Never on a card payment, as above.
   const suggested = !cardPayment && changedBySuggestion(category)
   const merchant = t.merchant_name?.trim() || 'this merchant'
-  const shareLabel = shareAmount !== null ? `, your share ${money(shareAmount)}` : ''
+  const shareLabel = shareAmount !== null ? `, your share ${moneyExact(shareAmount)}` : ''
 
   // The whole row is the control: a 390px row has no room for a separate affordance, and the
   // sheet is the only place the category and reimbursable controls fit (spec §3.2).
@@ -95,7 +95,7 @@ export function TransactionCard({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        aria-label={`${name}, ${categoryLabel}${learned ? `, learned from ${merchant}` : ''}${suggested ? ', suggested by Jev' : ''}, ${money(display)}${shareLabel} — edit`}
+        aria-label={`${name}, ${categoryLabel}${learned ? `, learned from ${merchant}` : ''}${suggested ? ', suggested by Jev' : ''}, ${moneyExact(display)}${shareLabel} — edit`}
         className="flex min-h-[44px] w-full items-start justify-between gap-3 border-b border-line px-4 py-3 text-left transition-colors last:border-b-0 active:bg-surface-2 md:min-h-0"
       >
         <span className="min-w-0 flex-1">
@@ -105,10 +105,10 @@ export function TransactionCard({
             {/* An icon only: a link inside this <button> is invalid HTML. The aria-label above says it. */}
             {learned && <LearnedIcon className="ml-1 inline-block h-3 w-3 align-[-1px] text-faint" />}
             {suggested && <SuggestedIcon className="ml-1 inline-block h-3 w-3 align-[-1px] text-faint" />}
-            {shareAmount !== null && ` · your share ${money(shareAmount)}`}
+            {shareAmount !== null && ` · your share ${moneyExact(shareAmount)}`}
           </span>
         </span>
-        <span className={`shrink-0 font-medium tabular-nums ${TONE_CLASS[tone]}`}>{money(display)}</span>
+        <span className={`shrink-0 font-medium tabular-nums ${TONE_CLASS[tone]}`}>{moneyExact(display)}</span>
       </button>
 
       <Dialog
@@ -146,7 +146,7 @@ export function TransactionCard({
             <dl className="mt-1 space-y-1.5 text-sm">
               <div className="flex items-baseline justify-between gap-4">
                 <dt className="text-muted">Amount</dt>
-                <dd className={`font-medium tabular-nums ${TONE_CLASS[tone]}`}>{money(display)}</dd>
+                <dd className={`font-medium tabular-nums ${TONE_CLASS[tone]}`}>{moneyExact(display)}</dd>
               </div>
               <div className="flex items-baseline justify-between gap-4">
                 <dt className="text-muted">Date</dt>

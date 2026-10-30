@@ -54,6 +54,13 @@ describe('ReimbursableCheckbox', () => {
     expect(screen.getByText(/750/)).toBeTruthy()
   })
 
+  // #215: a transaction's reimbursable part keeps its cents, and so does the amount beside it.
+  // Amounts with cents, so whole dollars cannot pass.
+  it('shows a partial mark to the cent', () => {
+    render(<ReimbursableCheckbox {...props} amount={56.78} reimbursableAmount={12.34} />)
+    expect(screen.getByText('$12.34 of $56.78')).toBeTruthy()
+  })
+
   it('renders nothing on a credit-card payment', () => {
     const { container } = render(
       <ReimbursableCheckbox {...props} pfcDetailed="LOAN_PAYMENTS_CREDIT_CARD_PAYMENT" />

@@ -54,6 +54,14 @@ describe('TransactionRow amount cell', () => {
     expect(screen.getByText(/your share -\$60\.00/)).toBeTruthy()
   })
 
+  // #215: a transaction keeps its cents, and so does your share of it. Amounts with cents, so whole
+  // dollars cannot pass.
+  it('shows the amount and the share to the cent', () => {
+    renderRow({ amount: 12.34, reimbursable_amount: 5.67 })
+    expect(screen.getByText('-$12.34')).toBeTruthy()
+    expect(screen.getByText('your share -$6.67')).toBeTruthy()
+  })
+
   // Ticking the box marks the WHOLE amount, so this is the state most marked rows are in. The
   // remainder is zero, and negating a zero gave -0, which Intl renders as "-$0.00". This test
   // used to pass the fully-marked amount and assert only /your share/, so it exercised the bug

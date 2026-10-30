@@ -1,4 +1,4 @@
-import { money, shortDate } from '@/lib/format'
+import { moneyExact, shortDate } from '@/lib/format'
 import { TONE_CLASS, type PresentedTxn } from '@/lib/transaction-presentation'
 import { ArrowUpRightIcon, ArrowDownLeftIcon } from './ui/icons'
 
@@ -50,7 +50,7 @@ export function RecentActivity({ items }: { items: ActivityItem[] }) {
           </div>
           <div className={`shrink-0 text-sm font-medium tabular-nums ${TONE_CLASS[t.tone]}`}>
             {t.tone === 'in' ? '+' : ''}
-            {money(t.display)}
+            {moneyExact(t.display)}
           </div>
         </li>
       ))}

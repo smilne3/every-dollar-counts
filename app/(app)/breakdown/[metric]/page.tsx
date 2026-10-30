@@ -110,6 +110,10 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
               amount: receivable,
               currency,
               owed: false,
+              // To the cent, as the dashboard and the reimbursements page show the same total, which
+              // is checked to the cent (owner decision, 2026-10-30, #215). Rounded, a 30-cent
+              // remainder would read "$0". Every other row here is whole dollars.
+              exact: true,
               href: '/reimbursements',
             },
           ]

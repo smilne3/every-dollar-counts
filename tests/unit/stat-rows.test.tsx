@@ -58,6 +58,13 @@ describe('StatRows', () => {
     expect(link.firstElementChild!.childElementCount).toBe(1)
   })
 
+  // #215: Saved 30 cents below zero printed "-$0", in coral on the dashboard. The figure is "$0".
+  it('never shows "-$0"', () => {
+    render(<StatRows rows={[{ label: 'Saved this month', amount: -0.3, href: '/breakdown/saved' }]} />)
+    expect(screen.getByText('$0')).toBeTruthy()
+    expect(screen.queryByText('-$0')).toBeNull()
+  })
+
   it('formats in the household currency', () => {
     render(<StatRows rows={[{ label: 'Cash on hand', amount: 1234.5, currency: 'EUR', href: '/breakdown/cash' }]} />)
     expect(screen.getByText('€1,235')).toBeTruthy()

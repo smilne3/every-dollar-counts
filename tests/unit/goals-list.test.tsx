@@ -127,6 +127,48 @@ describe('GoalsList', () => {
   })
 })
 
+// #215: a goal is done by the figures it shows, as Budgets decides "over". $999.60 of $1,000 reads
+// "$1,000 of $1,000", so it is done: its 🎉, and a full bar in the darker green.
+describe('GoalsList: done by the figures shown', () => {
+  const goal = (saved_amount: number) => ({
+    initialGoals: [{ id: '1', name: 'Emergency fund', target_amount: 1000, saved_amount }],
+    readAt: 1_000,
+  })
+  const figures = () => screen.getByText(/ of \$1,000/)
+  const bar = (container: HTMLElement) =>
+    container.querySelector('[data-goal-card] .rounded-full .rounded-full') as HTMLElement
+
+  it.each([999.5, 999.6])('counts %s of 1,000 as done', (saved) => {
+    const { container } = render(<GoalsList {...goal(saved)} />)
+    expect(figures().textContent).toBe('$1,000 of $1,000 🎉')
+    expect(screen.getByText('100%')).toBeTruthy()
+    expect(bar(container).className).toContain('bg-emerald-600')
+    expect(bar(container).style.width).toBe('100%')
+  })
+
+  it('does not count 999.4 of 1,000 as done', () => {
+    const { container } = render(<GoalsList {...goal(999.4)} />)
+    expect(figures().textContent).toBe('$999 of $1,000')
+    expect(bar(container).className).not.toContain('bg-emerald-600')
+  })
+
+  // The delete confirmation names the amounts in whole dollars too, as the card above it does.
+  // Amounts with cents, so figures to the cent cannot pass.
+  it('names the amounts in whole dollars when asking to delete', () => {
+    render(
+      <GoalsList
+        initialGoals={[{ id: '1', name: 'Emergency fund', target_amount: 3000.4, saved_amount: 1234.56 }]}
+        readAt={1_000}
+      />
+    )
+    fireEvent.click(screen.getByLabelText('Delete Emergency fund'))
+    const dialog = screen.getByRole('dialog', { name: 'Delete “Emergency fund”?' })
+    expect(within(dialog).getByText(/^You’ve saved/).textContent).toBe(
+      'You’ve saved $1,235 toward $3,000. This can’t be undone.'
+    )
+  })
+})
+
 // #165: call() never read the reply and had no try/finally, so a failed save looked done, a
 // request that threw left every goal control disabled, and the add form cleared before the reply.
 describe('GoalsList saves', () => {
@@ -325,7 +367,7 @@ describe('GoalsList saves', () => {
       expect(alert.textContent).toBe('It may not have saved. Showing the latest.')
       expect(card(EF).contains(alert)).toBe(true)
       expect(amount(EF).value).toBe('1200')
-      expect(within(card(EF)).getByText(/\$1,200\.00 of \$3,000\.00/)).toBeTruthy()
+      expect(within(card(EF)).getByText(/\$1,200 of \$3,000/)).toBeTruthy()
       expect(within(card(EF)).getByText('40%')).toBeTruthy()
       expect(refresh).toHaveBeenCalledTimes(1)
       expect(logged).toHaveBeenCalledWith('[GoalsList] save failed', expect.anything())
@@ -484,7 +526,7 @@ describe('GoalsList saves', () => {
         // The first update's reload, read at 2,500: after it was written and before the second was.
         rerender(<GoalsList readAt={2_500} initialGoals={reloaded(1500)} />)
         expect(amount(EF).value).toBe('1700')
-        expect(within(card(EF)).getByText(/\$1,700\.00 of \$3,000\.00/)).toBeTruthy()
+        expect(within(card(EF)).getByText(/\$1,700 of \$3,000/)).toBeTruthy()
         // The second's, read at 3,500.
         rerender(<GoalsList readAt={3_500} initialGoals={reloaded(1700)} />)
         expect(amount(EF).value).toBe('1700')
@@ -570,7 +612,7 @@ describe('GoalsList saves', () => {
         await updateAndSettle('1700')
         expect(within(card(EF)).getByRole('alert').textContent).toBe('It may not have saved. Showing the latest.')
         expect(amount(EF).value).toBe('1500')
-        expect(within(card(EF)).getByText(/\$1,500\.00 of \$3,000\.00/)).toBeTruthy()
+        expect(within(card(EF)).getByText(/\$1,500 of \$3,000/)).toBeTruthy()
       })
 
       // A card holds back only what its own update sent. Held back too, another goal's change from
@@ -649,7 +691,7 @@ describe('GoalsList saves', () => {
     }
 
     // #177 review: one failure for the whole list was cleared by any save, so after another goal's
-    // save the refused card still read "50%, $1,500.00 of $3,000.00" with nothing to say the server
+    // save the refused card still read "50%, $1,500 of $3,000" with nothing to say the server
     // held $1,200. The bar follows the field as a preview; the message that stays explains it.
     it("keeps a goal's refusal, beside the amount it explains, when another goal and the add form save", async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(refused(500, TRY_AGAIN)).mockResolvedValueOnce(saved()).mockResolvedValueOnce(saved()))
@@ -666,7 +708,7 @@ describe('GoalsList saves', () => {
       expect(within(card(EF)).getByRole('alert').textContent).toBe(TRY_AGAIN)
       expect(screen.getAllByRole('alert')).toHaveLength(1)
       expect(amount(EF).value).toBe('1500')
-      expect(within(card(EF)).getByText(/\$1,500\.00 of \$3,000\.00/)).toBeTruthy()
+      expect(within(card(EF)).getByText(/\$1,500 of \$3,000/)).toBeTruthy()
       expect(within(card(EF)).getByText('50%')).toBeTruthy()
     })
 

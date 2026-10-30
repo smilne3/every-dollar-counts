@@ -4,6 +4,7 @@ import { AccountList } from '@/components/AccountList'
 import { LinkButton } from '@/components/LinkButton'
 import { MissingBalancesNote } from '@/components/MissingBalancesNote'
 import { NotSyncingBanner } from '@/components/NotSyncingBanner'
+import { OwedToYouLink } from '@/components/OwedToYouLink'
 import { RefreshButton } from '@/components/RefreshButton'
 import { SpendIncomeChart } from '@/components/SpendIncomeChart'
 import { RecentActivity } from '@/components/RecentActivity'
@@ -13,7 +14,7 @@ import { tapTargetClass } from '@/components/ui/styles'
 import { StatCard } from '@/components/ui/StatCard'
 import { StatRows } from '@/components/ui/StatRows'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { money, moneyWhole, longDate, monthNameLong } from '@/lib/format'
+import { money, moneyFigure, longDate, monthNameLong } from '@/lib/format'
 import { fetchCategoryContext, SUGGESTION_EMBED, withSuggestion } from '@/lib/category-context'
 import { activityItem } from '@/lib/category-views'
 import {
@@ -40,6 +41,19 @@ function greeting(hour: number): string {
   if (hour < 12) return 'Good morning'
   if (hour < 18) return 'Good afternoon'
   return 'Good evening'
+}
+
+// "Avg $3,822/mo · 5 mo", under Saved on the tile and the phone row. Coral by the figure shown, not
+// by the average before rounding (#215): a few cents below zero reads as a plain "$0", and 50 cents
+// below as a coral "-$1". It was coloured by Math.round, which rounds -0.50 to 0, so that "-$1" was
+// not coral, and a few cents below printed "-$0".
+function averageLine(average: number, months: number, currency: string) {
+  const avg = moneyFigure(average, currency)
+  return (
+    <span className={`block ${avg.value < 0 ? 'text-coral' : 'text-muted'}`}>
+      {`Avg ${avg.text}/mo · ${months} mo`}
+    </span>
+  )
 }
 
 export default async function DashboardPage({
@@ -222,13 +236,21 @@ export default async function DashboardPage({
   const cash = cashOnHand(accounts)
   const depCount = accounts.filter((a) => a.type === 'depository').length
 
-  const budgetPct = totalBudget > 0 ? Math.round((trackedSpend / totalBudget) * 100) : null
-  // Exact on the tile; whole dollars on the phone row, beside a whole-dollar figure, so it fits.
-  const budgetFoot = (fmt: typeof money) =>
-    budgetPct != null ? (
-      <span className={budgetPct > 100 ? 'text-coral' : budgetPct > 80 ? 'text-amber' : 'text-muted'}>
-        {`${fmt(trackedSpend, currency)} of ${fmt(totalBudget, currency)} budgeted`}
-      </span>
+  // The same note on the tile and the phone row, in whole dollars on both (#215), and coloured by the
+  // figures it prints, as Budgets decides "over" (#219): coral once the spend shown is over the budget
+  // shown, amber above 80% of it. It was coloured by a rounded percentage the note does not show:
+  // "$15,074 of $15,000 budgeted" stayed amber until 100.5%, and "$50 of $50" was coral at $50.30.
+  const spentFigure = moneyFigure(trackedSpend, currency)
+  const budgetFigure = moneyFigure(totalBudget, currency)
+  const budgetTone =
+    spentFigure.value > budgetFigure.value
+      ? 'text-coral'
+      : spentFigure.value > 0.8 * budgetFigure.value
+        ? 'text-amber'
+        : 'text-muted'
+  const budgetFoot =
+    totalBudget > 0 ? (
+      <span className={budgetTone}>{`${spentFigure.text} of ${budgetFigure.text} budgeted`}</span>
     ) : (
       <span className="text-muted">this month</span>
     )
@@ -242,14 +264,12 @@ export default async function DashboardPage({
   // neither layout has room to say why, and the saved breakdown it links to does. That includes a
   // bank that isn't syncing (#135), which the banner above names, and one with no accounts yet
   // (#170), which the note above names. The month count keeps a one- or two-month "average" from
-  // passing for a settled one. Coral by the rounded figure, so a few cents below zero does not read
-  // as a red "$0".
+  // passing for a settled one.
   const avgLine =
-    avgSaved.kind === 'average' ? (
-      <span className={`block ${Math.round(avgSaved.average) < 0 ? 'text-coral' : 'text-muted'}`}>
-        {`Avg ${moneyWhole(avgSaved.average, currency)}/mo · ${avgSaved.months.length} mo`}
-      </span>
-    ) : null
+    avgSaved.kind === 'average' ? averageLine(avgSaved.average, avgSaved.months.length, currency) : null
+  // Coral by the figure shown, on the tile and the phone row alike: 30 cents below zero shows "$0",
+  // which is not a loss, so it is not coral (#215).
+  const savedTone = moneyFigure(saved, currency).value < 0 ? 'coral' : 'ink'
 
   return (
     <div className="space-y-6">
@@ -304,8 +324,7 @@ export default async function DashboardPage({
         />
         {/* The three supporting figures. On a phone, rows in one card: three tiles across were too
             narrow (see components/ui/StatRows.tsx). The Saved row has room for one note: the
-            average when there is one, which drops money in and out, otherwise money in and out in
-            whole dollars. */}
+            average when there is one, which drops money in and out, otherwise money in and out. */}
         <div className="md:hidden">
           <StatRows
             rows={[
@@ -315,15 +334,15 @@ export default async function DashboardPage({
                 amount: spent,
                 currency,
                 href: '/breakdown/spent',
-                foot: budgetFoot(moneyWhole),
+                foot: budgetFoot,
               },
               {
                 label: 'Saved this month',
                 amount: saved,
                 currency,
                 href: '/breakdown/saved',
-                tone: saved < 0 ? 'coral' : 'ink',
-                foot: avgLine ?? `${moneyWhole(income, currency)} in · ${moneyWhole(spent, currency)} out`,
+                tone: savedTone,
+                foot: avgLine ?? `${money(income, currency)} in · ${money(spent, currency)} out`,
               },
             ]}
           />
@@ -345,14 +364,14 @@ export default async function DashboardPage({
             currency={currency}
             variant="compact"
             href="/breakdown/spent"
-            foot={budgetFoot(money)}
+            foot={budgetFoot}
           />
           <StatCard
             label="Saved this month"
             amount={saved}
             currency={currency}
             variant="compact"
-            tone={saved < 0 ? 'coral' : 'ink'}
+            tone={savedTone}
             href="/breakdown/saved"
             foot={
               <>
@@ -366,16 +385,8 @@ export default async function DashboardPage({
         </div>
       </div>
 
-      {owedToYou > 0 && (
-        <Link
-          href="/reimbursements"
-          aria-label={`Owed to you: ${money(owedToYou, currency)}`}
-          className="flex min-h-[44px] items-center justify-between rounded-lg border border-line px-4 py-3 text-sm hover:bg-surface-2 md:min-h-0"
-        >
-          <span className="text-muted">Owed to you</span>
-          <span className="font-medium tabular-nums text-ink">{money(owedToYou, currency)}</span>
-        </Link>
-      )}
+      {/* To the cent, the one total here that is (#215): see the component. */}
+      <OwedToYouLink amount={owedToYou} currency={currency} />
 
       {/* grid-cols-1 (= minmax(0,1fr)), not a bare `grid`: an implicit auto track sizes to
           max-content, so the chart's intrinsic width scrolls the whole page sideways on a

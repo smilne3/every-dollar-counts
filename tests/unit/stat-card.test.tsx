@@ -7,24 +7,21 @@ afterEach(cleanup)
 // The §9 assertion: a formatting test, not a width one. This is the test that would have caught
 // §1.3 regressing, because the tile — not the caller — now decides how many characters it shows.
 describe('StatCard', () => {
-  it('renders the hero figure exactly, cents and all', () => {
+  // Net worth is the figure that clipped twice (§1.3), so every dollar of it shows: never "$1.18M".
+  // Its cents went on 2026-10-23, when the owner reversed spec §4's exact net worth (#215).
+  it('renders the hero figure in whole dollars, every one of them', () => {
     render(<StatCard label="Net worth" amount={1182885.15} variant="hero" />)
-    expect(screen.getByText('$1,182,885.15')).toBeTruthy()
-  })
-
-  // Net worth is the figure that clipped twice. It must never be the rounded one.
-  it('never rounds the hero figure', () => {
-    render(<StatCard label="Net worth" amount={1182885.15} variant="hero" />)
-    expect(screen.queryByText('$1,182,885')).toBeNull()
+    expect(screen.getByText('$1,182,885')).toBeTruthy()
+    expect(screen.queryByText('$1,182,885.15')).toBeNull()
   })
 
   // A compact tile is shown only from md up: below md the dashboard, its one caller, shows StatRows
-  // instead (#136). So it shows its figure exactly, at every width, and carries no rounded copy
-  // for a phone that never sees it (#137).
-  it('shows a compact tile its figure exactly, and nothing rounded', () => {
+  // instead (#136). Its figure is whole dollars, as the phone row's is, so the two layouts show the
+  // same figure the same way (#215).
+  it('shows a compact tile its figure in whole dollars', () => {
     render(<StatCard label="Cash on hand" amount={34920.49} />)
-    expect(screen.getByText('$34,920.49')).toBeTruthy()
-    expect(screen.queryByText('$34,920')).toBeNull()
+    expect(screen.getByText('$34,920')).toBeTruthy()
+    expect(screen.queryByText('$34,920.49')).toBeNull()
   })
 
   // One string, with nothing in it hidden at any width: no md:hidden and md:inline pair.
@@ -32,7 +29,7 @@ describe('StatCard', () => {
     const { container } = render(<StatCard label="Cash on hand" amount={34920.49} />)
     const figure = container.querySelector('.tabular-nums')!
     expect(figure.children.length).toBe(0)
-    expect(figure.textContent).toBe('$34,920.49')
+    expect(figure.textContent).toBe('$34,920')
   })
 
   // The desktop-unchanged constraint is this stage's hardest rule, and it is the one thing no
@@ -70,11 +67,17 @@ describe('StatCard', () => {
   it('defaults to compact when no variant is given', () => {
     const { container: unset } = render(<StatCard label="Spent" amount={8776.51} />)
     const figure = unset.querySelector('.tabular-nums')!
-    expect(figure.textContent).toBe('$8,776.51')
+    expect(figure.textContent).toBe('$8,777')
     const asDefault = figure.className
     cleanup()
     const { container: compact } = render(<StatCard label="Spent" amount={8776.51} variant="compact" />)
     expect(asDefault).toBe(compact.querySelector('.tabular-nums')!.className)
+  })
+
+  // #215: a figure a few cents below zero is "$0", never "-$0".
+  it('never shows "-$0"', () => {
+    const { container } = render(<StatCard label="Saved this month" amount={-0.3} />)
+    expect(container.querySelector('.tabular-nums')!.textContent).toBe('$0')
   })
 
   it('names the tile', () => {
@@ -86,7 +89,7 @@ describe('StatCard', () => {
   // JSX, which is why the caller had to pre-format the figure in the first place.
   it.each(['hero', 'compact'] as const)('paints a coral figure when asked, on a %s tile', (variant) => {
     render(<StatCard label="Saved" amount={-120} variant={variant} tone="coral" />)
-    expect(screen.getByText('-$120.00').className.split(/\s+/)).toContain('text-coral')
+    expect(screen.getByText('-$120').className.split(/\s+/)).toContain('text-coral')
   })
 
   it('renders a footnote when given one', () => {

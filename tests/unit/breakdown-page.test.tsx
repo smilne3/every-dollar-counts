@@ -2,9 +2,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 // vi.hoisted for the same reason as tests/unit/budgets-page.test.tsx and tests/unit/trends-page.test.tsx:
 // the static page import below is linked before this file's body runs, firing the mock factory.
-const { results, calls, tz, history, selects } = vi.hoisted(() => ({
+const { results, calls, tz, history, selects, receivable } = vi.hoisted(() => ({
   // Every `.select()` the page sends, per table, so a test can pin the suggestion embed (§7.4).
   selects: {} as Record<string, string[]>,
+  // What lib/receivable answers: what the household is owed, 0 unless a test says otherwise.
+  receivable: { value: 0 },
   // What lib/history-start answers; see tests/unit/dashboard-page.test.tsx for why it is mocked.
   history: { value: new Map() as ReadonlyMap<string, string | null> },
   results: {} as Record<string, { data: unknown; error: { message: string } | null }>,
@@ -99,7 +101,7 @@ vi.mock('@/lib/household', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/household')>()),
   householdTimezone: async () => tz.value,
 }))
-vi.mock('@/lib/receivable', () => ({ fetchReceivable: async () => 0 }))
+vi.mock('@/lib/receivable', () => ({ fetchReceivable: async () => receivable.value }))
 vi.mock('@/lib/history-start', () => ({ historyStart: async () => history.value }))
 
 import BreakdownPage from '@/app/(app)/breakdown/[metric]/page'
@@ -111,6 +113,7 @@ import { catalogFingerprint } from '@/lib/category-rules'
 import { sug } from './helpers/category-context'
 import { blocks, bannerText, balancesNote } from './helpers/banner'
 import { storedItem, FOREIGN_ITEMS } from '../stubs/plaid-items'
+import { render as renderDom, screen, cleanup } from '@testing-library/react'
 
 const FOOD = { id: 'c-food', name: 'Food & Drink', pfc_primary: 'FOOD_AND_DRINK', sort_order: 0 }
 const GROCERY = { id: 'c-grocery', name: 'Grocery', pfc_primary: null, sort_order: 1 }
@@ -147,6 +150,7 @@ beforeEach(() => {
   results.transactions = { data: [], error: null }
   results.manual_assets = { data: [], error: null }
   results.plaid_items = { data: [], error: null }
+  receivable.value = 0
   for (const k of Object.keys(selects)) delete selects[k]
   vi.unstubAllEnvs()
 })
@@ -577,5 +581,38 @@ describe('Breakdown categories and rules (#28)', () => {
   it('throws when the categories and rules cannot be read', async () => {
     results.category_rules = { data: null, error: { message: 'boom' } }
     await expect(render('spent')).rejects.toThrow(/could not read category rules/)
+  })
+})
+
+// The owed-to-you total keeps its cents wherever it appears (owner decision, 2026-10-30, #215): here
+// as on the dashboard's link and the reimbursements page. Rounded, a 30-cent remainder would read
+// "Owed to you $0". The rows are rendered as the page hands them to BreakdownList, so this needs
+// both halves: the page marking the row, and the list keeping its cents.
+describe('Net worth breakdown: Owed to you, to the cent', () => {
+  afterEach(cleanup)
+
+  const shown = async (owed: number) => {
+    receivable.value = owed
+    results.accounts = { data: [account('item-1', { current_balance: 1234.56 })], error: null }
+    const props = lists(await render('net-worth'))[0] as Parameters<typeof BreakdownList>[0]
+    renderDom(<BreakdownList {...props} />)
+    const amountOf = (label: string) =>
+      screen.getByText(label).closest('li')!.querySelector('.tabular-nums')!.textContent
+    return { owed: amountOf('Owed to you'), account: amountOf('Checking') }
+  }
+
+  it.each([
+    [12.34, '$12.34'],
+    [0.3, '$0.30'],
+  ])('shows %s owed as %s, beside an account in whole dollars', async (owed, text) => {
+    expect(await shown(owed)).toEqual({ owed: text, account: '$1,235' })
+  })
+
+  // The page marks that one row exact, and no other row on any breakdown.
+  it.each(METRICS)('marks no row exact but Owed to you, on %s', async (metric) => {
+    receivable.value = 12.34
+    results.accounts = { data: [account('item-1')], error: null }
+    const rows = lists(await render(metric)).flatMap((l) => l.rows as { label: string; exact?: boolean }[])
+    expect(rows.filter((r) => r.exact).map((r) => r.label)).toEqual(metric === 'net-worth' ? ['Owed to you'] : [])
   })
 })

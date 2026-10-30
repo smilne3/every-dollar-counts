@@ -84,10 +84,35 @@ describe('BudgetEditor', () => {
     const { container } = render(<BudgetEditor {...props} />)
     expect(container.querySelectorAll('[data-budget-row]')).toHaveLength(2)
     expect(screen.getByText('Groceries')).toBeTruthy()
-    expect(screen.getByText(/\$210\.00 spent/).className).toContain('text-coral')
+    expect(screen.getByText('$210 spent').className).toContain('text-coral')
     expect((screen.getByLabelText('Dining monthly budget limit') as HTMLInputElement).value).toBe(
       '150'
     )
+  })
+
+  // #215: spend shows in whole dollars, so whether it is over is decided from the figure shown.
+  // $500.40 against a $500 limit reads "$500 spent", and coral there would call $500 of $500 over.
+  const groceries = (spent: number) => ({
+    ...props,
+    categoryNames: ['Groceries'],
+    initialLimits: { Groceries: 500 },
+    spend: { Groceries: spent },
+  })
+  const barOf = (container: HTMLElement) =>
+    container.querySelector('[data-budget-row] .rounded-full .rounded-full') as HTMLElement
+
+  it('does not call a category 40 cents over its limit over budget', () => {
+    const { container } = render(<BudgetEditor {...groceries(500.4)} />)
+    expect(screen.getByText('$500 spent').className).not.toContain('text-coral')
+    expect(barOf(container).className).not.toContain('bg-coral')
+    expect(barOf(container).className).toContain('bg-amber')
+  })
+
+  // 50 cents over shows "$501 spent", half away from zero, which is over.
+  it('calls a category over budget once the figure shown is over', () => {
+    const { container } = render(<BudgetEditor {...groceries(500.5)} />)
+    expect(screen.getByText('$501 spent').className).toContain('text-coral')
+    expect(barOf(container).className).toContain('bg-coral')
   })
 })
 

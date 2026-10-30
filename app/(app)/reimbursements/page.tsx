@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { NotSyncingBanner } from '@/components/NotSyncingBanner'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
-import { money } from '@/lib/format'
+import { moneyExact } from '@/lib/format'
 import { todayIn } from '@/lib/clock'
 import { currentHouseholdId, householdTimezone } from '@/lib/household'
 import { listItemsForHousehold } from '@/lib/plaid-items'
@@ -94,7 +94,7 @@ export default async function ReimbursementsPage() {
           // Only a marked deposit covers a marked expense (lib/reimbursements.ts), and nothing else
           // said to mark one, so a repayment left unmarked kept its expense owed here (#159).
           owed > 0
-            ? `You're owed ${money(owed)}. These are the expenses to put on your next report. When it's paid back, mark that deposit reimbursable on Transactions too.`
+            ? `You're owed ${moneyExact(owed)}. These are the expenses to put on your next report. When it's paid back, mark that deposit reimbursable on Transactions too.`
             : 'Nothing outstanding. Tick a transaction as reimbursable and it will appear here.'
         }
       />
@@ -155,7 +155,7 @@ export default async function ReimbursementsPage() {
                       </td>
                       <td className="truncate px-4 py-3 text-sm text-muted">{t?.reimbursable_note}</td>
                       <td className="px-4 py-3 text-right font-medium tabular-nums text-ink">
-                        {money(r.remaining)}
+                        {moneyExact(r.remaining)}
                       </td>
                     </tr>
                   )
@@ -220,7 +220,7 @@ export default async function ReimbursementsPage() {
                         </td>
                         <td className="truncate px-4 py-3 text-sm text-muted">{t.reimbursable_note}</td>
                         <td className="px-4 py-3 text-right font-medium tabular-nums text-ink">
-                          {money(Number(t.reimbursable_amount))}
+                          {moneyExact(Number(t.reimbursable_amount))}
                         </td>
                       </tr>
                     ))}

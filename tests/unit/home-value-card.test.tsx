@@ -30,6 +30,12 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }))
 // readAt is when the page read the value, by the server's clock.
 const props = { initialValue: 700000, updatedAt: '2026-10-01T12:00:00Z', readAt: 1_000 }
 
+// Whole dollars, as every figure outside the transactions and what is owed back on them (#215).
+it('says what is stored in whole dollars', () => {
+  render(<HomeValueCard {...props} initialValue={700000.4} />)
+  expect(screen.getByText(/^Currently /).textContent).toMatch(/^Currently \$700,000 · updated /)
+})
+
 // #165: the card checked res.ok alone, so a save made after the session ended, which is redirected
 // to the login page and answers 200, read as saved. The home value moves net worth.
 describe('HomeValueCard saves', () => {
@@ -213,7 +219,7 @@ describe('HomeValueCard saves', () => {
       fireEvent.change(field(), { target: { value: '$750,000' } })
       rerender(reloaded(800000, 2_000))
       expect(field().value).toBe('$750,000')
-      expect(currently()).toContain('$800,000.00')
+      expect(currently()).toContain('$800,000')
     })
 
     // As Zillow shows it: a reload that brings back the value saved leaves the field as it was typed.
@@ -234,7 +240,7 @@ describe('HomeValueCard saves', () => {
       await saveAndSettle('750000')
       rerender(reloaded(700000, 2_500))
       expect(field().value).toBe('700000')
-      expect(currently()).toContain('$700,000.00')
+      expect(currently()).toContain('$700,000')
     })
 
     // "Currently" says what is stored after each outcome. Once a save is confirmed, that is the value
@@ -243,7 +249,7 @@ describe('HomeValueCard saves', () => {
       vi.stubGlobal('fetch', answering(() => savedAt(2_000)))
       render(<HomeValueCard {...props} />)
       await saveAndSettle('750000')
-      expect(currently()).toContain('$750,000.00')
+      expect(currently()).toContain('$750,000')
     })
 
     // #182's race, here: two quick saves, and the reload asked for after the first read the value
@@ -257,10 +263,10 @@ describe('HomeValueCard saves', () => {
       // The first save's reload, read at 2,500: after it was written and before the second was.
       rerender(reloaded(750000, 2_500))
       expect(field().value).toBe('800000')
-      expect(currently()).toContain('$800,000.00')
+      expect(currently()).toContain('$800,000')
       rerender(reloaded(800000, 3_500))
       expect(field().value).toBe('800000')
-      expect(currently()).toContain('$800,000.00')
+      expect(currently()).toContain('$800,000')
     })
 
     // The page takes its time before reading and the route after writing, so a read stamped in the
@@ -272,10 +278,10 @@ describe('HomeValueCard saves', () => {
       await saveAndSettle('750000')
       rerender(reloaded(700000, 2_000))
       expect(field().value).toBe('750000')
-      expect(currently()).toContain('$750,000.00')
+      expect(currently()).toContain('$750,000')
       rerender(reloaded(800000, 2_001))
       expect(field().value).toBe('800000')
-      expect(currently()).toContain('$800,000.00')
+      expect(currently()).toContain('$800,000')
     })
 
     // In Next 16.4.2 the first save's reload can land while the second is in flight (see #176), and
@@ -291,7 +297,7 @@ describe('HomeValueCard saves', () => {
       settle(savedAt(3_000))
       await waitFor(() => expect(button().disabled).toBe(false))
       expect(field().value).toBe('800000')
-      expect(currently()).toContain('$800,000.00')
+      expect(currently()).toContain('$800,000')
     })
 
     // Nothing reloads after a refusal, so the first save's reload can still land after it. What was
@@ -304,7 +310,7 @@ describe('HomeValueCard saves', () => {
       await screen.findByRole('alert')
       rerender(reloaded(750000, 2_500))
       expect(field().value).toBe('800000')
-      expect(currently()).toContain('$750,000.00')
+      expect(currently()).toContain('$750,000')
     })
 
     // It may have saved, and what was typed stays (#177): saving again sets the same value. Whatever
@@ -318,7 +324,7 @@ describe('HomeValueCard saves', () => {
       // The reload after it, read at 2,000: the save did not land.
       rerender(reloaded(700000, 2_000))
       expect(field().value).toBe('$750,000')
-      expect(currently()).toContain('$700,000.00')
+      expect(currently()).toContain('$700,000')
     })
 
     // It may have saved, and the reload after it shows it did: the field then holds what the server
