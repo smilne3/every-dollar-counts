@@ -13,7 +13,8 @@ export function money(amount: number | null | undefined, currency = 'USD'): stri
 
 // money(), with the figure it shows. Whatever an amount decides beside it, a colour or a minus sign,
 // is decided from `value`, the figure on screen, not from the amount before rounding: 30 cents below
-// zero shows "$0", which is no loss to colour coral, and 50 cents below shows "-$1", which is (#215).
+// zero shows "$0", which is not a loss, so it is not coral, and 50 cents below shows "-$1", which is
+// a loss, and coral (#215).
 //
 // Rounded here, half away from zero, which is Intl's rule, and Intl is handed the result, so it has
 // nothing left to round and `value` and `text` cannot disagree. Negative zero becomes zero: Intl

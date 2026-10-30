@@ -238,7 +238,7 @@ export default async function DashboardPage({
 
   // The same note on the tile and the phone row, in whole dollars on both (#215), and coloured by the
   // figures it prints, as Budgets decides "over" (#219): coral once the spend shown is over the budget
-  // shown, amber above 80% of it. It was coloured by the percentage rounded, which no longer shows:
+  // shown, amber above 80% of it. It was coloured by a rounded percentage the note does not show:
   // "$15,074 of $15,000 budgeted" stayed amber until 100.5%, and "$50 of $50" was coral at $50.30.
   const spentFigure = moneyFigure(trackedSpend, currency)
   const budgetFigure = moneyFigure(totalBudget, currency)
@@ -268,7 +268,7 @@ export default async function DashboardPage({
   const avgLine =
     avgSaved.kind === 'average' ? averageLine(avgSaved.average, avgSaved.months.length, currency) : null
   // Coral by the figure shown, on the tile and the phone row alike: 30 cents below zero shows "$0",
-  // which is no loss to colour (#215).
+  // which is not a loss, so it is not coral (#215).
   const savedTone = moneyFigure(saved, currency).value < 0 ? 'coral' : 'ink'
 
   return (
@@ -385,7 +385,7 @@ export default async function DashboardPage({
         </div>
       </div>
 
-      {/* To the cent, the one figure here that is (#215): see the component. */}
+      {/* To the cent, the one total here that is (#215): see the component. */}
       <OwedToYouLink amount={owedToYou} currency={currency} />
 
       {/* grid-cols-1 (= minmax(0,1fr)), not a bare `grid`: an implicit auto track sizes to

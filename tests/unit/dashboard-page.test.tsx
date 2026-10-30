@@ -710,12 +710,12 @@ describe('Dashboard average savings (#126)', () => {
   })
 
   // #219: the note is coloured by the figures it prints, as Budgets decides "over" (#215). Coral once
-  // the spend shown is over the budget shown, amber above 80% of it. By the percentage rounded,
-  // "$15,074 of $15,000" stayed amber, and "$50 of $50" was coral at $50.30.
+  // the spend shown is over the budget shown, amber above 80% of it. By a rounded percentage the note
+  // does not show, "$15,074 of $15,000" stayed amber, and "$50 of $50" was coral at $50.30.
   it.each([
     ['$15,074 of $15,000, over', 15074, 15000, '$15,074 of $15,000 budgeted', 'text-coral'],
     ['$50.30 of $50, which shows as $50 of $50', 50.3, 50, '$50 of $50 budgeted', 'text-amber'],
-    ['$800.40 of $1,000, which shows as 80%', 800.4, 1000, '$800 of $1,000 budgeted', 'text-muted'],
+    ['$800.40 of $1,000, which shows as $800, exactly 80%', 800.4, 1000, '$800 of $1,000 budgeted', 'text-muted'],
     ['$800.50 of $1,000, which shows as $801', 800.5, 1000, '$801 of $1,000 budgeted', 'text-amber'],
   ])('colours the budget note by the figures it prints: %s', async (_, spend, limit, text, colour) => {
     results.categories = { data: [{ id: 'c2', name: 'Food & Drink', pfc_primary: 'FOOD_AND_DRINK', sort_order: 1 }], error: null }
@@ -954,8 +954,8 @@ describe('Dashboard reads', () => {
   })
 
   // Pins which tiles are compact: exactly the three supporting figures. Filtering on `!== 'hero'`
-  // would have stayed green if every tile lost its variant. What that variant then does about
-  // rounding is stat-card.test.tsx's business, not this file's.
+  // would have stayed green if every tile lost its variant. What the variant changes, the type scale,
+  // is stat-card.test.tsx's business, not this file's.
   it('leaves the other three tiles compact', async () => {
     const labels = findStatCards(await render())
       .filter((c) => c.props.variant === 'compact')
@@ -1004,8 +1004,8 @@ describe('Dashboard reads', () => {
     expect(saved!.props.tone).toBe('ink')
   })
 
-  // Rounding is display-only. The tile is handed the real figure and decides for itself; a
-  // pre-rounded value here would round the desktop layout too.
+  // Rounding is display-only. The tile is handed the real figure and rounds it itself, so each
+  // figure is rounded in one place, by one rule (#215).
   it('hands the tiles unrounded figures', async () => {
     results.accounts = {
       data: [{ id: 'a1', type: 'depository', current_balance: 34920.49 }],
@@ -1276,8 +1276,7 @@ describe('Dashboard full-width links: a 44px floor below md (#122)', () => {
   })
 })
 
-// What the page hands OwedToYouLink, which keeps the dashboard's one exact figure out of the page
-// (#215).
+// What the page hands OwedToYouLink, which keeps moneyExact out of the page (#215).
 async function owedToYouProps() {
   const links = elementsOf(await render()).filter((el) => el.type === OwedToYouLink)
   expect(links).toHaveLength(1)
@@ -1285,7 +1284,7 @@ async function owedToYouProps() {
 }
 
 describe('Dashboard Owed to you (#215)', () => {
-  // The one figure on the dashboard that keeps its cents (owner decision, 2026-10-23): it is checked
+  // The one total on the dashboard that keeps its cents (owner decision, 2026-10-23): it is checked
   // to the cent against an expense report and the repayment, and rounded, a 30-cent remainder would
   // read "Owed to you $0".
   it('hands the link what the household is owed, unrounded, in its currency', async () => {

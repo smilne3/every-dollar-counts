@@ -3,8 +3,8 @@ import { moneyExact } from '@/lib/format'
 
 // The dashboard's link to what the household is owed back, shown for any amount above zero.
 //
-// To the cent, unlike every other figure on the dashboard, and like the reimbursements page's own
-// "You're owed …" it leads to (owner decision, 2026-10-23, #215). The total is checked to the cent,
+// To the cent: the one total on the dashboard that is, like the reimbursements page's own "You're
+// owed …" it leads to (owner decision, 2026-10-23, #215). The total is checked to the cent,
 // against an expense report and then the repayment, and rounded, a 30-cent remainder would read
 // "Owed to you $0". It is a component of its own so the dashboard page has no reason to import
 // moneyExact, whose allowed files tests/unit/money-exact-imports.test.ts lists.

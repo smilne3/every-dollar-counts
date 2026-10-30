@@ -121,8 +121,8 @@ describe('money', () => {
     expect(money(8776.51)).toBe('$8,777')
   })
 
-  // Rounding is for READING. A figure that rounds to nothing must not read as nothing at all,
-  // so the currency symbol and the sign both survive.
+  // Rounding is for READING. A negative figure keeps its minus and its symbol, and one that rounds
+  // to zero is a plain "$0" (below), never an empty string.
   it('keeps the sign and the symbol on a negative figure', () => {
     expect(money(-5449)).toBe('-$5,449')
   })
@@ -163,10 +163,10 @@ describe('money', () => {
       vi.restoreAllMocks()
     })
 
-    // Budgets, Goals, the home value and the charts format in the phone's own browser (#215).
-    // Before v3 (Safari 15.4, Chrome 106), a maximum below the currency's default minimum of 2 threw
-    // a RangeError rather than lowering the minimum to meet it. Node is past v3, so the old rule is
-    // put back here, around the real formatter.
+    // Budgets, Goals, the home value, the account cards and the charts format in the phone's own
+    // browser (#215). Before v3, which arrived in Safari 15.4, Chrome 106 and Firefox 116, a maximum
+    // below the currency's default minimum of 2 threw a RangeError rather than lowering the minimum
+    // to meet it. Node is past v3, so the old rule is put back here, around the real formatter.
     it('still formats, as both limits are given', () => {
       const Real = Intl.NumberFormat
       vi.spyOn(Intl, 'NumberFormat').mockImplementation(function (

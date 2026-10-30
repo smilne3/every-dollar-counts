@@ -585,9 +585,9 @@ describe('Breakdown categories and rules (#28)', () => {
 })
 
 // The owed-to-you total keeps its cents wherever it appears (owner decision, 2026-10-30, #215): here
-// as on the dashboard's link and the reimbursements page. Rounded, a 30-cent remainder read "Owed to
-// you $0". The rows are rendered as the page hands them to BreakdownList, so this needs both halves:
-// the page marking the row, and the list keeping its cents.
+// as on the dashboard's link and the reimbursements page. Rounded, a 30-cent remainder would read
+// "Owed to you $0". The rows are rendered as the page hands them to BreakdownList, so this needs
+// both halves: the page marking the row, and the list keeping its cents.
 describe('Net worth breakdown: Owed to you, to the cent', () => {
   afterEach(cleanup)
 

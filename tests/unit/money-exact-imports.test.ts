@@ -20,7 +20,7 @@ const ALLOWED = new Map([
   ['components/RecentActivity.tsx', "The dashboard's Recent activity, which is transactions."],
   ['components/ReimbursableCheckbox.tsx', "A transaction's reimbursable part, beside its full amount."],
   ['components/ReimbursableEditor.tsx', "A transaction's reimbursable part, entered to the cent (step=\"0.01\")."],
-  ['app/(app)/reimbursements/page.tsx', "What is owed back: the \"You're owed\" total and the rows it adds up."],
+  ['app/(app)/reimbursements/page.tsx', "What is owed back: the \"You're owed\" total, the rows it adds up, and the rows already reimbursed."],
   ['components/ReimbursementCard.tsx', 'One row of what is owed back, or of what was reimbursed, on a phone.'],
   ['components/OwedToYouLink.tsx', "The dashboard's Owed to you, the same total as the reimbursements page's."],
   ['components/BreakdownList.tsx', "Only a row its page marks `exact`: net worth's Owed to you, the same total again."],
