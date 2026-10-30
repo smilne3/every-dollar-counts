@@ -31,15 +31,7 @@ type CategorySettings = {
 
 type Supabase = Awaited<ReturnType<typeof createClient>>
 
-// The household, and when the page began reading, by the server's clock, for TimezoneCard and
-// HomeValueCard to tell this page from one read before their last save was written (#182, #174). One
-// time for the page, taken before its first read, so it is never later than any read on it: a reload
-// that began before a save was written never passes as newer, however late in the page its read
-// comes. A time per read would let the home value's read, which comes after the banks', count a save
-// written while the page was reading them, so a card would refill one reload sooner; the reload
-// after the save does that anyway.
 async function readHousehold(supabase: Supabase) {
-  const readAt = Date.now()
   const { data: households, error: householdsError } = await supabase
     .from('households')
     .select('id, name, timezone')
@@ -48,7 +40,7 @@ async function readHousehold(supabase: Supabase) {
   // No data and no error is not "no household" either (#46): every card below would render as if
   // nothing were connected.
   if (!households) throw new Error('could not read your household: read returned no data and no error')
-  return { household: households[0], readAt }
+  return households[0]
 }
 
 async function readBudgetNames(supabase: Supabase): Promise<Set<string>> {
@@ -134,6 +126,20 @@ async function readOrNull<T>(what: string, read: () => Promise<T>): Promise<T | 
   }
 }
 
+// The household, and then what needs its id, together. A failed household read throws, and takes the
+// page down; each of the others is its own card's to report (#91).
+async function readHouseholdAndItsCards(supabase: Supabase) {
+  const household = await readHousehold(supabase)
+  const [items, slotsUsed, manualAssets] = await Promise.all([
+    household ? readOrNull('the banks', () => listItemsForHousehold(household.id)) : [],
+    // Null when it cannot be established — BankList falls back to the old wording rather than
+    // printing a number nobody stands behind.
+    household ? countSlotsUsed(household.id) : null,
+    household ? readOrNull('the home value', () => listManualAssets(household.id)) : [],
+  ])
+  return { household, items, slotsUsed, manualAssets }
+}
+
 // What a card shows in place of a read that failed. A plain function, not a component, so the
 // markup appears in the unrendered tree the page test reads. `Try again.` is a plain link so it
 // works in the installed app, which has no reload button (#139). It loads `href`, the page's top
@@ -149,20 +155,35 @@ function unavailable(message: string, href = '/settings') {
   )
 }
 
+// The server's clock. A function of its own because lint (react-hooks/purity) refuses Date.now() in a
+// component's body, where it would change between renders. This one renders once per request, and
+// the time is meant to differ between them.
+function serverClock() {
+  return Date.now()
+}
+
 export default async function SettingsPage() {
+  // When the page began reading, by the server's clock, for TimezoneCard and HomeValueCard to tell
+  // this page from one read before their last save was written (#182, #174). One time for the page,
+  // taken before any read starts, so it is never later than any read on it, in whatever order they
+  // run: a reload that began before a save was written never passes as newer, however late in the
+  // page its read comes. A time per read would let the home value's read, which starts once the
+  // household arrives, count a save written while the page was reading the household, so a card would
+  // refill one reload sooner; the reload after the save does that anyway.
+  const readAt = serverClock()
   const supabase = await createClient()
-  const { household, readAt } = await readHousehold(supabase)
-  const accounts = await readOrNull('the accounts', () => readAccounts(supabase))
-  const items = household ? await readOrNull('the banks', () => listItemsForHousehold(household.id)) : []
-  // Null when it cannot be established — BankList falls back to the old wording rather than
-  // printing a number nobody stands behind.
-  const slotsUsed = household ? await countSlotsUsed(household.id) : null
-  const manualAssets = household ? await readOrNull('the home value', () => listManualAssets(household.id)) : []
+
+  // Three chains that need nothing from each other, together, so the page waits for the longest and
+  // not their sum (#199).
+  const [{ household, items, slotsUsed, manualAssets }, accounts, categorySettings] = await Promise.all([
+    readHouseholdAndItsCards(supabase),
+    readOrNull('the accounts', () => readAccounts(supabase)),
+    // Four reads (see loadCategorySettings); if any fails, the Categories and Category rules cards
+    // both say so.
+    readOrNull('categories and rules', () => loadCategorySettings(supabase)),
+  ])
   const home = manualAssets?.find((a) => a.name === 'Home') ?? null
   const firstLine = accounts === null ? null : banksLine(accounts.length)
-  // Four reads (see loadCategorySettings); if any fails, the Categories and Category rules cards
-  // both say so.
-  const categorySettings = await readOrNull('categories and rules', () => loadCategorySettings(supabase))
   const categoriesUnavailable = unavailable("Couldn't load categories and rules.")
   const rulesUnavailable = unavailable("Couldn't load categories and rules.", CATEGORY_RULES_HREF)
 

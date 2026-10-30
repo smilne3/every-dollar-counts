@@ -37,6 +37,8 @@ import { currentHouseholdId, householdTimezone } from '@/lib/household'
 import { readAllRows } from '@/lib/read-all'
 import { historyStart } from '@/lib/history-start'
 
+type Supabase = Awaited<ReturnType<typeof createClient>>
+
 function greeting(hour: number): string {
   if (hour < 12) return 'Good morning'
   if (hour < 18) return 'Good afternoon'
@@ -56,6 +58,54 @@ function averageLine(average: number, months: number, currency: string) {
   )
 }
 
+async function readAccounts(supabase: Supabase) {
+  const { data, error } = await supabase
+    .from('accounts')
+    .select('*')
+    .order('name')
+    .order('account_id')
+  // Zero accounts renders "Connect your first account". A household with eleven of them being told
+  // it has none is not a smaller failure than an error message, it is a more convincing one (#46).
+  if (error) throw new Error(`could not read accounts: ${error.message}`)
+  return data ?? []
+}
+
+// The window passes PostgREST's 1,000-row cap: six months alone held 908 rows on 2026-10-05, and
+// this reads seven. Paged, so the chart and the tiles never silently drop transactions (#69).
+async function readFlowTxns(supabase: Supabase, windowStart: string) {
+  const { data, error } = await readAllRows(() =>
+    supabase
+      .from('transactions')
+      .select(`id, amount, date, merchant_name, user_category, pfc_primary, pfc_detailed, reimbursable_amount, ${SUGGESTION_EMBED}`)
+      .eq('removed', false)
+      .gte('date', windowStart)
+  )
+  // #46: "the query failed" and "you spent nothing this month" must never render identically.
+  if (error) throw new Error(`could not read transactions: ${error.message}`)
+  return data
+}
+
+async function readBudgets(supabase: Supabase) {
+  const { data, error } = await supabase.from('budgets').select('category, monthly_limit')
+  // A failed read here reads as "you have not set any budgets", so the tile's budget footnote
+  // disappears rather than reporting that it could not be worked out.
+  if (error) throw new Error(`could not read budgets: ${error.message}`)
+  return data ?? []
+}
+
+async function readRecentTxns(supabase: Supabase) {
+  const { data, error } = await supabase
+    .from('transactions')
+    .select(`id, name, merchant_name, amount, date, user_category, pfc_primary, pfc_detailed, reimbursable_amount, ${SUGGESTION_EMBED}`)
+    .eq('removed', false)
+    .order('date', { ascending: false })
+    .order('id', { ascending: false })  // #50: `date` is day-granular and ties constantly; without a unique second key Postgres may return tied rows in any order, so an UPDATE reshuffles the list under the reader.
+    .limit(6)
+  // Otherwise a failed read renders "No transactions yet" to a household with 696 of them.
+  if (error) throw new Error(`could not read recent transactions: ${error.message}`)
+  return data ?? []
+}
+
 export default async function DashboardPage({
   searchParams,
 }: {
@@ -65,37 +115,35 @@ export default async function DashboardPage({
   // arriving") so it isn't lost on the redirect. Next 16: searchParams is async.
   const notice = (await searchParams)?.notice
   const supabase = await createClient()
-  const { data: accountsData, error: accountsError } = await supabase
-    .from('accounts')
-    .select('*')
-    .order('name')
-    .order('account_id')
-  // Zero accounts renders "Connect your first account". A household with eleven of them being told
-  // it has none is not a smaller failure than an error message, it is a more convincing one (#46).
-  if (accountsError) throw new Error(`could not read accounts: ${accountsError.message}`)
-  const accounts = accountsData ?? []
 
-  // Any bank that isn't syncing has to be visible on the main screen. Stale numbers that look
-  // fine are the failure this whole migration exists to prevent.
-  // The household read throws when it fails: otherwise the banks list and the home value both
-  // silently vanish, and net worth quietly drops by the value of the house. Null is an account with
-  // no household, which has neither.
-  const householdId = await currentHouseholdId()
-  const items = householdId ? await listItemsForHousehold(householdId) : []
-  const manualAssets = householdId ? await listManualAssets(householdId) : []
-  const home = manualAssets.find((a) => a.name === 'Home') ?? null
+  // The three the early return below needs, together, so the page waits for the slowest of them and
+  // not their sum (#199). Every other read waits for this, so that a household with no accounts
+  // starts none it won't show, and none of them can put it on the error page.
+  const [accounts, householdId, tz] = await Promise.all([
+    readAccounts(supabase),
+    // The household read throws when it fails: otherwise the banks list and the home value both
+    // silently vanish, and net worth quietly drops by the value of the house. Null is an account with
+    // no household, which has neither.
+    currentHouseholdId(),
+    householdTimezone(),
+  ])
 
   // Two different questions, two different sources. `now` is an INSTANT, and homeStale below
   // measures elapsed milliseconds between two instants — correct in any zone. `today` and the
   // greeting are CALENDAR values, which only mean anything in a stated zone (#73).
   const now = new Date()
-  const tz = await householdTimezone()
   const today = todayIn(tz)
-  const homeStale =
-    home != null && now.getTime() - new Date(home.updated_at).getTime() > 30 * 24 * 60 * 60 * 1000
   const dateStr = longDate(today)
 
+  // Any bank that isn't syncing has to be visible on the main screen. Stale numbers that look
+  // fine are the failure this whole migration exists to prevent.
+  const readBanks = async () => (householdId ? listItemsForHousehold(householdId) : [])
+
   if (accounts.length === 0) {
+    // The one read this path needs past the three above. It shows no home value and no figures, so
+    // it reads neither, and a failed read of either can't take it down.
+    const items = await readBanks()
+
     // Banks with no accounts yet are not "no banks" (#164). A bank whose first balance pull failed
     // is kept, with a note to press Refresh, and Refresh pulls its balances: the sync route stores
     // accounts for every bank it does not skip. Connect here would invite linking the same bank
@@ -161,38 +209,41 @@ export default async function DashboardPage({
 
   const currency = accounts[0]?.iso_currency_code ?? 'USD'
 
-  // Throws on a failed read. With no categories nothing maps to Income or Transfer and a paycheck
-  // counts as negative spending (measured: "Spent" -$1,796.70 against a true $3,929.35), so a
-  // failure must not become a plausible number (#46).
-  const data = await fetchCategoryContext()
-
   // The average's six complete months plus this one, which never counts toward it (#126). The
   // chart shows the last six of these ("Last 6 months" below), so AVERAGE_SAVED_MONTHS must not drop
   // below 6 without the chart changing too.
   const months = lastNMonths(today, AVERAGE_SAVED_MONTHS + 1)
   const windowStart = `${months[0].key}-01`
 
-  // The window passes PostgREST's 1,000-row cap: six months alone held 908 rows on 2026-10-05, and
-  // this reads seven. Paged, so the chart and the tiles never silently drop transactions (#69).
-  const { data: flowTxns, error: flowError } = await readAllRows(() =>
-    supabase
-      .from('transactions')
-      .select(`id, amount, date, merchant_name, user_category, pfc_primary, pfc_detailed, reimbursable_amount, ${SUGGESTION_EMBED}`)
-      .eq('removed', false)
-      .gte('date', windowStart)
-  )
-  // #46: "the query failed" and "you spent nothing this month" must never render identically.
-  if (flowError) throw new Error(`could not read transactions: ${flowError.message}`)
+  // Everything else, together, so the page waits for the longest of these and not their sum (#199).
+  // Each throws when it fails (#46), and the page goes to the error page without waiting for the
+  // rest. Promise.all, not promises started and then awaited one by one: that leaves a later failure
+  // unhandled while an earlier read is awaited.
+  const [items, manualAssets, data, flowTxns, owedToYou, starts, budgetRows, recentTxns] = await Promise.all([
+    readBanks(),
+    householdId ? listManualAssets(householdId) : [],
+    // Throws on a failed read. With no categories nothing maps to Income or Transfer and a paycheck
+    // counts as negative spending (measured: "Spent" -$1,796.70 against a true $3,929.35), so a
+    // failure must not become a plausible number (#46).
+    fetchCategoryContext(),
+    readFlowTxns(supabase, windowStart),
+    // Net worth DOES include this. A reimbursable expense takes the cash out of the account today and
+    // brings it back later, so counting only the cash side would report money you are going to get
+    // back as money you have lost. Fetched once here so it stays the single source of truth this tile
+    // and its drill-down both point at — see fetchReceivable() in lib/receivable.ts.
+    fetchReceivable(),
+    historyStart(),
+    readBudgets(supabase),
+    readRecentTxns(supabase),
+  ])
 
-  // Net worth DOES include this. A reimbursable expense takes the cash out of the account today and
-  // brings it back later, so counting only the cash side would report money you are going to get
-  // back as money you have lost. Fetched once here so it stays the single source of truth this tile
-  // and its drill-down both point at — see fetchReceivable() in lib/receivable.ts.
-  const owedToYou = await fetchReceivable()
+  const home = manualAssets.find((a) => a.name === 'Home') ?? null
+  const homeStale =
+    home != null && now.getTime() - new Date(home.updated_at).getTime() > 30 * 24 * 60 * 60 * 1000
 
   // The reimbursable map is built straight from this page's own transaction rows — see
   // buildSpendContext.
-  const allRows = withSuggestion(flowTxns ?? [])
+  const allRows = withSuggestion(flowTxns)
   const ctx = buildSpendContext({ data, txns: allRows })
 
   const flows = monthlyFlows(allRows, ctx, months)
@@ -204,16 +255,10 @@ export default async function DashboardPage({
   // so a partial fix could have had the label and the amount naming different months.
   const thisMonthLabel = monthNameLong(months[months.length - 1].key)
   const chartFlows = flows.slice(-6)
-  const avgSaved = savedAverage(flows, months[months.length - 1].key, await historyStart(), items, accounts)
+  const avgSaved = savedAverage(flows, months[months.length - 1].key, starts, items, accounts)
 
-  const { data: budgetRows, error: budgetsError } = await supabase
-    .from('budgets')
-    .select('category, monthly_limit')
-  // A failed read here reads as "you have not set any budgets", so the tile's budget footnote
-  // disappears rather than reporting that it could not be worked out.
-  if (budgetsError) throw new Error(`could not read budgets: ${budgetsError.message}`)
   const limits: Record<string, number> = {}
-  for (const b of budgetRows ?? []) limits[b.category as string] = Number(b.monthly_limit || 0)
+  for (const b of budgetRows) limits[b.category as string] = Number(b.monthly_limit || 0)
   const totalBudget = Object.values(limits).reduce((s, v) => s + v, 0)
 
   // Only spend in budgeted categories counts against the budget total — see budgetedSpend.
@@ -221,16 +266,7 @@ export default async function DashboardPage({
   const monthTxns = allRows.filter((t) => monthKey(t.date) === thisMonthKey)
   const trackedSpend = budgetedSpend(spendByCategory(monthTxns, ctx), limits)
 
-  const { data: recentTxns, error: recentError } = await supabase
-    .from('transactions')
-    .select(`id, name, merchant_name, amount, date, user_category, pfc_primary, pfc_detailed, reimbursable_amount, ${SUGGESTION_EMBED}`)
-    .eq('removed', false)
-    .order('date', { ascending: false })
-    .order('id', { ascending: false })  // #50: `date` is day-granular and ties constantly; without a unique second key Postgres may return tied rows in any order, so an UPDATE reshuffles the list under the reader.
-    .limit(6)
-  // Otherwise a failed read renders "No transactions yet" to a household with 696 of them.
-  if (recentError) throw new Error(`could not read recent transactions: ${recentError.message}`)
-  const recentItems = withSuggestion(recentTxns ?? []).map((t) => activityItem(t, ctx))
+  const recentItems = withSuggestion(recentTxns).map((t) => activityItem(t, ctx))
 
   const worth = netWorth(accounts, owedToYou) + sumManualAssets(manualAssets)
   const cash = cashOnHand(accounts)

@@ -2,9 +2,16 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 // vi.hoisted for the same reason as tests/unit/trends-page.test.tsx: the static page import below
 // is linked before this file's body runs, firing the mock factory.
-const { results, tz, presentation, paged, history, selects, receivable } = vi.hoisted(() => ({
+const { results, tz, presentation, paged, history, selects, receivable, gates, started, queries } = vi.hoisted(() => ({
   // Every `.select()` the page sends, per table, so a test can pin the suggestion embed (§7.4).
   selects: {} as Record<string, string[]>,
+  // Reads a test holds open until it lets go, by name, and every read the page has started, so a
+  // test can tell a read made beside another from one made after it (#199).
+  gates: {} as Record<string, Promise<void>>,
+  started: [] as string[],
+  // Each read's filters, orders and limit, by name, so a test can pin what it asks for: the stub
+  // otherwise answers whatever it is asked.
+  queries: {} as Record<string, unknown[][]>,
   // What lib/receivable answers: what the household is owed, 0 unless a test says otherwise.
   receivable: { value: 0 },
   // What lib/history-start answers. Mocked so these tests can tell a page that takes the history
@@ -23,7 +30,13 @@ const { results, tz, presentation, paged, history, selects, receivable } = vi.ho
 // method and resolves to whatever the test configured for that table.
 const chainFor = (table: string) => {
   const chain: Record<string, unknown> = {}
-  for (const m of ['select', 'order', 'eq', 'gte', 'lte', 'limit', 'not']) chain[m] = () => chain
+  const calls: unknown[][] = []
+  for (const m of ['order', 'eq', 'gte', 'lte', 'limit', 'not']) {
+    chain[m] = (...args: unknown[]) => {
+      calls.push([m, ...args])
+      return chain
+    }
+  }
   chain.select = (cols: string) => {
     (selects[table] ??= []).push(cols)
     return chain
@@ -37,11 +50,22 @@ const chainFor = (table: string) => {
   }
   // maybeSingle only. Null data and no error is its answer for no row; .single() makes no row an
   // error (PGRST116), which a stand-in answering null would hide (#172).
-  chain.maybeSingle = async () => results[table] ?? { data: null, error: null }
-  chain.then = (resolve: (v: unknown) => unknown) =>
-    Promise.resolve(
-      afterCursor ? { data: [], error: null } : (results[table] ?? { data: [], error: null })
-    ).then(resolve)
+  chain.maybeSingle = async () => {
+    started.push(table)
+    await gates[table]
+    return results[table] ?? { data: null, error: null }
+  }
+  chain.then = (resolve: (v: unknown) => unknown) => {
+    // The six recent transactions are told from the seven-month window by their limit, so a test can
+    // hold or fail one without the other: the two now run side by side (#199). By default both are
+    // answered from `results.transactions`.
+    const read = table === 'transactions' && calls.some(([m, n]) => m === 'limit' && n === 6) ? 'recent transactions' : table
+    started.push(read)
+    queries[read] = calls
+    return Promise.resolve(gates[read])
+      .then(() => (afterCursor ? { data: [], error: null } : (results[read] ?? results[table] ?? { data: [], error: null })))
+      .then(resolve)
+  }
   return chain
 }
 
@@ -66,8 +90,11 @@ vi.mock('@/lib/supabase/admin', async () => {
   const { plaidItemsQuery } = await import('../stubs/plaid-items')
   return {
     supabaseAdmin: {
-      from: (table: string) =>
-        table === 'plaid_items' ? plaidItemsQuery(results.plaid_items ?? { data: [], error: null }) : chainFor(table),
+      from: (table: string) => {
+        if (table !== 'plaid_items') return chainFor(table)
+        started.push(table)
+        return plaidItemsQuery(results.plaid_items ?? { data: [], error: null }, gates.plaid_items)
+      },
     },
   }
 })
@@ -83,6 +110,8 @@ vi.mock('@/lib/category-context', async (importOriginal) => {
   return {
     ...actual,
     fetchCategoryContext: async () => {
+      started.push('categories')
+      await gates.categories
       const c = results.categories ?? { data: [], error: null }
       if (c.error) throw new Error(`could not read categories: ${c.error.message}`)
       const r = results.category_rules ?? { data: [], error: null }
@@ -97,10 +126,16 @@ vi.mock('@/lib/category-context', async (importOriginal) => {
   }
 })
 // The real module but for the timezone, so currentHouseholdId reads `results.memberships` as the
-// saved breakdown it is compared with below does.
+// saved breakdown it is compared with below does. A failed `results.timezone` rejects with the
+// module's message, as `results.categories` does above.
 vi.mock('@/lib/household', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/household')>()),
-  householdTimezone: async () => tz.value,
+  householdTimezone: async () => {
+    started.push('timezone')
+    await gates.timezone
+    if (results.timezone?.error) throw new Error(`could not read the household timezone: ${results.timezone.error.message}`)
+    return tz.value
+  },
 }))
 // The real module by default. Under `stampLabel` every label gets a prefix no local expression
 // could produce, which is the ONLY way to tell "the page took p.label" apart from "the page
@@ -116,8 +151,24 @@ vi.mock('@/lib/transaction-presentation', async (importOriginal) => {
     },
   }
 })
-vi.mock('@/lib/receivable', () => ({ fetchReceivable: async () => receivable.value }))
-vi.mock('@/lib/history-start', () => ({ historyStart: async () => history.value }))
+// As the timezone: a failed `results.receivable` or `results['history start']` rejects with the
+// module's message.
+vi.mock('@/lib/receivable', () => ({
+  fetchReceivable: async () => {
+    started.push('receivable')
+    await gates.receivable
+    if (results.receivable?.error) throw new Error(`could not read reimbursable transactions: ${results.receivable.error.message}`)
+    return receivable.value
+  },
+}))
+vi.mock('@/lib/history-start', () => ({
+  historyStart: async () => {
+    started.push('history start')
+    await gates['history start']
+    if (results['history start']?.error) throw new Error(`could not read accounts: ${results['history start'].error.message}`)
+    return history.value
+  },
+}))
 
 import { pagedTable } from '../stubs/postgrest-pages'
 import { storedItem, FOREIGN_ITEMS } from '../stubs/plaid-items'
@@ -138,6 +189,7 @@ import { StatCard } from '@/components/ui/StatCard'
 import type { ReactNode } from 'react'
 import { money } from '@/lib/format'
 import { catalogFingerprint } from '@/lib/category-rules'
+import { SUGGESTION_EMBED } from '@/lib/category-context'
 import { sug } from './helpers/category-context'
 
 const render = () => DashboardPage({ searchParams: Promise.resolve({}) })
@@ -248,6 +300,7 @@ beforeEach(() => {
   vi.setSystemTime(REPORTED)
   tz.value = 'America/New_York'
   presentation.stampLabel = false
+  for (const k of Object.keys(results)) delete results[k]
   // One account, so the page renders the money tiles rather than the empty state.
   results.accounts = { data: [A1], error: null }
   results.memberships = { data: { household_id: 'hh-1' }, error: null }
@@ -261,6 +314,9 @@ beforeEach(() => {
   history.value = new Map()
   receivable.value = 0
   for (const k of Object.keys(selects)) delete selects[k]
+  for (const k of Object.keys(gates)) delete gates[k]
+  for (const k of Object.keys(queries)) delete queries[k]
+  started.length = 0
   vi.unstubAllEnvs()
 })
 
@@ -880,16 +936,24 @@ describe('Dashboard reads', () => {
     expect(spent!.props.amount).toBeCloseTo(1050, 2)
   })
 
+  // The third request, because the six recent transactions share this stand-in and are asked for
+  // beside the window's first page (#199). The window's second page comes after both of those,
+  // whichever goes first, and the last line holds this test to that page.
   it('fails loudly when a later page of the transactions read fails', async () => {
-    paged.transactions = pagedTable(
+    const table = pagedTable(
       Array.from({ length: 1050 }, (_, i) => ({ id: `t${String(i).padStart(5, '0')}`, date: '2026-09-01' })),
-      { failOnRequest: 2 }
+      { failOnRequest: 3 }
     )
+    paged.transactions = table
     await expect(render()).rejects.toThrow(/could not read transactions: boom/)
+    expect(table.requests[2].after).not.toBeNull()
   })
 
+  // The window alone: the recent transactions run beside it, and would otherwise fail with it, in
+  // words of their own (#199).
   it('fails loudly when the transactions read fails, rather than reporting a spotless month', async () => {
     results.transactions = { data: null, error: { message: 'statement timeout' } }
+    results['recent transactions'] = { data: [], error: null }
     await expect(render()).rejects.toThrow(/could not read transactions: statement timeout/)
   })
 
@@ -951,6 +1015,27 @@ describe('Dashboard reads', () => {
     expect(hero).toBeTruthy()
     expect(hero!.props.variant).toBe('hero')
     expect(hero!.props.amount).toBeCloseTo(1182885.15, 2)
+  })
+
+  // Two reads that now run beside the rest end in this one figure (#199). Without the home value, net
+  // worth drops by the house while the mortgage is still subtracted (#91), and without what's owed,
+  // money that is coming back reads as lost.
+  it('counts the home value and what is owed in net worth', async () => {
+    results.accounts = { data: [{ id: 'a1', type: 'depository', current_balance: 1000 }], error: null }
+    results.manual_assets = { data: [{ id: 'm1', name: 'Home', value: 500000, updated_at: '2026-08-20T00:00:00Z' }], error: null }
+    receivable.value = 20
+    const hero = findStatCards(await render()).find((c) => c.props.label === 'Net worth')
+    expect(hero!.props.amount).toBeCloseTo(501020, 2)
+  })
+
+  // The reminder is for a home value over a month old, and only that. Shown for any other, it would
+  // nag about a value just entered, or send the reader to Zillow over an asset that isn't the house.
+  it.each([
+    ['a home value updated within the month', 'Home', '2026-08-20T00:00:00Z'],
+    ['an old value that is not the home', 'Boat', '2026-07-01T00:00:00Z'],
+  ])('does not remind about %s', async (_, name, updated_at) => {
+    results.manual_assets = { data: [{ id: 'm1', name, value: 5000, updated_at }], error: null }
+    expect(textOf(await render())).not.toContain('Your home value was last updated')
   })
 
   // Pins which tiles are compact: exactly the three supporting figures. Filtering on `!== 'hero'`
@@ -1201,6 +1286,180 @@ describe('Dashboard reads', () => {
     // Below md the tiles give way to StatRows (see "hides the tiles below md…"); from md up they
     // must still be direct grid children, or the three crush into one cell.
     expect(classes).toContain('hidden md:contents')
+  })
+})
+
+// #199: the page waited for its reads one at a time, so a render took the sum of their round trips.
+// It now waits only for its longest chain. These tests hold reads open: a read that starts while
+// another is held cannot have waited for it, and one that has not started once the others have
+// finished is waiting for something it should not.
+describe('Dashboard waits only for its longest chain (#199)', () => {
+  // What the early return needs, so what every visit reads first.
+  const FIRST = ['accounts', 'memberships', 'timezone']
+  // The other eight a household with accounts needs: the banks, the home value, the category
+  // context, the seven-month window, what's owed, the history start, budgets, and the six recent
+  // transactions.
+  const REST = ['plaid_items', 'manual_assets', 'categories', 'transactions', 'receivable', 'history start', 'budgets', 'recent transactions']
+
+  // This file's clock is fake, so the turn of the event loop that lets every read the page can
+  // start without the held ones start is vitest's.
+  const settle = () => vi.advanceTimersByTimeAsync(0)
+  // Holds each read named until its release is called.
+  function holdEach(names: string[]): Record<string, () => void> {
+    const release: Record<string, () => void> = {}
+    for (const name of names) gates[name] = new Promise<void>((resolve) => (release[name] = resolve))
+    return release
+  }
+  const letGo = (release: Record<string, () => void>) => Object.values(release).forEach((r) => r())
+  // Exactly these reads have started, each once.
+  const expectStarted = (names: string[]) => expect([...started].sort()).toEqual([...names].sort())
+  // What a page left running has come to so far: its error's message, 'rendered', or 'still reading'.
+  // Handled from the start, so a page that fails while a test is waiting is not an unhandled rejection.
+  function watch(page: Promise<unknown>) {
+    const outcome = page.then(
+      () => 'rendered',
+      (e: Error) => e.message
+    )
+    return () => Promise.race([outcome, Promise.resolve('still reading')])
+  }
+
+  // Each of the three as the last to finish, so nothing is let through by any two of them.
+  it.each(FIRST)('starts the first three together, and nothing else until %s has finished too', async (last) => {
+    const release = holdEach([...FIRST, ...REST])
+    const page = render()
+    await settle()
+    expectStarted(FIRST)
+    for (const name of FIRST) if (name !== last) release[name]()
+    await settle()
+    expectStarted(FIRST)
+    letGo(release)
+    await page
+  })
+
+  it('with accounts, starts the other eight together, before any of them has finished', async () => {
+    const release = holdEach(REST)
+    const page = watch(render())
+    await settle()
+    expectStarted([...FIRST, ...REST])
+    expect(await page()).toBe('still reading')
+    letGo(release)
+    await settle()
+    expect(await page()).toBe('rendered')
+  })
+
+  it('with no accounts, reads only the banks next, and none of the other seven', async () => {
+    results.accounts = { data: [], error: null }
+    results.plaid_items = { data: [storedItem()], error: null }
+    const first = holdEach(FIRST)
+    const banks = holdEach(['plaid_items'])
+    const page = render()
+    await settle()
+    expectStarted(FIRST)
+    letGo(first)
+    await settle()
+    expectStarted([...FIRST, 'plaid_items'])
+    letGo(banks)
+    const tree = await page
+    await settle()
+    expectStarted([...FIRST, 'plaid_items'])
+    expect(textOf(tree)).toContain('Your balances are on their way')
+  })
+
+  // The early return shows no home value, no budgets and no transactions, so none of those can take
+  // it down. A household with no accounts yet is told how to begin, whatever else is failing.
+  it('with no accounts, shows Connect your first account though every read it does not need would fail', async () => {
+    results.accounts = { data: [], error: null }
+    for (const name of REST) if (name !== 'plaid_items') results[name] = { data: null, error: { message: 'boom' } }
+    const tree = await render()
+    expect(textOf(tree)).toContain('Connect your first account')
+    expect(renders(tree, LinkButton)).toBe(true)
+  })
+
+  // Its one read past the first three still throws, as it did: rendered as no banks, a bank whose
+  // balances haven't arrived would be offered Connect, which spends a lifetime connection (#51, #164).
+  it('with no accounts, still fails loudly when the banks read fails', async () => {
+    results.accounts = { data: [], error: null }
+    results.plaid_items = { data: null, error: { message: 'boom' } }
+    await expect(render()).rejects.toThrow('could not read linked banks: boom')
+  })
+
+  it('with no accounts and no household, reads nothing past the first three', async () => {
+    results.accounts = { data: [], error: null }
+    results.memberships = { data: null, error: null }
+    const tree = await render()
+    expectStarted(FIRST)
+    expect(textOf(tree)).toContain('Connect your first account')
+  })
+
+  // #172 again, on the other path: accounts but no membership. Both reads are set to fail, so reading
+  // one would throw.
+  it('with accounts and no household, reads no banks and no home value', async () => {
+    results.memberships = { data: null, error: null }
+    results.plaid_items = { data: null, error: { message: 'read for no household' } }
+    results.manual_assets = { data: null, error: { message: 'read for no household' } }
+    const tree = await render()
+    expectStarted([...FIRST, ...REST.filter((name) => name !== 'plaid_items' && name !== 'manual_assets')])
+    expect(findStatCards(tree).map((c) => c.props.label)).toContain('Net worth')
+  })
+
+  // Promise.all, not started promises awaited one by one, which leave a later failure unhandled while
+  // an earlier read is awaited, and the page waiting for a read whose answer can no longer matter. So
+  // each read fails with the others in its stage still held. It says what failed in its own words,
+  // and at once. Why each must throw is told by the tests under 'Dashboard reads'.
+  it.each([
+    ['accounts', 'could not read accounts: boom'],
+    ['memberships', 'could not read your household: boom'],
+    ['timezone', 'could not read the household timezone: boom'],
+    ['plaid_items', 'could not read linked banks: boom'],
+    ['manual_assets', 'could not read manual assets: boom'],
+    ['categories', 'could not read categories: boom'],
+    ['transactions', 'could not read transactions: boom'],
+    ['receivable', 'could not read reimbursable transactions: boom'],
+    ['history start', 'could not read accounts: boom'],
+    ['budgets', 'could not read budgets: boom'],
+    ['recent transactions', 'could not read recent transactions: boom'],
+  ])('fails at once when the %s read fails, with the others still running: %s', async (name, message) => {
+    const release = holdEach((FIRST.includes(name) ? FIRST : REST).filter((other) => other !== name))
+    results[name] = { data: null, error: { message: 'boom' } }
+    const page = watch(render())
+    await settle()
+    expect(await page()).toBe(message)
+    letGo(release)
+    await settle()
+  })
+
+  // The window needs the zone: at 8:10pm on 31 August in New York the server is already in September,
+  // so a window worked out from its day would open a month late and leave the oldest month out of
+  // the average (#73, #126).
+  it("opens the transactions window seven months back from the household's day", async () => {
+    vi.setSystemTime(new Date('2026-09-01T00:10:00Z'))
+    await render()
+    expect(queries.transactions).toContainEqual(['gte', 'date', '2026-02-01'])
+  })
+
+  // What the reads moved into their own functions ask for, which the stub would answer the same
+  // without: it hands back the whole fixture whatever is selected. A removed transaction counted in
+  // the tiles, or listed under Recent activity, would be money that was never spent, and each order
+  // ends in a unique key so tied rows can't reshuffle under the reader.
+  it('still asks for what each read asked for', async () => {
+    await render()
+    expect(selects.accounts).toEqual(['*'])
+    expect(queries.accounts).toEqual([
+      ['order', 'name'],
+      ['order', 'account_id'],
+    ])
+    expect(selects.budgets).toEqual(['category, monthly_limit'])
+    expect([...selects.transactions].sort()).toEqual([
+      `id, amount, date, merchant_name, user_category, pfc_primary, pfc_detailed, reimbursable_amount, ${SUGGESTION_EMBED}`,
+      `id, name, merchant_name, amount, date, user_category, pfc_primary, pfc_detailed, reimbursable_amount, ${SUGGESTION_EMBED}`,
+    ])
+    expect(queries.transactions).toContainEqual(['eq', 'removed', false])
+    expect(queries['recent transactions']).toEqual([
+      ['eq', 'removed', false],
+      ['order', 'date', { ascending: false }],
+      ['order', 'id', { ascending: false }],
+      ['limit', 6],
+    ])
   })
 })
 

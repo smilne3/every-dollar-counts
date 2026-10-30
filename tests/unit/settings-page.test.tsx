@@ -2,16 +2,28 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 // vi.hoisted for the same reason as tests/unit/dashboard-page.test.tsx: the static page import
 // below is linked before this file's body runs, firing the mock factory.
-const { results, switchState, onRead } = vi.hoisted(() => ({
+const { results, switchState, onRead, onAsk, gates, started, filters, slots } = vi.hoisted(() => ({
   results: {} as Record<string, { data: unknown; error: { message: string } | null }>,
   switchState: { suggestionsOn: true },
   // Run as a table's read is awaited, so a test can move the clock on during it.
   onRead: {} as Record<string, () => void>,
+  // Run the moment the page asks for any read, before the read is awaited, so a test can tell a time
+  // taken before that from one taken after, in whatever order the page asks.
+  onAsk: { run: null as null | (() => void) },
+  // Reads a test holds open until it lets go, by name, and every read the page has started, so a
+  // test can tell a read made beside another from one made after it (#199).
+  gates: {} as Record<string, Promise<void>>,
+  started: [] as string[],
+  // Each table's `.eq()` filters, which the stub otherwise ignores.
+  filters: {} as Record<string, unknown[][]>,
+  // What the slot count answers, and the household it was asked for.
+  slots: { value: null as number | null, askedFor: null as string | null },
 }))
 
 // A supabase query is a builder awaited at the end, so the stub returns itself for every chained
 // method and resolves to whatever the test configured for that table.
 const chainFor = (table: string) => {
+  onAsk.run?.()
   const chain: Record<string, unknown> = {}
   // Each row comes back with only the columns the select names, as from PostgREST, so a read of the
   // wrong column finds nothing in it. The accounts read gets each account's plaid_item_id, and a
@@ -25,7 +37,11 @@ const chainFor = (table: string) => {
     Array.isArray(reply.data)
       ? { ...reply, data: reply.data.map((row: Record<string, unknown>) => Object.fromEntries(columns.filter((c) => c in row).map((c) => [c, row[c]]))) }
       : reply
-  for (const m of ['order', 'eq', 'limit']) chain[m] = () => chain
+  for (const m of ['order', 'limit']) chain[m] = () => chain
+  chain.eq = (column: string, value: unknown) => {
+    (filters[table] ??= []).push([column, value])
+    return chain
+  }
   // readAllRows (lib/read-all.ts) asks for the rows after its cursor with .or(); there are none
   // past this fixture, so a continuation page is empty and the read ends.
   let afterCursor = false
@@ -37,9 +53,12 @@ const chainFor = (table: string) => {
   // error (PGRST116), which a stand-in answering null would hide (#172).
   chain.maybeSingle = async () => results[table] ?? { data: null, error: null }
   chain.then = (resolve: (v: unknown) => unknown) => {
+    started.push(table)
     onRead[table]?.()
     const reply = afterCursor ? { data: [], error: null } : (results[table] ?? { data: [], error: null })
-    return Promise.resolve(selected(reply)).then(resolve)
+    return Promise.resolve(gates[table])
+      .then(() => selected(reply))
+      .then(resolve)
   }
   return chain
 }
@@ -56,6 +75,9 @@ vi.mock('@/lib/category-context', async () => {
   const { testData } = await import('./helpers/category-context')
   return {
     fetchCategoryContext: async () => {
+      onAsk.run?.()
+      started.push('categories')
+      await gates.categories
       const c = results.categories ?? { data: [], error: null }
       if (c.error) throw new Error(`could not read categories: ${c.error.message}`)
       const r = results.category_rules ?? { data: [], error: null }
@@ -63,6 +85,9 @@ vi.mock('@/lib/category-context', async () => {
       return testData(c.data as never, r.data as never, { suggestionsOn: switchState.suggestionsOn })
     },
     readTransactionsForCounts: async () => {
+      onAsk.run?.()
+      started.push('transactions')
+      await gates.transactions
       const t = results.transactions ?? { data: [], error: null }
       if (t.error) throw new Error(`could not read transactions: ${t.error.message}`)
       return t.data
@@ -76,7 +101,16 @@ vi.mock('@/lib/category-context', async () => {
 // the page never makes a real network call; lib/plaid-items.ts needs only plaidEnv from lib/plaid.
 vi.mock('@/lib/supabase/admin', () => ({ supabaseAdmin: { from: (table: string) => chainFor(table) } }))
 vi.mock('@/lib/plaid', () => ({ plaidEnv: 'sandbox' }))
-vi.mock('@/lib/plaid-slots', () => ({ countSlotsUsed: async () => null, LIFETIME_SLOTS: 10 }))
+vi.mock('@/lib/plaid-slots', () => ({
+  countSlotsUsed: async (householdId: string) => {
+    onAsk.run?.()
+    started.push('slot count')
+    slots.askedFor = householdId
+    await gates['slot count']
+    return slots.value
+  },
+  LIFETIME_SLOTS: 10,
+}))
 // For the tests that render the bank list the page hands out, to read the card as the person does.
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {} }) }))
 
@@ -176,6 +210,12 @@ beforeEach(() => {
   results.plaid_items = { data: [], error: null }
   switchState.suggestionsOn = true
   for (const k of Object.keys(onRead)) delete onRead[k]
+  onAsk.run = null
+  for (const k of Object.keys(gates)) delete gates[k]
+  started.length = 0
+  for (const k of Object.keys(filters)) delete filters[k]
+  slots.value = null
+  slots.askedFor = null
 })
 
 // A console.error spy left behind by a failing test would hand its calls to the next test's spy.
@@ -395,9 +435,9 @@ describe('Settings timezone control', () => {
   })
 
   // #182: TimezoneCard follows the server only from a read made after its last save was written, so
-  // the page tells it when it began reading, timed from before its first read, the household's that
-  // brings the zone. Taken after, a read that began before a save was written and returned after it
-  // would pass as newer.
+  // the page tells it when it began reading, timed from before any of its reads, among them the
+  // household's that brings the zone. Taken after, a read that began before a save was written and
+  // returned after it would pass as newer.
   it('tells the control when the page began reading, timed from before its first read', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-10-20T12:00:00Z'))
@@ -410,11 +450,11 @@ describe('Settings timezone control', () => {
 })
 
 describe('Settings home value control', () => {
-  // #174: HomeValueCard gets the same time as TimezoneCard, though its read comes later: one time for
-  // the page, taken before its first read. A time of its own, taken before the home value's read,
+  // #174: HomeValueCard gets the same time as TimezoneCard, though its read starts later: one time for
+  // the page, taken before any of its reads. A time of its own, taken before the home value's read,
   // would be safe too, since that read would still come after it. The one time is never later than
-  // a read, and only delays a refill: a save written while the page was still reading the banks is
-  // refilled by the next reload rather than this one.
+  // a read, and only delays a refill: a save written while the page was still reading the household
+  // is refilled by the next reload rather than this one.
   it('tells the card when the page began reading, the same time as the time zone control', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-10-20T12:00:00Z'))
@@ -551,6 +591,149 @@ describe('Settings categories and rules', () => {
     expect(alertText(tree)).toContain("Couldn't load categories and rules.")
     expect((log.mock.calls[0][1] as Error).message).toBe('could not read budgets: read returned no data and no error')
     log.mockRestore()
+  })
+})
+
+// #199: the page waited for its reads one at a time, so a render took the sum of their round trips.
+// It now runs three chains side by side and waits only for the longest. These tests hold reads open:
+// a read that starts while another is held cannot have waited for it.
+describe('Settings waits only for its longest chain (#199)', () => {
+  // The household, the accounts and the category settings, which are three reads here: this file
+  // stands in for fetchCategoryContext's two as one.
+  const FIRST = ['households', 'accounts', 'categories', 'transactions', 'budgets']
+  // What needs the household's id.
+  const AFTER_HOUSEHOLD = ['plaid_items', 'slot count', 'manual_assets']
+
+  // One turn of the event loop, so every read the page can start without the held ones has started.
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
+  // Holds each read named until its release is called.
+  function holdEach(names: string[]): Record<string, () => void> {
+    const release: Record<string, () => void> = {}
+    for (const name of names) gates[name] = new Promise<void>((resolve) => (release[name] = resolve))
+    return release
+  }
+  const letGo = (release: Record<string, () => void>) => Object.values(release).forEach((r) => r())
+  // Exactly these reads have started, each once.
+  const expectStarted = (names: string[]) => expect([...started].sort()).toEqual([...names].sort())
+
+  it('starts the household, the accounts and the category settings together, and nothing else', async () => {
+    const release = holdEach([...FIRST, ...AFTER_HOUSEHOLD])
+    const page = SettingsPage()
+    await settle()
+    expectStarted(FIRST)
+    letGo(release)
+    await page
+  })
+
+  // Not behind the accounts or the category settings, which hold the slowest read and which these
+  // three need nothing from, and not behind each other.
+  it('starts the banks, the slot count and the home value once the household arrives, with the rest still running', async () => {
+    const release = holdEach([...FIRST, ...AFTER_HOUSEHOLD])
+    const page = SettingsPage()
+    await settle()
+    release.households()
+    await settle()
+    expectStarted([...FIRST, ...AFTER_HOUSEHOLD])
+    letGo(release)
+    await page
+  })
+
+  // They need the household's id and nothing else, so nothing else lets them through.
+  it('holds the banks, the slot count and the home value until the household arrives, whatever else has finished', async () => {
+    const release = holdEach([...FIRST, ...AFTER_HOUSEHOLD])
+    const page = SettingsPage()
+    await settle()
+    for (const name of FIRST) if (name !== 'households') release[name]()
+    await settle()
+    expectStarted(FIRST)
+    letGo(release)
+    await page
+  })
+
+  it('asks for the banks, the slot count and the home value of the household it read', async () => {
+    await SettingsPage()
+    expect(filters.plaid_items).toContainEqual(['household_id', 'hh-1'])
+    expect(filters.manual_assets).toContainEqual(['household_id', 'hh-1'])
+    expect(slots.askedFor).toBe('hh-1')
+  })
+
+  it('hands the bank list the slot count', async () => {
+    slots.value = 4
+    expect(findProps(card(await SettingsPage(), 'Banks'), BankList)).toMatchObject({ slotsUsed: 4 })
+  })
+
+  // An empty household read renders, and reads nothing scoped to a household: `household.id` would
+  // throw, and take down the only page a bank can be reconnected from (spec §7.3).
+  it('reads no banks, no slot count and no home value when there is no household', async () => {
+    results.households = { data: [], error: null }
+    const tree = await SettingsPage()
+    expectStarted(FIRST)
+    expect(flatText(card(tree, 'Household'))).toContain('No household found for your account.')
+    expect(findProps(tree, BankList)).toMatchObject({ items: [], slotsUsed: null })
+    expect(findProps(tree, HomeValueCard)).toMatchObject({ initialValue: null })
+    expect(alertText(tree)).toBeNull()
+  })
+
+  // A failed household read takes the page down, as it always has, and at once: it does not wait for
+  // chains whose answers can no longer matter, nor leave its failure unhandled while it does.
+  it.each([
+    ['fails', { data: null, error: { message: 'boom' } }, 'could not read your household: boom'],
+    ['returns no data and no error', { data: null, error: null }, 'could not read your household: read returned no data and no error'],
+  ])('throws at once when the household read %s, with the other chains still running', async (_name, reply, message) => {
+    const release = holdEach(FIRST.filter((name) => name !== 'households'))
+    results.households = reply
+    const outcome = SettingsPage().then(
+      () => 'rendered',
+      (e: Error) => e.message
+    )
+    await settle()
+    expect(await Promise.race([outcome, Promise.resolve('still reading')])).toBe(message)
+    letGo(release)
+    await settle()
+  })
+
+  // #91, now that the reads overlap: one failed read says so in its own card and in no other, and the
+  // other cards' controls are all still there.
+  it.each([
+    ['accounts', { Banks: "Couldn't check your accounts. Try again." }, []],
+    ['plaid_items', { Banks: "Couldn't load your banks. Try again." }, [BankList]],
+    ['manual_assets', { 'Home value': "Couldn't load your home value. Try again." }, [HomeValueCard]],
+    ...['categories', 'transactions', 'budgets'].map((read) => [
+      read,
+      { Categories: "Couldn't load categories and rules. Try again.", 'Category rules': "Couldn't load categories and rules. Try again." },
+      [CategoryManager, CategoryRulesCard],
+    ]),
+  ] as [string, Record<string, string>, unknown[]][])('a failed %s read degrades only its own card', async (read, alerts, gone) => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    results[read] = { data: null, error: { message: 'boom' } }
+    const tree = await SettingsPage()
+    const shown = Object.entries({
+      Household: alertText(card(tree, 'Household')),
+      Banks: alertText(card(tree, 'Banks')),
+      'Home value': alertText(card(tree, 'Home value')),
+      Categories: alertText(card(tree, 'Categories')),
+      'Category rules': alertText(card(tree, 'Category rules')),
+    }).filter(([, alert]) => alert !== null)
+    expect(Object.fromEntries(shown)).toEqual(alerts)
+    for (const control of [TimezoneCard, BankList, HomeValueCard, CategoryManager, CategoryRulesCard]) {
+      expect(findProps(tree, control) === null).toBe(gone.includes(control))
+    }
+  })
+
+  // #182, #174: which read the page asks for first depends on the order of an array, and three start
+  // together. So every read moves the clock on the moment it is asked for, and neither card's time may
+  // be later than the clock before them all. The last two lines hold the test to having moved it for
+  // each of the eight.
+  it('takes the time the cards are given before it asks for any read, whichever it asks for first', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-20T12:00:00Z'))
+    const before = Date.now()
+    onAsk.run = () => vi.setSystemTime(Date.now() + 1_000)
+    const tree = await SettingsPage()
+    expect(findProps(tree, TimezoneCard)?.readAt).toBe(before)
+    expect(findProps(tree, HomeValueCard)?.readAt).toBe(before)
+    expect(Date.now() - before).toBe(started.length * 1_000)
+    expect(started.length).toBe(FIRST.length + AFTER_HOUSEHOLD.length)
   })
 })
 
