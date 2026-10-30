@@ -236,13 +236,21 @@ export default async function DashboardPage({
   const cash = cashOnHand(accounts)
   const depCount = accounts.filter((a) => a.type === 'depository').length
 
-  const budgetPct = totalBudget > 0 ? Math.round((trackedSpend / totalBudget) * 100) : null
-  // The same note on the tile and the phone row, in whole dollars on both (#215).
+  // The same note on the tile and the phone row, in whole dollars on both (#215), and coloured by the
+  // figures it prints, as Budgets decides "over" (#219): coral once the spend shown is over the budget
+  // shown, amber above 80% of it. It was coloured by the percentage rounded, which no longer shows:
+  // "$15,074 of $15,000 budgeted" stayed amber until 100.5%, and "$50 of $50" was coral at $50.30.
+  const spentFigure = moneyFigure(trackedSpend, currency)
+  const budgetFigure = moneyFigure(totalBudget, currency)
+  const budgetTone =
+    spentFigure.value > budgetFigure.value
+      ? 'text-coral'
+      : spentFigure.value > 0.8 * budgetFigure.value
+        ? 'text-amber'
+        : 'text-muted'
   const budgetFoot =
-    budgetPct != null ? (
-      <span className={budgetPct > 100 ? 'text-coral' : budgetPct > 80 ? 'text-amber' : 'text-muted'}>
-        {`${money(trackedSpend, currency)} of ${money(totalBudget, currency)} budgeted`}
-      </span>
+    totalBudget > 0 ? (
+      <span className={budgetTone}>{`${spentFigure.text} of ${budgetFigure.text} budgeted`}</span>
     ) : (
       <span className="text-muted">this month</span>
     )

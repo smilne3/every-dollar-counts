@@ -388,3 +388,42 @@ describe('Reimbursable banks (#171)', () => {
     await page
   })
 })
+
+// The text of every amount cell in the desktop tables, in the order shown: outstanding first, then
+// each month already reimbursed.
+function amountCellsOf(node: unknown): string[] {
+  const out: string[] = []
+  const walk = (n: unknown) => {
+    if (n == null || typeof n !== 'object') return
+    if (Array.isArray(n)) return n.forEach(walk)
+    const el = n as { type?: unknown; props?: { className?: unknown; children?: unknown } }
+    if (el.type === 'td' && String(el.props?.className).includes('tabular-nums')) out.push(String(el.props?.children))
+    if (el.props?.children) walk(el.props.children)
+  }
+  walk(node)
+  return out
+}
+
+// #215: what is owed back keeps its cents, on every figure this page prints. It is checked to the cent
+// against an expense report and then the repayment. Amounts with cents, so whole dollars cannot pass.
+describe('Reimbursements page, to the cent', () => {
+  // $12.34 still owed. $7.89 settled outright by its own $7.89 deposit, so it shows as reimbursed.
+  beforeEach(() => {
+    results.transactions = {
+      data: [
+        { id: 'e2', amount: 12.34, date: '2026-09-03', name: 'LYFT', merchant_name: 'Lyft', reimbursable_amount: 12.34, reimbursable_note: null },
+        { id: 'd1', amount: -7.89, date: '2026-08-25', name: 'ACME EXPENSES', merchant_name: null, reimbursable_amount: 7.89, reimbursable_note: null },
+        { id: 'e1', amount: 7.89, date: '2026-08-20', name: 'PARKING', merchant_name: 'Parking', reimbursable_amount: 7.89, reimbursable_note: null },
+      ],
+      error: null,
+    }
+  })
+
+  it('says what is owed to the cent', async () => {
+    expect(subtitleOf(await render())).toMatch(/^You're owed \$12\.34\. /)
+  })
+
+  it('shows each row still owed, and each one reimbursed, to the cent', async () => {
+    expect(amountCellsOf(await render())).toEqual(['$12.34', '$7.89'])
+  })
+})

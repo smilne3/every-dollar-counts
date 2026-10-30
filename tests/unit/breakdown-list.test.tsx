@@ -70,6 +70,18 @@ describe('BreakdownList', () => {
     expect(screen.getByText('−$1').className).toContain('text-coral')
   })
 
+  // A row marked exact keeps its cents: the owed-to-you total, wherever it appears (owner decision,
+  // 2026-10-30, #215). The rows beside it stay whole dollars.
+  it('keeps the cents on a row marked exact, and only there', () => {
+    render(
+      <BreakdownList
+        rows={[rows[0], { key: 'owed', label: 'Owed to you', amount: 12.34, currency: 'USD', exact: true }]}
+      />
+    )
+    expect(screen.getByText('$12.34')).toBeTruthy()
+    expect(screen.getByText('$1,235')).toBeTruthy()
+  })
+
   // A total a few cents below zero, such as a month's saving, reads "$0", never "-$0".
   it('never shows a total of "-$0"', () => {
     render(<BreakdownList rows={rows} total={{ label: 'Saved this month', amount: -0.3, currency: 'USD' }} />)

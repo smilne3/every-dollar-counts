@@ -1,7 +1,8 @@
-// An amount as the app shows it: whole dollars. Everywhere but the transactions themselves and what
-// is owed back on them, which keep their cents through moneyExact (owner decision, 2026-10-23,
-// #215). Cents on a summary are digits nobody acts on, and on a phone they cost the width a figure
-// needs (#136). Being the default, a new summary is whole dollars without anyone choosing it.
+// An amount as the app shows it: whole dollars. Everywhere but the transactions themselves, the
+// reimbursements, and the owed-to-you total wherever it appears, which keep their cents through
+// moneyExact (owner decisions, 2026-10-23 and 2026-10-30, #215). Cents on a summary are digits nobody
+// acts on, and on a phone they cost the width a figure needs (#136). Being the default, a new summary
+// is whole dollars without anyone choosing it.
 //
 // Rounding is a DISPLAY choice: what this returns is only ever shown, never stored or added into a
 // total. So rounded parts need not add up to the rounded total beside them, and nothing should make
@@ -39,10 +40,12 @@ export function moneyFigure(
   }
 }
 
-// To the cent, for the transactions themselves and what is owed back on them: a transaction is
+// To the cent, for the transactions themselves, the reimbursements, and the owed-to-you total wherever
+// it appears: on the dashboard, the reimbursements page and the net-worth breakdown. A transaction is
 // read against the bank's statement, and what is owed is checked against an expense report and then
-// the repayment (owner decision, 2026-10-23, #215). tests/unit/money-exact-imports.test.ts names
-// the files allowed it, so a summary cannot pick up cents by importing the wrong formatter.
+// the repayment (owner decisions, 2026-10-23 and 2026-10-30, #215).
+// tests/unit/money-exact-imports.test.ts names the files allowed it, so a summary cannot pick up
+// cents by importing the wrong formatter.
 export function moneyExact(amount: number | null | undefined, currency = 'USD'): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount ?? 0)
 }

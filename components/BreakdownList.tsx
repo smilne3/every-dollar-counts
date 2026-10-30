@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { money, moneyFigure } from '@/lib/format'
+import { money, moneyExact, moneyFigure } from '@/lib/format'
 
 export type BreakdownRow = {
   key: string
@@ -8,10 +8,14 @@ export type BreakdownRow = {
   amount: number
   currency: string
   owed?: boolean
+  // To the cent, where every other row is whole dollars. Only for the owed-to-you total, which keeps
+  // its cents wherever it appears (owner decision, 2026-10-30, #215).
+  exact?: boolean
   href?: string
 }
 
 // Presentational list for a breakdown page: each row is a label + amount, optionally a drill link.
+// Amounts are whole dollars, but for a row marked `exact`, the owed-to-you total (#215).
 // A liability (`owed`) renders its amount as a negative in coral, matching AccountCard, by the
 // figure shown: one under 50 cents shows "$0", not "−$0" (#215).
 export function BreakdownList({
@@ -27,7 +31,9 @@ export function BreakdownList({
   return (
     <ul className="divide-y divide-line">
       {rows.map((r) => {
-        const figure = moneyFigure(r.amount, r.currency)
+        const figure = r.exact
+          ? { value: r.amount, text: moneyExact(r.amount, r.currency) }
+          : moneyFigure(r.amount, r.currency)
         const negative = r.owed && figure.value !== 0
         const amountEl = (
           <span className={`tabular-nums ${negative ? 'text-coral' : 'text-ink'}`}>

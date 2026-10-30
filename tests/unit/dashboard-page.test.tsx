@@ -709,6 +709,26 @@ describe('Dashboard average savings (#126)', () => {
     expect(textOf((await phoneRows()).rows[1].foot)).toContain('$14,289 of $15,000 budgeted')
   })
 
+  // #219: the note is coloured by the figures it prints, as Budgets decides "over" (#215). Coral once
+  // the spend shown is over the budget shown, amber above 80% of it. By the percentage rounded,
+  // "$15,074 of $15,000" stayed amber, and "$50 of $50" was coral at $50.30.
+  it.each([
+    ['$15,074 of $15,000, over', 15074, 15000, '$15,074 of $15,000 budgeted', 'text-coral'],
+    ['$50.30 of $50, which shows as $50 of $50', 50.3, 50, '$50 of $50 budgeted', 'text-amber'],
+    ['$800.40 of $1,000, which shows as 80%', 800.4, 1000, '$800 of $1,000 budgeted', 'text-muted'],
+    ['$800.50 of $1,000, which shows as $801', 800.5, 1000, '$801 of $1,000 budgeted', 'text-amber'],
+  ])('colours the budget note by the figures it prints: %s', async (_, spend, limit, text, colour) => {
+    results.categories = { data: [{ id: 'c2', name: 'Food & Drink', pfc_primary: 'FOOD_AND_DRINK', sort_order: 1 }], error: null }
+    results.budgets = { data: [{ category: 'Food & Drink', monthly_limit: limit }], error: null }
+    results.transactions = { data: month('09', 0, spend), error: null }
+    const { tree, rows } = await phoneRows()
+    const tile = findStatCards(tree).find((t) => t.props.label.startsWith('Spent'))!
+    for (const note of [rows[1].foot, tile.props.foot] as { props: { className: string; children: string } }[]) {
+      expect(note.props.children).toBe(text)
+      expect(note.props.className).toBe(colour)
+    }
+  })
+
   // The tiles from md up show the same whole dollars as the phone rows (#215). Until then they were
   // exact, so the same Spent read two ways on one day.
   it('gives the Spent and Saved tile notes in whole dollars too', async () => {

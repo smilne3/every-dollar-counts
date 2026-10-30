@@ -151,6 +151,22 @@ describe('GoalsList: done by the figures shown', () => {
     expect(figures().textContent).toBe('$999 of $1,000')
     expect(bar(container).className).not.toContain('bg-emerald-600')
   })
+
+  // The delete confirmation names the amounts in whole dollars too, as the card above it does.
+  // Amounts with cents, so figures to the cent cannot pass.
+  it('names the amounts in whole dollars when asking to delete', () => {
+    render(
+      <GoalsList
+        initialGoals={[{ id: '1', name: 'Emergency fund', target_amount: 3000.4, saved_amount: 1234.56 }]}
+        readAt={1_000}
+      />
+    )
+    fireEvent.click(screen.getByLabelText('Delete Emergency fund'))
+    const dialog = screen.getByRole('dialog', { name: 'Delete “Emergency fund”?' })
+    expect(within(dialog).getByText(/^You’ve saved/).textContent).toBe(
+      'You’ve saved $1,235 toward $3,000. This can’t be undone.'
+    )
+  })
 })
 
 // #165: call() never read the reply and had no try/finally, so a failed save looked done, a

@@ -290,6 +290,16 @@ describe('ReimbursableEditor', () => {
     expect(screen.getByText(/Up to \$100\.00/)).toBeTruthy()
   })
 
+  // #215: a transaction and its reimbursable part keep their cents. The part is entered to the cent
+  // (step="0.01"), so the amount it is taken from, and its limit, read to the cent too. Amounts with
+  // cents, so whole dollars cannot pass.
+  it('shows the charge and the limit to the cent', () => {
+    render(<ReimbursableEditor {...props} amount={12.34} />)
+    openEditor()
+    expect(screen.getByText('$12.34 on 2026-08-29')).toBeTruthy()
+    expect(screen.getByText('Up to $12.34')).toBeTruthy()
+  })
+
   it('warns that removing the mark takes the note with it', () => {
     render(<ReimbursableEditor {...props} reimbursableAmount={40} note="Dave" />)
     openEditor()
