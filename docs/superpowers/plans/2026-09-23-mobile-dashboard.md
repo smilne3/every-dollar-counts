@@ -161,14 +161,14 @@ afterEach(cleanup)
 // §1.3 regressing, because the tile — not the caller — now decides how many characters it shows.
 describe('StatCard', () => {
   it('renders the hero figure exactly, cents and all', () => {
-    render(<StatCard label="Net worth" amount={1182885.15} variant="hero" />)
-    expect(screen.getByText('$1,182,885.15')).toBeTruthy()
+    render(<StatCard label="Net worth" amount={1234567.15} variant="hero" />)
+    expect(screen.getByText('$1,234,567.15')).toBeTruthy()
   })
 
   // Net worth is the figure that clipped twice. It must never be the rounded one.
   it('never rounds the hero figure', () => {
-    render(<StatCard label="Net worth" amount={1182885.15} variant="hero" />)
-    expect(screen.queryByText('$1,182,885')).toBeNull()
+    render(<StatCard label="Net worth" amount={1234567.15} variant="hero" />)
+    expect(screen.queryByText('$1,234,567')).toBeNull()
   })
 
   // A compact tile carries BOTH: the rounded one for the phone, the exact one from md up. CSS
@@ -339,7 +339,7 @@ Append inside the existing `describe('Dashboard reads', ...)` in `tests/unit/das
   // decidable here is that the hero tile exists and carries the figure that clipped twice.
   it('gives net worth the hero tile', async () => {
     results.accounts = {
-      data: [{ id: 'a1', type: 'depository', current_balance: 1182885.15 }],
+      data: [{ id: 'a1', type: 'depository', current_balance: 1234567.15 }],
       error: null,
     }
     const tree = await render()
@@ -737,17 +737,17 @@ describe('RecentActivity', () => {
   it('does not dress a credit-card payment up as income', () => {
     render(
       <RecentActivity
-        items={[item({ amount: -7866.69, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' })]}
+        items={[item({ amount: -6412.58, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' })]}
       />
     )
-    expect(screen.queryByText('+$7,866.69')).toBeNull()
-    expect(screen.getByText('$7,866.69')).toBeTruthy()
+    expect(screen.queryByText('+$6,412.58')).toBeNull()
+    expect(screen.getByText('$6,412.58')).toBeTruthy()
   })
 
   it('says a card payment is between your own accounts rather than naming a category', () => {
     render(
       <RecentActivity
-        items={[item({ amount: -7866.69, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' })]}
+        items={[item({ amount: -6412.58, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' })]}
       />
     )
     expect(screen.getByText(/Between your accounts/)).toBeTruthy()
@@ -925,7 +925,7 @@ Every one must pass before the branch is offered for review. Report the actual n
 - [ ] **Desktop diff check.** Load the dashboard at desktop width and confirm it is what it was: four tiles across at `lg`, exact figures with cents on all four, every account card showing, no "Show all" control. A visible change at desktop width is a Global Constraint violation, not a preference.
 
 - [ ] **Ask the owner to check on their actual phone** via the PR's Vercel preview, and wait for the answer rather than merging on green CI. Name three specific things and no more:
-  1. Net worth reads in full — `$1,182,885.15`, not clipped or wrapped.
+  1. Net worth reads in full — `$1,234,567.15`, not clipped or wrapped.
   2. Cash / Spent / Saved sit on one row, rounded to whole dollars, nothing overlapping.
   3. Accounts show four with a "Show all 12" control that reveals the rest.
 

@@ -168,8 +168,8 @@ So one button becomes two paths, with a third supported in code but not shipped:
 | Investment account | `investments` | **Balances only** |
 | *(loan servicer — supported, no button)* | `liabilities` | **Balances only** |
 
-**Decision 2026-07-23: no "Add a loan or mortgage" button.** The mortgage is at **Wells Fargo**
-(`ins_127991`), which `/institutions/search` confirms supports `transactions` — so the mortgage
+**Decision 2026-07-23: no "Add a loan or mortgage" button.** The mortgage is at a bank that
+`/institutions/search` confirms supports `transactions` — so the mortgage
 arrives through the ordinary "Connect a bank" flow, in the same login, costing **no extra Item
 slot and no extra code**. A dedicated button only earns its place for a servicer where the
 household does not also bank, which is not the case here. The `liabilities` product stays wired

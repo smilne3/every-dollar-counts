@@ -52,7 +52,7 @@ Scaled down on small screens: a figure like -$40,452.32 overflows the tile in
 the 2-column mobile grid at anything above text-xl.
 ```
 
-That fix — dropping to `text-xl` on mobile — held for an 11-character figure. The household's net worth is now **$1,182,885.15**, which is 13.
+That fix — dropping to `text-xl` on mobile — held for an 11-character figure. A household net worth can reach **$1,234,567.15** (illustrative), which is 13.
 
 The space available, at a 390px viewport:
 
@@ -62,7 +62,7 @@ The space available, at a 390px viewport:
 171 − 40 (Card p-5)  = 131px of content
 ```
 
-`$1,182,885.15` at `text-xl` with `tabular-nums` needs roughly 138px. It is about 7px too wide — the margin that looks fine right up until a net worth crosses into seven figures. The other three tiles ($34,920.18, $8,775.73, $5,448.99) fit.
+`$1,234,567.15` at `text-xl` with `tabular-nums` needs roughly 138px. It is about 7px too wide — the margin that looks fine right up until a net worth crosses into seven figures. The other three tiles ($34,920.18, $8,775.73, $5,448.99) fit.
 
 **Shrinking the type again is not the fix.** It is the move that already failed once, and it fails in the direction of making the most important number on the app's most-opened screen the hardest to read.
 
@@ -114,10 +114,10 @@ Below `md`, the table is replaced by a list of rows. Each row shows **merchant, 
 
 ```
 ┌──────────────────────────────────┐
-│ WF HOME MTG            −$3,929.35│
+│ HOME LOAN PMT            −$2,846.20│
 │ Sep 1 · Loan Payments            │
 ├──────────────────────────────────┤
-│ Walmart                   +$13.73│
+│ Walmart                   +$14.20│
 │ Sep 1 · Shopping                 │
 └──────────────────────────────────┘
 ```
@@ -136,7 +136,7 @@ The reason is room, not control quality. `CategoryPicker` is already a native `<
 
 The reimbursable checkbox and the partial editor move into the same sheet, which also resolves the problem that a compact row has nowhere to put them.
 
-**Card payments keep their existing exemption.** `isCreditCardPayment` already suppresses the category picker, the checkbox and the editor on the desktop row, for the reason documented at `TransactionRow.tsx:48-58`: setting `user_category` on a card payment re-enters both legs into the totals, and on a real $7,866.69 payment that moved September spending from $3,949.16 to *minus* $3,917.53. The sheet must honour the same predicate and show "Card payment · moves between your accounts" with no controls. **This is the single most important correctness constraint in this spec.**
+**Card payments keep their existing exemption.** `isCreditCardPayment` already suppresses the category picker, the checkbox and the editor on the desktop row, for the reason documented at `TransactionRow.tsx:48-58`: setting `user_category` on a card payment re-enters both legs into the totals, and on a $6,412.58 payment that moved September spending from $3,210.47 to *minus* $3,202.11. The sheet must honour the same predicate and show "Card payment · moves between your accounts" with no controls. **This is the single most important correctness constraint in this spec.**
 
 ### 3.3 Why not the alternatives
 
@@ -152,7 +152,7 @@ Below `md` the four-tile grid becomes a hero plus a row of three:
 ```
 ┌──────────────────────────────────┐
 │ NET WORTH                        │
-│ $1,182,885.15                    │   full width, larger than today
+│ $1,234,567.15                    │   full width, larger than today
 └──────────────────────────────────┘
 ┌──────────┬──────────┬────────────┐
 │ CASH     │ SPENT    │ SAVED      │
@@ -198,7 +198,7 @@ The remaining dashboard sections stack in the order they already have: the spend
 `SpendByCategoryChart` is already horizontal and already works on a phone. `PeriodOverPeriodChart` is vertical and does not. Below `md`, the comparison chart becomes horizontal:
 
 ```
-Loan Payments                 $3,929
+Loan Payments                 $2,846
 ████████████████████████████████████  last 30 days
 ████████████████████████████████████  prior 30 days
 
@@ -209,7 +209,7 @@ Food & Drink                  $2,314
 
 Horizontal bars need no rotated labels at all, which removes the §1.4 collision by construction rather than by tuning font sizes.
 
-**Categories are capped at the top 6 plus a tappable "Other" below `md`.** The household's bottom 7 categories total $665 of $11,600 — about 6% — so the chart fits one screen while hiding very little. Tapping "Other" expands the remainder.
+**Categories are capped at the top 6 plus a tappable "Other" below `md`.** Illustratively, the bottom 7 categories total $640 of $10,900 — about 6% — so the chart fits one screen while hiding very little. Tapping "Other" expands the remainder.
 
 ### 5.1 The palette changes on both layouts
 
@@ -219,7 +219,7 @@ This is the one change in this spec that is **not** phone-only. A series at 1.56
 
 ### 5.2 Out of scope here
 
-A "what changed" view is filed as **#95** and is deliberately not in this spec. It is additive, and it has a blind spot — Loan Payments is $3,929.35 in both windows, so its delta is $0 and it would not render at all — which is why it must be a toggle on top of this chart rather than a replacement for it.
+A "what changed" view is filed as **#95** and is deliberately not in this spec. It is additive, and it has a blind spot — Loan Payments is $2,846.20 in both windows, so its delta is $0 and it would not render at all — which is why it must be a toggle on top of this chart rather than a replacement for it.
 
 ---
 
@@ -268,7 +268,7 @@ The existing suite is 338 tests and **none of them cover layout**, which is why 
 
   > **Note (owner decision, 2026-10-23, #215):** Both slots are now whole dollars, as the phone rows are; tests/unit/stat-card.test.tsx asserts it. See the reversal under §4's rounding rule.
 - **The phone row and the desktop row derive from one source.** Both presentations must consume the same `effectiveCategory`, the same `display = -amount` convention, and the same `isCreditCardPayment` predicate. A test asserts the two render identical category, amount and card-payment state for the same transaction. **This is how §2's accepted duplication cost is contained** — the markup may differ, the meaning may not.
-- **The sheet honours the card-payment exemption.** Given a `LOAN_PAYMENTS_CREDIT_CARD_PAYMENT` transaction with no `user_category`, the sheet offers no category picker, no checkbox and no editor. This guards the $7,866.69 failure documented at `TransactionRow.tsx:48-58`.
+- **The sheet honours the card-payment exemption.** Given a `LOAN_PAYMENTS_CREDIT_CARD_PAYMENT` transaction with no `user_category`, the sheet offers no category picker, no checkbox and no editor. This guards the $6,412.58 failure documented at `TransactionRow.tsx:48-58`.
 - **Trends caps at six categories plus Other below `md`, and Other's amount equals the sum of the remainder.** A pure function over the rows; no rendering required.
 - **The palette stays validated.** A test asserting the chart constants are the validated pair, so a future colour change has to be deliberate.
 
@@ -293,7 +293,7 @@ Visual verification is manual, on a real phone, per stage. Neither jsdom nor a C
 
 **A minimum width on the table so `overflow-x-auto` engages.** Two lines: `min-w-[800px]` plus `overflow-hidden` on cells. It would stop the overlap today. Rejected as a destination rather than a stopgap — reading a row would mean swiping sideways to see the amount, on the app's most-used screen. It remains available as a one-hour patch if the full pass stalls.
 
-**Abbreviating net worth to `$1.18M` with the exact figure on tap.** The smallest possible change; the 2×2 grid survives untouched. Rejected because the number the household opens the app to see should not be the one that is rounded.
+**Abbreviating net worth to `$1.23M` with the exact figure on tap.** The smallest possible change; the 2×2 grid survives untouched. Rejected because the number the household opens the app to see should not be the one that is rounded.
 
 > **Note (owner decision, 2026-10-23, #215):** The reason above no longer holds as written. At the household's request net worth is now rounded to whole dollars, like every figure but the transactions, the reimbursements and the owed-to-you total (see the reversal under §4). Abbreviating it stays rejected: the hero shows every dollar, so what goes is the cents, never the digits.
 

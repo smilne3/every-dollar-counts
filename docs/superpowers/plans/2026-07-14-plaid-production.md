@@ -744,7 +744,7 @@ export async function completePendingLink(
 
 - [x] **Step 2: Rewrite `LinkButton` with two variants**
 
-> **Decision 2026-07-23 — no loan button.** The mortgage is at Wells Fargo, which supports
+> **Decision 2026-07-23 — no loan button.** The mortgage is at a bank that supports
 > `transactions`, so it arrives through the ordinary bank flow inside the same login at no extra
 > Item cost. The `liabilities` product stays wired through the link-token and exchange routes, so
 > adding a button later is trivial if a standalone servicer ever appears. Skip the third button

@@ -130,7 +130,7 @@ const render = (searchParams: Params = {}) =>
   TransactionsPage({ searchParams: Promise.resolve(searchParams) })
 
 // The household's one account, at storedItem()'s bank, so that bank's accounts are in (#170).
-const ACCOUNTS = [{ account_id: 'acc-1', name: '360 Checking', plaid_item_id: 'item-1' }]
+const ACCOUNTS = [{ account_id: 'acc-1', name: 'Main Checking', plaid_item_id: 'item-1' }]
 
 // Holds the read named `name` open until the test lets it go.
 function hold(name: string): () => void {
@@ -179,11 +179,11 @@ beforeEach(() => {
     data: [
       txn({ id: 't1' }),
       txn({ id: 't2', user_category: 'Grocery' }),
-      // The $7,866.69 shape. Both branches have to be handed it identically, because it is the one
+      // The $6,412.58 shape. Both branches have to be handed it identically, because it is the one
       // row whose gating differs from every other.
       txn({
         id: 't3',
-        amount: -7866.69,
+        amount: -6412.58,
         pfc_primary: 'LOAN_PAYMENTS',
         pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT',
       }),
@@ -434,10 +434,10 @@ describe('Transactions page dual layout', () => {
     it("hands each card its transaction's account name, keyed by account_id", async () => {
       const { cards } = await branches()
       expect(cards.map((c) => c.props?.accountName)).toEqual([
-        '360 Checking',
-        '360 Checking',
-        '360 Checking',
-        '360 Checking',
+        'Main Checking',
+        'Main Checking',
+        'Main Checking',
+        'Main Checking',
       ])
     })
 

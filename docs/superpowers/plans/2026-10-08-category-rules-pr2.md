@@ -1095,7 +1095,7 @@ const ROWS = [
   r('d', 'Acme Payroll', 25, 'INCOME'), // a clawback
   r('e', 'Savings', 500, 'TRANSFER_OUT'),
   r('f', 'Savings', -500, 'TRANSFER_IN'),
-  r('g', 'Chase', 7866.69, 'LOAN_PAYMENTS', { pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' }),
+  r('g', 'Chase', 6412.58, 'LOAN_PAYMENTS', { pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' }),
   r('h', 'Lender', -1000, 'LOAN_DISBURSEMENTS'), // unmapped primary
   r('i', 'Safeway', 12, 'FOOD_AND_DRINK', { user_category: 'Travel' }),
   r('j', 'Venmo', 40, 'TRANSFER_OUT'),
@@ -1246,7 +1246,7 @@ export function effectiveCategory(t: CategorizableTxn, ctx: CategoryContext): st
 
   - **Dashboard** (`app/(app)/dashboard/page.tsx`):
     - `import { fetchCategoryContext } from '@/lib/category-context'` and `import { resolveCategory } from '@/lib/category-rules'`.
-    - Where the categories read was: `const data = await fetchCategoryContext()`, with the old comment's substance kept above it: `// Throws on a failed read. With no categories nothing maps to Income or Transfer and a paycheck counts as negative spending (measured: "Spent" -$1,796.70 against a true $3,929.35), so a failure must not become a plausible number (#46).`
+    - Where the categories read was: `const data = await fetchCategoryContext()`, with the old comment's substance kept above it: `// Throws on a failed read. With no categories nothing maps to Income or Transfer and a paycheck counts as negative spending (illustrative: "Spent" -$1,530.90 against a true $2,846.20), so a failure must not become a plausible number (#46).`
     - Flows select becomes `'id, amount, date, merchant_name, user_category, pfc_primary, pfc_detailed, reimbursable_amount'`.
     - `const allRows = flowTxns ?? []` and `const ctx = buildSpendContext({ data, txns: allRows })`; `monthlyFlows(allRows, ctx, months)`. The `as Txn[]` and `as FlowTxn[]` casts go; drop the then-unused `Txn`/`FlowTxn` imports.
     - Recent activity: `category: resolveCategory(t, ctx).name` (Task 6 replaces this with `activityItem`).
@@ -1350,7 +1350,7 @@ const ROWS = [
   r('e', '2026-09', 'Acme Payroll', -3000, 'INCOME'),
   r('f', '2026-09', 'Savings', 500, 'TRANSFER_OUT'),
   // An unpicked card payment: Loan Payments by its primary, but in no total and no drill-down.
-  r('g', '2026-09', null, 7866.69, 'LOAN_PAYMENTS', { pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' }),
+  r('g', '2026-09', null, 6412.58, 'LOAN_PAYMENTS', { pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' }),
   r('h', '2026-09', 'Mortgage Co', 2100, 'LOAN_PAYMENTS'),
   r('i', '2026-09', 'Safeway', 12, 'FOOD_AND_DRINK', { user_category: 'Travel' }),
   r('j', '2026-09', 'Rental', 400, 'TRAVEL', { reimbursable_amount: 400 }),
@@ -3192,8 +3192,8 @@ describe('brand-cast', () => {
 // fetchCategoryContext (lib/category-context.ts) can produce. A page that read categories itself
 // and built its own map would compile, ignore every rule, and show Safeway under Food & Drink on
 // one page and Grocery on the next. And a rule must never write user_category: any value there on
-// a card payment re-enters it into every total, which once took a month's spending from $3,949.16
-// to -$3,917.53 (#59).
+// a card payment re-enters it into every total, which once took a month's spending from $3,210.47
+// to -$3,202.11 (#59).
 // ---------------------------------------------------------------------------
 const CATEGORY_READS_ALLOWED = new Map([
   ['lib/category-context.ts', 'The one read every page goes through.'],

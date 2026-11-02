@@ -53,7 +53,7 @@ afterAll(() => {
 })
 
 const data = [
-  { category: 'Loan Payments', current: 3929.35, previous: 3929.35 },
+  { category: 'Loan Payments', current: 2846.2, previous: 2846.2 },
   { category: 'Food & Drink', current: 260.75, previous: 64.2 },
 ]
 

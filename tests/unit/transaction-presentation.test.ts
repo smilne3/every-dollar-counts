@@ -91,13 +91,13 @@ describe('presentTransaction', () => {
     expect(presentTransaction({ ...base, amount: -250 }).tone).toBe('in')
   })
 
-  // The $7,866.69 case: money INTO the card is an inflow by sign, but it is your own
+  // The $6,412.58 case: money INTO the card is an inflow by sign, but it is your own
   // money moving between your own accounts and must never read as income.
   it('tones a credit-card payment neutral whichever way it points', () => {
     const cc = { ...base, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' }
-    expect(presentTransaction({ ...cc, amount: -7866.69 }).tone).toBe('neutral')
-    expect(presentTransaction({ ...cc, amount: 7866.69 }).tone).toBe('neutral')
-    expect(presentTransaction({ ...cc, amount: -7866.69 }).isCC).toBe(true)
+    expect(presentTransaction({ ...cc, amount: -6412.58 }).tone).toBe('neutral')
+    expect(presentTransaction({ ...cc, amount: 6412.58 }).tone).toBe('neutral')
+    expect(presentTransaction({ ...cc, amount: -6412.58 }).isCC).toBe(true)
   })
 
   // A user override deliberately wins, which is what re-enters both legs into the totals.

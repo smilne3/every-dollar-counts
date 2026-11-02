@@ -95,7 +95,7 @@ for its whole life.
 
 ### Link real banks
 
-9. **Link Wells Fargo first.** It's an OAuth bank, so it hands you off to wellsfargo.com and back.
+9. **Link an OAuth bank first.** It hands you off to the bank's site and back.
    Tick every account you want — including the mortgage, which comes in on this same login at no
    extra connection. Confirm the balances match what the bank's own website says.
    **Transactions will not appear right away.** Plaid's first pull runs for minutes to hours; an

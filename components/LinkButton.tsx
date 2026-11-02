@@ -17,7 +17,7 @@ import { SAVE_TIMEOUT_MS, sendRequest, type RequestOutcome } from '@/lib/save-re
 // Two paths, because Plaid Link only lists institutions supporting EVERY requested product:
 // asking for transactions + investments at once would hide most banks AND most brokerages.
 //
-// There is deliberately no third "loan" button. The household's mortgage is at Wells Fargo, which
+// There is deliberately no third "loan" button. The household's mortgage is at a bank that
 // supports `transactions`, so it appears in the ordinary bank flow inside the same login — no
 // extra Item slot. A dedicated button only pays for itself with a servicer you don't also bank at.
 

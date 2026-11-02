@@ -25,7 +25,7 @@ import { answerOf, UNKNOWN_ANSWER } from './helpers/route-answers'
 type Row = Record<string, unknown>
 type DbError = { code?: string; message: string } | null
 
-const HOUSEHOLDS: Row[] = [{ id: 'hh-1', name: 'The Milnes', timezone: 'America/New_York' }]
+const HOUSEHOLDS: Row[] = [{ id: 'hh-1', name: 'The Test Household', timezone: 'America/New_York' }]
 
 function project(data: Row | null, columns: string): Row | null {
   if (!data) return data

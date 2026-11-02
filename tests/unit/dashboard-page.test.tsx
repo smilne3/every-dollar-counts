@@ -847,7 +847,7 @@ describe('Dashboard average savings (#126)', () => {
 describe('Dashboard reads', () => {
   // The one measured on real data. With no categories nothing maps to Income or Transfer, so the
   // exclusions in monthlyFlows never fire and a paycheck is counted as negative spending: "Spent"
-  // reads -$1,796.70 and "Saved" +$1,796.70 where the truth is $3,929.35 and $1,796.70. That is a
+  // reads -$1,530.90 and "Saved" +$1,530.90 where the truth is $2,846.20 and $1,530.90. That is a
   // number the reader would believe, which is worse than an error (#46).
   it('fails loudly when the categories read fails, rather than counting income as spending', async () => {
     results.categories = { data: null, error: { message: 'permission denied' } }
@@ -943,14 +943,14 @@ describe('Dashboard reads', () => {
   // decidable here is that the hero tile exists and carries the figure that clipped twice.
   it('gives net worth the hero tile', async () => {
     results.accounts = {
-      data: [{ id: 'a1', type: 'depository', current_balance: 1182885.15 }],
+      data: [{ id: 'a1', type: 'depository', current_balance: 1234567.15 }],
       error: null,
     }
     const tree = await render()
     const hero = findStatCards(tree).find((c) => c.props.label === 'Net worth')
     expect(hero).toBeTruthy()
     expect(hero!.props.variant).toBe('hero')
-    expect(hero!.props.amount).toBeCloseTo(1182885.15, 2)
+    expect(hero!.props.amount).toBeCloseTo(1234567.15, 2)
   })
 
   // Pins which tiles are compact: exactly the three supporting figures. Filtering on `!== 'hero'`
@@ -1028,7 +1028,7 @@ describe('Dashboard reads', () => {
           // duplication this task removed — is then indistinguishable from taking p.label.
           name: 'JOE S DEN',
           merchant_name: 'Joe S Den',
-          amount: -7866.69, // Plaid: negative is money in, and this leg only looks like income
+          amount: -6412.58, // Plaid: negative is money in, and this leg only looks like income
           date: '2026-09-01',
           user_category: null,
           pfc_primary: 'LOAN_PAYMENTS',
@@ -1056,7 +1056,7 @@ describe('Dashboard reads', () => {
         date: '2026-09-01',
         category: 'Uncategorized', // no categories seeded, so PFC maps to nothing
         label: 'Joe S Den', // the merchant, not the raw name
-        display: 7866.69,
+        display: 6412.58,
         tone: 'neutral',
         isInternal: true,
       },

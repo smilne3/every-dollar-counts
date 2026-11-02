@@ -162,7 +162,7 @@ export default async function DashboardPage({
   const currency = accounts[0]?.iso_currency_code ?? 'USD'
 
   // Throws on a failed read. With no categories nothing maps to Income or Transfer and a paycheck
-  // counts as negative spending (measured: "Spent" -$1,796.70 against a true $3,929.35), so a
+  // counts as negative spending (illustrative: "Spent" -$1,530.90 against a true $2,846.20), so a
   // failure must not become a plausible number (#46).
   const data = await fetchCategoryContext()
 

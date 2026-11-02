@@ -51,8 +51,8 @@ export function TransactionRow({
       {/* No category picker on a card payment. Setting user_category makes isCreditCardPayment
           return false — the deliberate "user override wins" rule — which re-enters that row into
           the totals (each leg of a card payment is its own row, so only the picked leg returns).
-          Measured on a real $7,866.69 payment: picking a spending category takes September
-          spending from $3,949.16 to MINUS $3,917.53; picking Income invents $7,866.69 of income.
+          Illustrative figures: on a $6,412.58 payment, picking a spending category takes September
+          spending from $3,210.47 to MINUS $3,202.11; picking Income invents $6,412.58 of income.
           Only the two Transfer categories are harmless. A control where most choices silently
           corrupt the numbers by thousands does not belong on the row, and "Loan Payments" was
           never what this is anyway. The same reasoning hides the reimbursable box and the editor
@@ -86,7 +86,7 @@ export function TransactionRow({
       {/* A credit-card payment is neither spending nor income — it moves your own money between two
           of your own accounts, and every total already skips both legs (#31). It was still painted
           emerald on the leg that credits the card, which is the colour this table uses for money
-          arriving, so a $7,866.69 card payment read as income. Muted says "this is not new money"
+          arriving, so a $6,412.58 card payment read as income. Muted says "this is not new money"
           without hiding a transaction that genuinely happened on the statement. */}
       <td
         className={`px-4 py-3 text-right font-medium tabular-nums ${TONE_CLASS[tone]}`}
