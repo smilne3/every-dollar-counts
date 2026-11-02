@@ -38,11 +38,6 @@ import ts from 'typescript'
 // ---------------------------------------------------------------------------
 const READS_ALLOWED = new Map([
   [
-    'app/(app)/layout.tsx',
-    'Sits ABOVE app/(app)/error.tsx, so throwing takes down the whole shell rather than one ' +
-      'section. Needs only a display name, and has a fallback for it.',
-  ],
-  [
     'lib/sync.ts',
     "Destructures Plaid's transactions/sync response, not a Supabase read. Plaid's client rejects a " +
       'failed call, so there is no `error` to check: the failure reaches the caller as a throw (#91).',

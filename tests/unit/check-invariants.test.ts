@@ -123,9 +123,14 @@ const sql = 'const { data } = await supabase.from(goals)'`
     expect(checkUncheckedReads(file(PAGE, src))).toEqual([])
   })
 
-  it("allows the layout's display-name read, and lib/sync.ts's Plaid response", () => {
-    expect(checkUncheckedReads(file('app/(app)/layout.tsx', `const { data: households } = await supabase.from('households').select('id, name').limit(1)`))).toEqual([])
+  it("allows lib/sync.ts's Plaid response", () => {
     expect(checkUncheckedReads(file('lib/sync.ts', `const { data } = await plaidClient.transactionsSync({ access_token, cursor: next })`))).toEqual([])
+  })
+
+  // It logs a failed read, because nothing else may say why a hung one held up the page (#202).
+  it("fires on the layout's display-name read if it stops binding its error", () => {
+    expect(checkUncheckedReads(file('app/(app)/layout.tsx', `const { data: households } = await supabase.from('households').select('id, name').limit(1)`))).toHaveLength(1)
+    expect(checkUncheckedReads(file('app/(app)/layout.tsx', `const { data: households, error: householdError } = await supabase.from('households').select('id, name').limit(1)`))).toEqual([])
   })
 })
 

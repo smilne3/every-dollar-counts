@@ -15,12 +15,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (signIn.state === 'ended') redirect('/login')
   const { user } = signIn
 
-  // The one read in the app deliberately left unchecked. app/(app)/error.tsx is a route-segment
-  // boundary for the PAGES under this layout, and its own comment notes the layout "sits above this
-  // boundary and is unaffected" — so throwing here would take down the whole shell rather than show
-  // the retryable message, and app/error.tsx would say sign-in couldn't be checked. It also only
-  // needs a display name, and has a fallback for it.
-  const { data: households } = await supabase.from('households').select('id, name').limit(1)
+  // The one read in the app whose failure deliberately doesn't stop the page. app/(app)/error.tsx is a
+  // route-segment boundary for the PAGES under this layout, and its own comment notes the layout "sits
+  // above this boundary and is unaffected" — so throwing here would take down the whole shell rather
+  // than show the retryable message, and app/error.tsx would say sign-in couldn't be checked. It also
+  // only needs a display name, and has a fallback for it. Logged, though: nothing renders until this
+  // read is done, so a hung one holds up every full page load until its time limit
+  // (lib/supabase/read-deadline.ts), and this line may be all that says why (#202).
+  const { data: households, error: householdError } = await supabase.from('households').select('id, name').limit(1)
+  if (householdError) console.error(`[layout] could not read the household's name: ${householdError.message}`)
   const householdName = households?.[0]?.name ?? 'Your household'
 
   return (
