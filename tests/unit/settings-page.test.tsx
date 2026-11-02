@@ -51,7 +51,11 @@ const chainFor = (table: string) => {
   }
   // maybeSingle only. Null data and no error is its answer for no row; .single() makes no row an
   // error (PGRST116), which a stand-in answering null would hide (#172).
-  chain.maybeSingle = async () => results[table] ?? { data: null, error: null }
+  chain.maybeSingle = async () => {
+    started.push(table)
+    await gates[table]
+    return results[table] ?? { data: null, error: null }
+  }
   chain.then = (resolve: (v: unknown) => unknown) => {
     started.push(table)
     onRead[table]?.()
@@ -415,8 +419,8 @@ describe('Settings: a failed read says so in its own card (#91)', () => {
     })
   })
 
-  // The household read gates every card below it: unchecked, a read with neither rows nor an error
-  // rendered every card as if nothing were connected (#46).
+  // A failed household read takes the whole page down. Unchecked, a read with neither rows nor an
+  // error rendered the cards that need the household as if nothing were connected (#46).
   it('throws when the household read returns no data and no error', async () => {
     results.households = { data: null, error: null }
     await expect(SettingsPage()).rejects.toThrow('could not read your household: read returned no data and no error')
@@ -438,7 +442,7 @@ describe('Settings timezone control', () => {
   // the page tells it when it began reading, timed from before any of its reads, among them the
   // household's that brings the zone. Taken after, a read that began before a save was written and
   // returned after it would pass as newer.
-  it('tells the control when the page began reading, timed from before its first read', async () => {
+  it('tells the control when the page began reading, timed from before the household read that brings the zone', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-10-20T12:00:00Z'))
     const before = Date.now()
@@ -692,8 +696,8 @@ describe('Settings waits only for its longest chain (#199)', () => {
     await settle()
   })
 
-  // #91, now that the reads overlap: one failed read says so in its own card and in no other, and the
-  // other cards' controls are all still there.
+  // #91, now that the reads overlap: one failed read says so in the cards it feeds and in no other,
+  // and the other cards' controls are all still there.
   it.each([
     ['accounts', { Banks: "Couldn't check your accounts. Try again." }, []],
     ['plaid_items', { Banks: "Couldn't load your banks. Try again." }, [BankList]],
@@ -703,7 +707,7 @@ describe('Settings waits only for its longest chain (#199)', () => {
       { Categories: "Couldn't load categories and rules. Try again.", 'Category rules': "Couldn't load categories and rules. Try again." },
       [CategoryManager, CategoryRulesCard],
     ]),
-  ] as [string, Record<string, string>, unknown[]][])('a failed %s read degrades only its own card', async (read, alerts, gone) => {
+  ] as [string, Record<string, string>, unknown[]][])('a failed %s read degrades only the cards it feeds', async (read, alerts, gone) => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     results[read] = { data: null, error: { message: 'boom' } }
     const tree = await SettingsPage()

@@ -118,7 +118,8 @@ export default async function DashboardPage({
 
   // The three the early return below needs, together, so the page waits for the slowest of them and
   // not their sum (#199). Every other read waits for this, so that a household with no accounts
-  // starts none it won't show, and none of them can put it on the error page.
+  // starts none it won't show, and no read it won't show can put it on the error page. The banks
+  // read, which it does show, still can.
   const [accounts, householdId, tz] = await Promise.all([
     readAccounts(supabase),
     // The household read throws when it fails: otherwise the banks list and the home value both

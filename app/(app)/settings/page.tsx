@@ -37,8 +37,8 @@ async function readHousehold(supabase: Supabase) {
     .select('id, name, timezone')
     .limit(1)
   if (householdsError) throw new Error(`could not read your household: ${householdsError.message}`)
-  // No data and no error is not "no household" either (#46): every card below would render as if
-  // nothing were connected.
+  // No data and no error is not "no household" either (#46): the Household, Banks and Home value
+  // cards would render as if nothing were connected.
   if (!households) throw new Error('could not read your household: read returned no data and no error')
   return households[0]
 }
@@ -126,8 +126,9 @@ async function readOrNull<T>(what: string, read: () => Promise<T>): Promise<T | 
   }
 }
 
-// The household, and then what needs its id, together. A failed household read throws, and takes the
-// page down; each of the others is its own card's to report (#91).
+// The household, then what needs its id, together. A failed household read throws, and takes the
+// page down. A failed banks or home value read is its own card's to report (#91). The slot count
+// never throws.
 async function readHouseholdAndItsCards(supabase: Supabase) {
   const household = await readHousehold(supabase)
   const [items, slotsUsed, manualAssets] = await Promise.all([
@@ -166,9 +167,9 @@ export default async function SettingsPage() {
   // When the page began reading, by the server's clock, for TimezoneCard and HomeValueCard to tell
   // this page from one read before their last save was written (#182, #174). One time for the page,
   // taken before any read starts, so it is never later than any read on it, in whatever order they
-  // run: a reload that began before a save was written never passes as newer, however late in the
-  // page its read comes. A time per read would let the home value's read, which starts once the
-  // household arrives, count a save written while the page was reading the household, so a card would
+  // run: a reload that began before a save was written never passes as newer, however late its read
+  // starts. A time per read would let the home value's read, which starts once the household
+  // arrives, count a save written while the page was reading the household, so HomeValueCard would
   // refill one reload sooner; the reload after the save does that anyway.
   const readAt = serverClock()
   const supabase = await createClient()

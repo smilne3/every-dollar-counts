@@ -118,7 +118,11 @@ vi.mock('@/lib/category-context', async (importOriginal) => {
       if (r.error) throw new Error(`could not read category rules: ${r.error.message}`)
       return testData(c.data as never, r.data as never, { suggestionsOn: actual.suggestionsEnabled() })
     },
+    // Settings' read of every transaction, not this page's. Recorded all the same, so a test of which
+    // reads start would see it if the page ever made it (#199).
     readTransactionsForCounts: async () => {
+      started.push('transactions for counts')
+      await gates['transactions for counts']
       const t = results.transactions ?? { data: [], error: null }
       if (t.error) throw new Error(`could not read transactions: ${t.error.message}`)
       return t.data
@@ -917,9 +921,8 @@ describe('Dashboard reads', () => {
     await expect(render()).rejects.toThrow(/could not read category rules/)
   })
 
-  // #69: the six-month window passes PostgREST's 1,000-row cap near each month end. A plain read
-  // against this stub gets the first 1,000 of these 1,050 one-dollar purchases, so "Spent" would
-  // read $1,000.
+  // #69: the seven-month window passes PostgREST's 1,000-row cap. A plain read against this stub gets
+  // the first 1,000 of these 1,050 one-dollar purchases, so "Spent" would read $1,000.
   it('counts every transaction in the window, past the 1,000-row cap', async () => {
     paged.transactions = pagedTable(
       Array.from({ length: 1050 }, (_, i) => ({
@@ -1030,12 +1033,18 @@ describe('Dashboard reads', () => {
 
   // The reminder is for a home value over a month old, and only that. Shown for any other, it would
   // nag about a value just entered, or send the reader to Zillow over an asset that isn't the house.
+  // REPORTED is 00:10 UTC on 3 September, so these are 29 and 31 days old, either side of the month.
   it.each([
-    ['a home value updated within the month', 'Home', '2026-08-20T00:00:00Z'],
-    ['an old value that is not the home', 'Boat', '2026-07-01T00:00:00Z'],
+    ['a home value updated 29 days ago', 'Home', '2026-08-05T00:10:00Z'],
+    ['a value updated 31 days ago that is not the home', 'Boat', '2026-08-03T00:10:00Z'],
   ])('does not remind about %s', async (_, name, updated_at) => {
     results.manual_assets = { data: [{ id: 'm1', name, value: 5000, updated_at }], error: null }
     expect(textOf(await render())).not.toContain('Your home value was last updated')
+  })
+
+  it('reminds about a home value updated 31 days ago', async () => {
+    results.manual_assets = { data: [{ id: 'm1', name: 'Home', value: 5000, updated_at: '2026-08-03T00:10:00Z' }], error: null }
+    expect(textOf(await render())).toContain('Your home value was last updated')
   })
 
   // Pins which tiles are compact: exactly the three supporting figures. Filtering on `!== 'hero'`
@@ -1291,8 +1300,8 @@ describe('Dashboard reads', () => {
 
 // #199: the page waited for its reads one at a time, so a render took the sum of their round trips.
 // It now waits only for its longest chain. These tests hold reads open: a read that starts while
-// another is held cannot have waited for it, and one that has not started once the others have
-// finished is waiting for something it should not.
+// another is held cannot have waited for it, and one that does not start until another is let go was
+// waiting for it.
 describe('Dashboard waits only for its longest chain (#199)', () => {
   // What the early return needs, so what every visit reads first.
   const FIRST = ['accounts', 'memberships', 'timezone']
@@ -1366,7 +1375,7 @@ describe('Dashboard waits only for its longest chain (#199)', () => {
   })
 
   // The early return shows no home value, no budgets and no transactions, so none of those can take
-  // it down. A household with no accounts yet is told how to begin, whatever else is failing.
+  // it down. A household with no accounts yet is told how to begin, whichever of those is failing.
   it('with no accounts, shows Connect your first account though every read it does not need would fail', async () => {
     results.accounts = { data: [], error: null }
     for (const name of REST) if (name !== 'plaid_items') results[name] = { data: null, error: { message: 'boom' } }
@@ -1405,7 +1414,8 @@ describe('Dashboard waits only for its longest chain (#199)', () => {
   // Promise.all, not started promises awaited one by one, which leave a later failure unhandled while
   // an earlier read is awaited, and the page waiting for a read whose answer can no longer matter. So
   // each read fails with the others in its stage still held. It says what failed in its own words,
-  // and at once. Why each must throw is told by the tests under 'Dashboard reads'.
+  // and at once. Why each must throw is told where it throws, and for all but the time zone, what's
+  // owed, the history start and the recent transactions, by a test under 'Dashboard reads' too.
   it.each([
     ['accounts', 'could not read accounts: boom'],
     ['memberships', 'could not read your household: boom'],
@@ -1431,7 +1441,7 @@ describe('Dashboard waits only for its longest chain (#199)', () => {
   // The window needs the zone: at 8:10pm on 31 August in New York the server is already in September,
   // so a window worked out from its day would open a month late and leave the oldest month out of
   // the average (#73, #126).
-  it("opens the transactions window seven months back from the household's day", async () => {
+  it("opens the seven-month transactions window from the household's day", async () => {
     vi.setSystemTime(new Date('2026-09-01T00:10:00Z'))
     await render()
     expect(queries.transactions).toContainEqual(['gte', 'date', '2026-02-01'])
@@ -1460,6 +1470,37 @@ describe('Dashboard waits only for its longest chain (#199)', () => {
       ['order', 'id', { ascending: false }],
       ['limit', 6],
     ])
+  })
+
+  // The service-role client bypasses RLS, so this id is all that scopes the read: read for any other
+  // household, another's house lands in this one's net worth. The banks' read has the same scope,
+  // which the strict stand-in in tests/stubs/plaid-items.ts holds it to.
+  it("asks for this household's home value", async () => {
+    await render()
+    expect(queries.manual_assets).toContainEqual(['eq', 'household_id', 'hh-1'])
+  })
+
+  // Two reads of one table, which the stub otherwise answers from one fixture, so either would pass
+  // for the other. Here each has rows of its own. Spent built from the recent rows would count only
+  // the last six transactions, and Recent activity built from the window would list seven months of
+  // them, oldest first.
+  it('takes Spent from the window and Recent activity from the six recent transactions', async () => {
+    const row = (id: string, amount: number) => ({
+      id,
+      name: id,
+      merchant_name: null,
+      amount,
+      date: '2026-09-01',
+      user_category: null,
+      pfc_primary: null,
+      pfc_detailed: null,
+      reimbursable_amount: null,
+    })
+    results.transactions = { data: [row('in the window', 100)], error: null }
+    results['recent transactions'] = { data: [row('recent', 7)], error: null }
+    const tree = await render()
+    expect(findStatCards(tree).find((c) => c.props.label.startsWith('Spent in'))!.props.amount).toBe(100)
+    expect(recentItemsOf(tree)!.map((item) => item.id)).toEqual(['recent'])
   })
 })
 
