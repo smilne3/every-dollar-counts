@@ -32,7 +32,7 @@ export function HomeValueCard({
 }: {
   initialValue: number | null
   updatedAt: string | null
-  // When the page read initialValue, by the server's clock (#174).
+  // When the page began reading, by the server's clock: before its read of initialValue (#174).
   readAt: number
 }) {
   const router = useRouter()

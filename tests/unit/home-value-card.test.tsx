@@ -27,7 +27,7 @@ afterEach(() => {
 const refresh = vi.hoisted(() => vi.fn())
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }))
 
-// readAt is when the page read the value, by the server's clock.
+// readAt is when the page began reading, by the server's clock: before its read of the value.
 const props = { initialValue: 700000, updatedAt: '2026-10-01T12:00:00Z', readAt: 1_000 }
 
 // Whole dollars, as every figure outside the transactions and what is owed back on them (#215).
