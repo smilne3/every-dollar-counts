@@ -20,6 +20,10 @@ export const plaidEnv: 'sandbox' | 'production' = env
 const configuration = new Configuration({
   basePath: env === 'production' ? PlaidEnvironments.production : PlaidEnvironments.sandbox,
   baseOptions: {
+    // Plaid's API has no reason to redirect, so a redirect is refused and fails the call. Following
+    // one would send PLAID-SECRET and the request body, with its access token, to wherever it points:
+    // a change of site only drops standard credential headers such as Authorization (#233).
+    maxRedirects: 0,
     headers: {
       'PLAID-CLIENT-ID': process.env.PLAID_CLIENT_ID!,
       'PLAID-SECRET': process.env.PLAID_SECRET!,
