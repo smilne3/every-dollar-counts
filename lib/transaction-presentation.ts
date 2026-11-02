@@ -108,7 +108,7 @@ export function presentTransaction(t: PresentableTxn): PresentedTxn {
     label,
     display,
     // Internal movement is neither spending nor income — every leg is already excluded from every
-    // total. Painting a crediting leg emerald made a $7,866.69 card payment read as income (#31),
+    // total. Painting a crediting leg emerald made a $6,412.58 card payment read as income (#31),
     // and did the same to every transfer into savings. A zero amount
     // is neither either, and must not fall through to the `in` arm the way `display < 0` alone
     // lets it.

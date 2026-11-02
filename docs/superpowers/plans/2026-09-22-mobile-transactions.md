@@ -14,7 +14,7 @@
 
 - **`md` is the only breakpoint.** Phone layout below it, existing layout at and above it. `AppShell` already switches at `md`; a second boundary would put content out of step with the chrome.
 - **The desktop table is not restyled.** Its markup may be *wrapped*, never edited. The one edit permitted to `TransactionRow.tsx` is swapping its inline derivations for `presentTransaction` — output must be identical.
-- **The card-payment exemption is a correctness constraint, not a style choice.** Where `isCreditCardPayment` is true, no category picker, no reimbursable checkbox and no editor may be rendered — on either layout. Setting `user_category` on a card payment re-enters both legs into the totals; on a real $7,866.69 payment that is the difference between September spending of $3,949.16 and **minus** $3,917.53 (`TransactionRow.tsx:48-58`).
+- **The card-payment exemption is a correctness constraint, not a style choice.** Where `isCreditCardPayment` is true, no category picker, no reimbursable checkbox and no editor may be rendered — on either layout. Setting `user_category` on a card payment re-enters both legs into the totals; on a $6,412.58 payment (illustrative) that is the difference between September spending of $3,210.47 and **minus** $3,202.11 (`TransactionRow.tsx:48-58`).
 - **No file under `lib/` that computes money is edited.** Not `dashboard.ts`, `budget.ts`, `reimbursements.ts`, `spend-context.ts`, `categories.ts`. `lib/transaction-presentation.ts` is new and presentational only.
 - **Sign convention is `display = -amount`.** Plaid positive means money out. This rule exists once, in `presentTransaction`, and nowhere else after Task 1.
 - **Run the whole suite, not one file, before each commit.** Baseline on this branch is **327** passing tests. (`mobile-pass` branches off `main`; the 338 figure belongs to `drop-non-cashflow-transactions`, which carries 11 ingest tests this branch does not.)
@@ -76,13 +76,13 @@ describe('presentTransaction', () => {
     expect(presentTransaction({ ...base, amount: -250 }).tone).toBe('in')
   })
 
-  // The $7,866.69 case: money INTO the card is an inflow by sign, but it is your own
+  // The $6,412.58 case: money INTO the card is an inflow by sign, but it is your own
   // money moving between your own accounts and must never read as income.
   it('tones a credit-card payment neutral whichever way it points', () => {
     const cc = { ...base, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' }
-    expect(presentTransaction({ ...cc, amount: -7866.69 }).tone).toBe('neutral')
-    expect(presentTransaction({ ...cc, amount: 7866.69 }).tone).toBe('neutral')
-    expect(presentTransaction({ ...cc, amount: -7866.69 }).isCC).toBe(true)
+    expect(presentTransaction({ ...cc, amount: -6412.58 }).tone).toBe('neutral')
+    expect(presentTransaction({ ...cc, amount: 6412.58 }).tone).toBe('neutral')
+    expect(presentTransaction({ ...cc, amount: -6412.58 }).isCC).toBe(true)
   })
 
   // A user override deliberately wins, which is what re-enters both legs into the totals.
@@ -155,7 +155,7 @@ export function presentTransaction(t: PresentableTxn): PresentedTxn {
     label: t.merchant_name ?? t.name,
     display,
     // A card payment is neither spending nor income — both legs are already excluded from every
-    // total. Painting the crediting leg emerald made $7,866.69 read as income (#31).
+    // total. Painting the crediting leg emerald made $6,412.58 read as income (#31).
     tone: isCC ? 'neutral' : display < 0 ? 'out' : 'in',
     isCC,
     shareAmount: marked > 0 ? (t.amount < 0 ? share : -share) : null,
@@ -303,7 +303,7 @@ describe('phone card and desktop row agree', () => {
   const cases = [
     { name: 'ordinary outflow', o: {} },
     { name: 'income inflow', o: { amount: -2772.63, pfc_detailed: 'INCOME_WAGES' } },
-    { name: 'credit-card payment', o: { amount: -7866.69, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' } },
+    { name: 'credit-card payment', o: { amount: -6412.58, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' } },
   ]
   for (const c of cases) {
     it(`render the same amount text for a ${c.name}`, () => {
@@ -467,17 +467,17 @@ describe('TransactionCard sheet', () => {
   })
 
   // The constraint this whole plan is most at risk of breaking. Setting user_category on a card
-  // payment re-enters both legs into the totals: on a real $7,866.69 payment that is September
-  // spending of $3,949.16 versus MINUS $3,917.53.
+  // payment re-enters both legs into the totals: on a $6,412.58 payment (illustrative) that is September
+  // spending of $3,210.47 versus MINUS $3,202.11.
   it('offers no picker, checkbox or editor on a credit-card payment', () => {
-    openSheet({ pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', amount: -7866.69 })
+    openSheet({ pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', amount: -6412.58 })
     expect(screen.queryByRole('combobox')).toBeNull()
     expect(screen.queryByRole('checkbox')).toBeNull()
     expect(screen.queryByRole('button', { name: /partial reimbursable amount/ })).toBeNull()
   })
 
   it('explains what a card payment is instead of offering controls', () => {
-    openSheet({ pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', amount: -7866.69 })
+    openSheet({ pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', amount: -6412.58 })
     expect(screen.getByText(/moves between your accounts/)).toBeTruthy()
   })
 })

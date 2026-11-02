@@ -20,8 +20,8 @@ import ts from 'typescript'
 // #46, and again in #68, and again in #77. A Supabase read that fails sets `data` to null, and
 // `?? []` turns that into an empty array — so "the query failed" and "you have no data" render
 // identically. On the dashboard that was not even an empty state: with the categories read failing,
-// income stopped being excluded from spending and the tiles read -$1,796.70 and +$1,796.70 against
-// a truth of $3,929.35 and $1,796.70. A number the reader would act on.
+// income stopped being excluded from spending and the tiles read -$1,530.90 and +$1,530.90 against
+// a truth of $2,846.20 and $1,530.90 (illustrative figures). A number the reader would act on.
 //
 // #91 found six unchecked reads this check could not see while it matched `const { data` one line at
 // a time in app/(app)/ only: two lib/ helpers whose empty lists dropped the house from net worth and
@@ -302,8 +302,8 @@ export function checkTxnReads(files) {
 // fetchCategoryContext (lib/category-context.ts) can produce. A page that read categories itself
 // and built its own map would compile, ignore every rule, and show Safeway under Food & Drink on
 // one page and Grocery on the next. And a rule must never write user_category: any value there on
-// a card payment re-enters it into every total. Measured in #59 against a real $7,866.69 autopay,
-// one pick would take September's spending from $3,949.16 to -$3,917.53.
+// a card payment re-enters it into every total. With illustrative figures, on a $6,412.58 autopay (#59),
+// one pick would take September's spending from $3,210.47 to -$3,202.11.
 // ---------------------------------------------------------------------------
 const CATEGORY_READS_ALLOWED = new Map([
   ['lib/category-context.ts', 'The one read every page goes through.'],

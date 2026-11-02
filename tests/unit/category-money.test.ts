@@ -21,7 +21,7 @@ const ROWS = [
   r('d', 'Acme Payroll', 25, 'INCOME'), // a clawback
   r('e', 'Savings', 500, 'TRANSFER_OUT'),
   r('f', 'Savings', -500, 'TRANSFER_IN'),
-  r('g', 'Chase', 7866.69, 'LOAN_PAYMENTS', { pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' }),
+  r('g', 'Chase', 6412.58, 'LOAN_PAYMENTS', { pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' }),
   r('h', 'Lender', -1000, 'LOAN_DISBURSEMENTS'), // unmapped primary
   r('i', 'Safeway', 12, 'FOOD_AND_DRINK', { user_category: 'Travel' }),
   r('j', 'Venmo', 40, 'TRANSFER_OUT'),

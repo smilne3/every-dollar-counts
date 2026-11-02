@@ -107,10 +107,10 @@ describe('TransactionRow amount cell', () => {
 
   // A card payment is real on the statement but is your own money moving between your own accounts.
   // Both legs are already kept out of every total (#31); the leg that credits the card was still
-  // painted emerald — this table's colour for money arriving — so $7,866.69 read as income.
+  // painted emerald — this table's colour for money arriving — so $6,412.58 read as income.
   it('reads a credit-card payment as a transfer, not as income', () => {
     const { container } = renderRow({
-      amount: -7866.69, // negative: money INTO the card, the leg that looked like income
+      amount: -6412.58, // negative: money INTO the card, the leg that looked like income
       pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT',
       name: 'CAPITAL ONE AUTOPAY PYMT',
       merchant_name: null,
@@ -133,8 +133,8 @@ describe('TransactionRow amount cell', () => {
 
 
   // Setting user_category flips isCreditCardPayment to false and re-enters BOTH legs into the
-  // totals. On a real $7,866.69 payment that is the difference between September spending of
-  // $3,949.16 and MINUS $3,917.53. The control does not belong here.
+  // totals. On a $6,412.58 payment (illustrative) that is the difference between September spending of
+  // $3,210.47 and MINUS $3,202.11. The control does not belong here.
   it('offers no category picker on a credit-card payment', () => {
     renderRow({ pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' })
     expect(screen.queryByRole('combobox')).toBeNull()

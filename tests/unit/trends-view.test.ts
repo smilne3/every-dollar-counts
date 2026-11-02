@@ -11,7 +11,7 @@ import { categoriesFromMap, markedTxns, testData } from './helpers/category-cont
 //
 // The fixture mirrors the household's real mortgage postings — 1 July, 3 August (the 1st was a
 // Saturday), 1 September — because those dates are what exposed the rolling-window version
-// charting $7,858.70 against $0.00.
+// charting $5,692.40 against $0.00.
 
 const pfcMap: Record<string, string> = {
   LOAN_PAYMENTS: 'Loan Payments',
@@ -43,7 +43,7 @@ const t = (amount: number, date: string, pfc: string) => ({
   reimbursable_amount: null,
 })
 
-const MORTGAGE = 3929.35
+const MORTGAGE = 2846.2
 
 // On 2 September the windows are August (finished) and July.
 const NOW = '2026-09-02'
@@ -147,7 +147,7 @@ describe('Trends on the 2nd of the month', () => {
 describe('a mortgage that drifts off the 1st', () => {
   // The regression this window shape exists for. Against these exact postings the rolling-month
   // version put August's (3rd) and September's (1st) into one window and left the other empty,
-  // charting $7,858.70 against $0.00 on the live page.
+  // charting $5,692.40 (illustrative) against $0.00 on the live page.
   it('counts once on each side even though August posted on the 3rd', () => {
     expect(inCurrent()['Loan Payments']).toBeCloseTo(MORTGAGE)
     expect(inPrevious()['Loan Payments']).toBeCloseTo(MORTGAGE)
@@ -155,7 +155,7 @@ describe('a mortgage that drifts off the 1st', () => {
 
   it('never doubles it into one side and empties the other', () => {
     const loans = view.compare.rows.find((r) => r.category === 'Loan Payments')
-    // The exact failure seen on the live page: $7,858.70 against $0.00.
+    // The failure seen on the live page, with an illustrative amount: $5,692.40 against $0.00.
     expect(loans?.current).not.toBeCloseTo(MORTGAGE * 2)
     expect(loans?.previous).not.toBe(0)
   })

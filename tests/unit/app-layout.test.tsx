@@ -30,7 +30,7 @@ function makeSupabase(user: { id: string; email?: string } | null, error: AuthEr
       return {
         select: (cols: string) => {
           reads.push(`${table}: ${cols}`)
-          return { limit: (n: number) => Promise.resolve(n === 1 ? { data: [{ id: 'hh-1', name: 'The Milnes' }], error: null } : null) }
+          return { limit: (n: number) => Promise.resolve(n === 1 ? { data: [{ id: 'hh-1', name: 'The Test Household' }], error: null } : null) }
         },
       }
     },
@@ -97,7 +97,7 @@ describe('app/(app)/layout.tsx: signed in', () => {
     const reads = makeSupabase({ id: 'user-1', email: 'sarah@example.com' }, null)
     const shell = (await render()) as ReactElement<{ householdName: string; userEmail: string; children: ReactElement }>
     expect(shell.type).toBe(AppShell)
-    expect(shell.props.householdName).toBe('The Milnes')
+    expect(shell.props.householdName).toBe('The Test Household')
     expect(shell.props.userEmail).toBe('sarah@example.com')
     expect(reads).toEqual(['households: id, name'])
     expect(logs).toEqual([])

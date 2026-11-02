@@ -19,7 +19,7 @@ function toProducts(input: unknown): Products[] {
   if (list.includes('investments')) out.push(Products.Investments)
   // Requested only as a key to the door: it is what makes loan-only institutions (mortgage and
   // student-loan servicers) selectable in Link. We ingest balances, not liabilities data. There
-  // is deliberately no UI for this today — the household's mortgage is at Wells Fargo, which
+  // is deliberately no UI for this today — the household's mortgage is at a bank that
   // supports `transactions`, so it arrives through the ordinary bank flow at no extra Item cost.
   if (list.includes('liabilities')) out.push(Products.Liabilities)
   return out.length ? out : [Products.Transactions]

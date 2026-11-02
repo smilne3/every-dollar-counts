@@ -76,8 +76,8 @@ export function inRange<T extends { date: string }>(txns: T[], w: DateWindow): T
 // 2. A monthly bill is monthly BY CALENDAR MONTH, so each window holds exactly one of it however
 //    the posting date moves inside that month. A rolling month cannot promise this: the mortgage
 //    is due on the 1st and posts on the 3rd when the 1st is a Saturday, and the rolling windows
-//    put both August's and September's into one side and none into the other — $7,858.70 against
-//    $0.00 on the real data, on 2 September 2026.
+//    put both August's and September's into one side and none into the other — $5,692.40 against
+//    $0.00 (illustrative amount), seen on 2 September 2026.
 //
 // The cost is recency: late in September you are still reading August. The dashboard's "Spent in
 // September" tile and the Budgets page answer the current month; this page answers where the

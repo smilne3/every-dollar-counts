@@ -68,9 +68,9 @@ export function trendsView(
 
 // The top `limit` categories, plus one synthetic "Other" carrying everything below the line.
 //
-// Below `md` the comparison chart has room for about six bars; the household's bottom 7 categories
-// total $665 of $11,600, so capping hides about 6% (spec §5). Other must carry the remainder in
-// BOTH windows — a chart that hid $665 behind a bar sized from one window would misstate exactly
+// Below `md` the comparison chart has room for about six bars; the bottom 7 categories
+// might total $640 of $10,900 (illustrative), so capping hides about 6% (spec §5). Other must carry the remainder in
+// BOTH windows — a chart that hid $640 behind a bar sized from one window would misstate exactly
 // the thing the reader is comparing.
 //
 // `rows` arrive sorted by combined size from trendsView, so "top" is just the first N. This

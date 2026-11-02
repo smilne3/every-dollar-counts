@@ -31,7 +31,7 @@ On live data (read-only probe, 2026-09-10):
 
 The repetition is most of the table, and the household is consistent about it. All 14 Safeway picks sit on rows Plaid tagged with VERY_HIGH confidence. Plaid isn't wrong here; the household wants a finer category of its own.
 
-**The hazard that shapes everything.** `user_category` is not just a label. `isCreditCardPayment(t)` is `!t.user_category && t.pfc_detailed === 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT'` (`lib/categories.ts:49-54`), and seven sites gate on it: both aggregators, the dashboard's Recent activity, the transactions flow filter, the reimbursable route, `TransactionRow` and `ReimbursableCheckbox`. Any value in `user_category` on a card payment re-enters both legs into every total. Measured on a real $7,866.69 autopay, that took a month's spending from $3,949.16 to −$3,917.53 (#59). A learned rule that wrote `user_category` would walk straight into it.
+**The hazard that shapes everything.** `user_category` is not just a label. `isCreditCardPayment(t)` is `!t.user_category && t.pfc_detailed === 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT'` (`lib/categories.ts:49-54`), and seven sites gate on it: both aggregators, the dashboard's Recent activity, the transactions flow filter, the reimbursable route, `TransactionRow` and `ReimbursableCheckbox`. Any value in `user_category` on a card payment re-enters both legs into every total. Measured on a $6,412.58 autopay, that took a month's spending from $3,210.47 to −$3,202.11 (#59). A learned rule that wrote `user_category` would walk straight into it.
 
 **Success looks like:**
 - picking a category for a merchant once is enough, for its history and its future;
@@ -885,7 +885,7 @@ Rules need one pick per merchant, and most merchants are never picked. Plaid's c
 | Rule, else Jev | 48 / 73 |
 
 - **Jev doesn't replace picks.** Most picks carry context a transaction doesn't hold: purchases in Basel and Reims are Travel because of a trip, and Joe S Den is Kid Expenses because of what it is for. Jev mostly agrees with the bank on those, and its confidence barely drops when wrong (mean 0.82 wrong, 0.91 right).
-- **Jev fills the gap rules can't.** On 100 unpicked transactions it agreed with the app on 80. Of the 20 disagreements, **19 moved grocery stores to Grocery**, including merchants never picked: Whole Foods 0.84, Giant Food 0.86, Harris Teeter 0.84, Dunhams Produce 0.88 without examples, and 0.99–1.00 with them. It left Starbucks in Food & Drink, CVS in Medical and Target in Shopping. Its one doubtful call, PHR to Kid Expenses, came in at 0.48.
+- **Jev fills the gap rules can't.** On 100 unpicked transactions it agreed with the app on 80. Of the 20 disagreements, **19 moved grocery stores to Grocery**, including merchants never picked: four grocers 0.84 to 0.88 without examples, and 0.99–1.00 with them. It left Starbucks in Food & Drink, CVS in Medical and Target in Shopping. Its one doubtful call, PHR to Kid Expenses, came in at 0.48.
 - **Its worst errors crossed the line:** a Venmo payment the household filed as Kid Expenses, and a florist filed as Utilities, both called Transfer Out at 0.99. §14.2 makes that impossible.
 - **Cost and speed:** about 1,300 input tokens per call with examples; median 174ms, p95 275ms.
 

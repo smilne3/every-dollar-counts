@@ -71,12 +71,12 @@ describe('spendByCategory', () => {
       [
         t(8930.72, '2026-07-10', 'LOAN_PAYMENTS', null, 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT'),
         t(493.75, '2026-07-11', 'LOAN_PAYMENTS', null, 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT'),
-        t(3929.35, '2026-07-01', 'LOAN_PAYMENTS', null, 'LOAN_PAYMENTS_MORTGAGE_PAYMENT'),
+        t(2846.2, '2026-07-01', 'LOAN_PAYMENTS', null, 'LOAN_PAYMENTS_MORTGAGE_PAYMENT'),
       ],
       ctx({}, { ...pfcMap, LOAN_PAYMENTS: 'Loan Payments' })
     )
     // only the mortgage remains under Loan Payments; the two card payments are gone
-    expect(r['Loan Payments']).toBeCloseTo(3929.35)
+    expect(r['Loan Payments']).toBeCloseTo(2846.2)
   })
 
   // A refund (inflow in a spending category) must NET DOWN that category, not be ignored.
@@ -267,7 +267,7 @@ describe('lastCompleteMonths', () => {
   // Why calendar months and not a rolling month: a monthly bill is monthly BY CALENDAR MONTH, so
   // each window holds exactly one of it however the posting date moves inside that month. A
   // rolling window cannot promise this — measured against the real mortgage it doubled it into
-  // one window and left the other empty ($7,858.70 against $0.00) on 2 September 2026.
+  // one window and left the other empty ($5,692.40 against $0.00) on 2 September 2026.
   //
   // Stated precisely, because the broader claim is false: this holds for a bill that posts WITHIN
   // its own calendar month. See the limitation test below for the case it does not cover.

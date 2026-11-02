@@ -7,12 +7,12 @@ afterEach(cleanup)
 // The §9 assertion: a formatting test, not a width one. This is the test that would have caught
 // §1.3 regressing, because the tile — not the caller — now decides how many characters it shows.
 describe('StatCard', () => {
-  // Net worth is the figure that clipped twice (§1.3), so every dollar of it shows: never "$1.18M".
+  // Net worth is the figure that clipped twice (§1.3), so every dollar of it shows: never "$1.23M".
   // Its cents went on 2026-10-23, when the owner reversed spec §4's exact net worth (#215).
   it('renders the hero figure in whole dollars, every one of them', () => {
-    render(<StatCard label="Net worth" amount={1182885.15} variant="hero" />)
-    expect(screen.getByText('$1,182,885')).toBeTruthy()
-    expect(screen.queryByText('$1,182,885.15')).toBeNull()
+    render(<StatCard label="Net worth" amount={1234567.15} variant="hero" />)
+    expect(screen.getByText('$1,234,567')).toBeTruthy()
+    expect(screen.queryByText('$1,234,567.15')).toBeNull()
   })
 
   // A compact tile is shown only from md up: below md the dashboard, its one caller, shows StatRows

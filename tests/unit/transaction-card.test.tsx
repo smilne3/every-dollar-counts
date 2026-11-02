@@ -130,17 +130,17 @@ describe('TransactionCard', () => {
   // "Card payment" is the one piece of meaning a screen-reader user cannot recover from the
   // amount alone: the sheet will offer them no controls and they need to know why.
   it('names a card payment as one in its accessible name', () => {
-    renderCard({ amount: -7866.69, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' })
+    renderCard({ amount: -6412.58, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' })
     expect(screen.getByRole('button', { name: /Card payment/ })).toBeTruthy()
   })
 
   // A card payment moves money between your own accounts — see lib/transaction-presentation.ts.
-  // Painting it emerald (the colour this app uses for money arriving) made a real $7,866.69
+  // Painting it emerald (the colour this app uses for money arriving) made a $6,412.58
   // payment read as income (#31). TONE_CLASS is exercised directly elsewhere; this asserts the
   // same guarantee at this component's own boundary.
   it('never paints a card payment amount as income', () => {
-    renderCard({ amount: -7866.69, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' })
-    const amountEl = screen.getByText('$7,866.69')
+    renderCard({ amount: -6412.58, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' })
+    const amountEl = screen.getByText('$6,412.58')
     expect(amountEl.className).not.toContain('text-emerald')
   })
 })
@@ -231,7 +231,7 @@ describe('phone card and desktop row agree', () => {
   const cases: { name: string; o: Partial<typeof txn> }[] = [
     { name: 'ordinary outflow', o: {} },
     { name: 'income inflow', o: { amount: -2772.63, pfc_detailed: 'INCOME_WAGES' } },
-    { name: 'credit-card payment', o: { amount: -7866.69, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' } },
+    { name: 'credit-card payment', o: { amount: -6412.58, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' } },
     { name: 'partly-marked charge', o: { reimbursable_amount: 40 } },
     // Ticking the box marks the WHOLE amount, so this is the commonest marked state there is — and
     // the most recently fixed regression in this codebase: the remainder is zero, and negating a
@@ -254,17 +254,17 @@ describe('phone card and desktop row agree', () => {
   }
 
   // Spelled out rather than left to the loop's "they match each other": two surfaces could agree
-  // on the wrong thing. This is the $7,866.69 constraint stated positively on both.
+  // on the wrong thing. This is the $6,412.58 constraint stated positively on both.
   it('both name a credit-card payment as one and tone it as neither spending nor income', () => {
     const [card, row] = bothWays({
-      amount: -7866.69,
+      amount: -6412.58,
       pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT',
     })
     expect(card.category).toBe('Card payment')
     expect(row.category).toBe('Card payment')
     expect(card.tone).toBe('text-muted')
     expect(row.tone).toBe('text-muted')
-    expect(card.amount).toBe('$7,866.69')
+    expect(card.amount).toBe('$6,412.58')
   })
 
   // Spelled out for the same reason as the card-payment case above: agreeing on '-$0.00' would
@@ -335,17 +335,17 @@ describe('TransactionCard sheet', () => {
   })
 
   // The constraint this whole plan is most at risk of breaking. Setting user_category on a card
-  // payment re-enters both legs into the totals: on a real $7,866.69 payment that is September
-  // spending of $3,949.16 versus MINUS $3,917.53.
+  // payment re-enters both legs into the totals: on a $6,412.58 payment (illustrative) that is September
+  // spending of $3,210.47 versus MINUS $3,202.11.
   it('offers no picker, checkbox or editor on a credit-card payment', () => {
-    openSheet({ pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', amount: -7866.69 })
+    openSheet({ pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', amount: -6412.58 })
     expect(screen.queryByRole('combobox')).toBeNull()
     expect(screen.queryByRole('checkbox')).toBeNull()
     expect(screen.queryByRole('button', { name: /partial reimbursable amount/ })).toBeNull()
   })
 
   it('explains what a card payment is instead of offering controls', () => {
-    openSheet({ pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', amount: -7866.69 })
+    openSheet({ pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', amount: -6412.58 })
     expect(screen.getByText(/moves between your accounts/)).toBeTruthy()
   })
 
@@ -381,10 +381,10 @@ describe('TransactionCard sheet', () => {
     })
 
     it('shows the account row when an account name is supplied', () => {
-      openSheet({}, { accountName: '360 Checking' })
+      openSheet({}, { accountName: 'Main Checking' })
       const sheet = within(screen.getByRole('dialog'))
       expect(sheet.getByText('Account')).toBeTruthy()
-      expect(sheet.getByText('360 Checking')).toBeTruthy()
+      expect(sheet.getByText('Main Checking')).toBeTruthy()
     })
 
     // The owner cut Plaid's original category from the design; nothing here must reintroduce it.
@@ -398,14 +398,14 @@ describe('TransactionCard sheet', () => {
     // detail block is still owed to a card payment.
     it('still shows the detail block, including the account, on a card payment', () => {
       openSheet(
-        { pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', amount: -7866.69 },
-        { accountName: '360 Checking' }
+        { pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', amount: -6412.58 },
+        { accountName: 'Main Checking' }
       )
       const sheet = within(screen.getByRole('dialog'))
       expect(sheet.getByText('Amount')).toBeTruthy()
       expect(sheet.getByText('Date')).toBeTruthy()
       expect(sheet.getByText('Account')).toBeTruthy()
-      expect(sheet.getByText('360 Checking')).toBeTruthy()
+      expect(sheet.getByText('Main Checking')).toBeTruthy()
     })
   })
 })
@@ -574,7 +574,7 @@ describe('TransactionCard sheet with a save in flight', () => {
 
     rerender(
       <TransactionCard
-        t={{ ...txn, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', amount: -7866.69 }}
+        t={{ ...txn, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', amount: -6412.58 }}
         category={bank('Food')}
         categoryOptions={['Food']}
       />

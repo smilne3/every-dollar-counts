@@ -22,7 +22,7 @@ const ROWS = [
   r('e', '2026-09', 'Acme Payroll', -3000, 'INCOME'),
   r('f', '2026-09', 'Savings', 500, 'TRANSFER_OUT'),
   // An unpicked card payment: Loan Payments by its primary, but in no total and no drill-down.
-  r('g', '2026-09', null, 7866.69, 'LOAN_PAYMENTS', { pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' }),
+  r('g', '2026-09', null, 6412.58, 'LOAN_PAYMENTS', { pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' }),
   r('h', '2026-09', 'Mortgage Co', 2100, 'LOAN_PAYMENTS'),
   r('i', '2026-09', 'Safeway', 12, 'FOOD_AND_DRINK', { user_category: 'Travel' }),
   r('j', '2026-09', 'Rental', 400, 'TRAVEL', { reimbursable_amount: 400 }),

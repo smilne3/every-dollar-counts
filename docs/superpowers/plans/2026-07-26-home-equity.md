@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans. Steps use checkbox (`- [ ]`).
 
-**Goal:** Count the home's value toward net worth — a manually-entered home value on the asset side, netting against the live Wells Fargo mortgage that already loads as a liability.
+**Goal:** Count the home's value toward net worth — a manually-entered home value on the asset side, netting against the live mortgage that already loads as a liability.
 
 **Architecture:** A new `manual_assets` table holds things you own that aren't bank accounts (the home, for now). Net worth adds the sum of manual assets to the existing `assets − liabilities`. A Settings card edits the home value; a dashboard nudge appears when it's gone stale (>30 days). No change to the mortgage — it stays a live Plaid liability, so the house's net contribution is automatically `home value − mortgage`.
 

@@ -41,17 +41,17 @@ describe('RecentActivity', () => {
   it('does not dress a credit-card payment up as income', () => {
     render(
       <RecentActivity
-        items={[item({ amount: -7866.69, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' })]}
+        items={[item({ amount: -6412.58, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' })]}
       />
     )
-    expect(screen.queryByText('+$7,866.69')).toBeNull()
-    expect(screen.getByText('$7,866.69')).toBeTruthy()
+    expect(screen.queryByText('+$6,412.58')).toBeNull()
+    expect(screen.getByText('$6,412.58')).toBeTruthy()
   })
 
   it('says a card payment is between your own accounts rather than naming a category', () => {
     render(
       <RecentActivity
-        items={[item({ amount: -7866.69, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' })]}
+        items={[item({ amount: -6412.58, pfc_detailed: 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT' })]}
       />
     )
     expect(screen.getByText(/Between your accounts/)).toBeTruthy()
