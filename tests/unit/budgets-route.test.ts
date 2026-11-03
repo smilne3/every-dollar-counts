@@ -12,7 +12,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 // - either write can go unanswered, as postgrest-js reports a request lost in flight (#173).
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 
+// The environment guard (#148). Keep the real EnvMismatchError so the 409/500 split is exercised for
+// real; replace only the assertion the tests drive.
+const { assertEnvMatchesDatabase } = vi.hoisted(() => ({ assertEnvMatchesDatabase: vi.fn() }))
+vi.mock('@/lib/plaid', () => ({ plaidEnv: 'sandbox' }))
+vi.mock('@/lib/supabase/admin', () => ({ supabaseAdmin: {} }))
+vi.mock('@/lib/app-env', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/app-env')>()),
+  assertEnvMatchesDatabase,
+}))
+
 import { AuthRetryableFetchError, type AuthError } from '@supabase/supabase-js'
+import { EnvMismatchError } from '@/lib/app-env'
 import { createClient } from '@/lib/supabase/server'
 import { POST } from '@/app/api/budgets/route'
 import { NO_ANSWER, REFUSED_5XX } from '../stubs/no-answer'
@@ -109,6 +120,7 @@ const TRY_AGAIN = 'That could not be saved. Please try again.'
 let logs: unknown[][]
 beforeEach(() => {
   vi.mocked(createClient).mockReset()
+  assertEnvMatchesDatabase.mockReset().mockResolvedValue(undefined)
   logs = []
   vi.spyOn(console, 'error').mockImplementation((...a) => void logs.push(a))
 })
@@ -182,6 +194,40 @@ describe('POST /api/budgets', () => {
     expect(res.status).toBe(403)
     expect(await errorOf(res)).toBe("Your account isn't part of a household.")
     expect(writes(calls)).toBe(0)
+  })
+
+  // Local dev and Previews share production's database, so a save from either would rewrite the
+  // household's real limits (#148).
+  it('answers 409 in words when the app is pointed at another environment, logs it and writes nothing', async () => {
+    assertEnvMatchesDatabase.mockRejectedValue(new EnvMismatchError('sandbox', 'production'))
+    const calls = makeSupabase()
+    const res = await save()
+    expect(res.status).toBe(409)
+    expect(await errorOf(res)).toBe('This app is pointed at a database from a different environment. Nothing saved.')
+    expect(logs).toContainEqual(['[budgets] refusing to write across environments', expect.stringContaining('"sandbox"')])
+    expect(writes(calls)).toBe(0)
+  })
+
+  it('answers 500 in words when the environment cannot be checked, logs it and writes nothing', async () => {
+    const failure = new Error('could not read app_env: timeout')
+    assertEnvMatchesDatabase.mockRejectedValue(failure)
+    const calls = makeSupabase()
+    const res = await save()
+    expect(res.status).toBe(500)
+    expect(await errorOf(res)).toBe('Could not verify which database this is, so nothing was saved.')
+    expect(logs).toContainEqual(['[budgets] environment guard could not run', failure])
+    expect(writes(calls)).toBe(0)
+  })
+
+  it('checks the environment only for a signed-in member, after the membership read', async () => {
+    makeSupabase({ user: null })
+    await save()
+    makeSupabase({ membership: { data: null, error: null } })
+    await save()
+    expect(assertEnvMatchesDatabase).not.toHaveBeenCalled()
+    makeSupabase()
+    await save()
+    expect(assertEnvMatchesDatabase).toHaveBeenCalledOnce()
   })
 
   it("upserts the limits above zero for the caller's household and deletes the rest from it", async () => {

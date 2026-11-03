@@ -98,22 +98,49 @@ describe('/api/categories sign-in', () => {
   })
 })
 
-describe('DELETE /api/categories environment guard', () => {
-  it('answers 409 on a mismatch and touches no table', async () => {
+// Local dev and Previews share production's database (#148). A delete takes the category's rules
+// with it, a rename moves its picks and budgets, and all three change the catalogue fingerprint
+// that hides stored Jev suggestions. So each is guarded, before any read.
+describe('/api/categories environment guard', () => {
+  const writes = [
+    ['POST', 'added', add],
+    ['PATCH', 'renamed', rename],
+    ['DELETE', 'deleted', del],
+  ] as const
+
+  it.each(writes)('%s answers 409 on a mismatch, says nothing was %s, and touches no table', async (_, nothing, send) => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     assertEnvMatchesDatabase.mockRejectedValue(new EnvMismatchError('sandbox', 'production'))
-    expect((await del()).status).toBe(409)
+    const res = await send()
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: `This app is pointed at a database from a different environment. Nothing ${nothing}.` })
     expect(calls).toEqual([])
+    logged.mockRestore()
   })
 
-  it('answers 500 when the environment cannot be read, and touches no table', async () => {
+  it.each(writes)('%s answers 500 when the environment cannot be read, says nothing was %s, and touches no table', async (_, nothing, send) => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     assertEnvMatchesDatabase.mockRejectedValue(new Error('could not read app_env'))
-    expect((await del()).status).toBe(500)
+    const res = await send()
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: `Could not verify which database this is, so nothing was ${nothing}.` })
     expect(calls).toEqual([])
+    logged.mockRestore()
+  })
+
+  it.each(writes)('%s writes as before once the guard passes', async (_, __, send) => {
+    expect((await send()).status).toBe(200)
+    expect(assertEnvMatchesDatabase).toHaveBeenCalledOnce()
   })
 
   it('deletes as before once the guard passes', async () => {
     expect((await del()).status).toBe(200)
     expect(calls).toEqual(['categories', 'categories', 'transactions', 'budgets'])
+  })
+
+  it('checks no environment for GET, which writes nothing', async () => {
+    expect((await GET()).status).toBe(200)
+    expect(assertEnvMatchesDatabase).not.toHaveBeenCalled()
   })
 })
 
