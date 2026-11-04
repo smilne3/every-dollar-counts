@@ -21,7 +21,14 @@ import AppLayout from '@/app/(app)/layout'
 // Where a thrown redirect() was sending the person, or null for any other throw.
 const redirectedTo = (e: unknown) => (isRedirectError(e) ? getURLFromRedirectError(e) : null)
 
-function makeSupabase(user: { id: string; email?: string } | null, error: AuthError | null) {
+function makeSupabase(
+  user: { id: string; email?: string } | null,
+  error: AuthError | null,
+  householdRead: { data: { id: string; name: string }[] | null; error: { message: string } | null } = {
+    data: [{ id: 'hh-1', name: 'The Test Household' }],
+    error: null,
+  }
+) {
   const reads: string[] = []
   client.current = {
     auth: { getUser: vi.fn().mockResolvedValue({ data: { user }, error }) },
@@ -30,7 +37,7 @@ function makeSupabase(user: { id: string; email?: string } | null, error: AuthEr
       return {
         select: (cols: string) => {
           reads.push(`${table}: ${cols}`)
-          return { limit: (n: number) => Promise.resolve(n === 1 ? { data: [{ id: 'hh-1', name: 'The Test Household' }], error: null } : null) }
+          return { limit: (n: number) => Promise.resolve(n === 1 ? householdRead : null) }
         },
       }
     },
@@ -101,5 +108,18 @@ describe('app/(app)/layout.tsx: signed in', () => {
     expect(shell.props.userEmail).toBe('sarah@example.com')
     expect(reads).toEqual(['households: id, name'])
     expect(logs).toEqual([])
+  })
+
+  // A hung read that reached its time limit held up a full page load, and on a page that reads nothing
+  // else from households, the layout's log line is the only trace of why (#202).
+  it("falls back to a generic name when the household's name can't be read, and logs why", async () => {
+    makeSupabase({ id: 'user-1', email: 'sarah@example.com' }, null, {
+      data: null,
+      error: { message: 'AbortError: Supabase gave no answer within 20 seconds' },
+    })
+    const shell = (await render()) as ReactElement<{ householdName: string }>
+    expect(shell.type).toBe(AppShell)
+    expect(shell.props.householdName).toBe('Your household')
+    expect(logs).toEqual([["[layout] could not read the household's name: AbortError: Supabase gave no answer within 20 seconds"]])
   })
 })

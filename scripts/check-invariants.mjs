@@ -35,13 +35,10 @@ import ts from 'typescript'
 // Scanned: app/(app)/ and lib/. Not app/api/: its unchecked lookups mostly degrade into a 403 or 404
 // rather than a wrong number (0cfdef1), and have not been audited one by one (#91). Not counted: a
 // destructure of `auth.getUser()`. A failed auth check reads as signed out, a different defect (#143).
+// app/(app)/layout.tsx is held to it too, though it logs its failed read rather than throwing, because it
+// sits above app/(app)/error.tsx (#202).
 // ---------------------------------------------------------------------------
 const READS_ALLOWED = new Map([
-  [
-    'app/(app)/layout.tsx',
-    'Sits ABOVE app/(app)/error.tsx, so throwing takes down the whole shell rather than one ' +
-      'section. Needs only a display name, and has a fallback for it.',
-  ],
   [
     'lib/sync.ts',
     "Destructures Plaid's transactions/sync response, not a Supabase read. Plaid's client rejects a " +

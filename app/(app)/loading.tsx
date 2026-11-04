@@ -2,7 +2,8 @@
 // is dynamic, and without a loading boundary Next had nothing of them to show before the server had
 // read it: a tap left the old page up, unchanged, until the new one was ready. This one boundary
 // covers every tab, as app/(app)/error.tsx does. The tab bar's links prefetch the layout down to it,
-// so a tap shows it at once. A full page load streams it first, so the response's status is sent
+// so a tap shows it at once. A full page load streams it first, once the layout's sign-in check and
+// household-name read are done (app/(app)/layout.tsx), so the response's status is sent
 // before the page is read: a page whose read fails answers 200, and one not found answers 200 with
 // noindex (Next's loading.js docs, "Status codes").
 //

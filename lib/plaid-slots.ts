@@ -25,8 +25,13 @@ export async function countSlotsUsed(householdId: string): Promise<number | null
     .eq('plaid_env', 'production')
 
   // Includes the case where migration 018 has not been applied yet: no table, no number, no crash.
-  if (error || count == null) return null
-  return count
+  // Logged, because the Banks card just leaves the number out, so nothing else would say why, or that a
+  // read that hung held Settings up until its time limit (#231, #202).
+  if (error) {
+    console.error('[plaid] could not count the spent connection slots', { code: error.code, message: error.message })
+    return null
+  }
+  return count ?? null
 }
 
 // Record that a connection was spent. Called the moment Plaid tells us an Item exists — which is
