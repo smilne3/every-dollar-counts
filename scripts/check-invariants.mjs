@@ -15,7 +15,7 @@ import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 
 // ---------------------------------------------------------------------------
-// 1. Every read on a page, and in the lib/ helpers pages call, checks `error`.
+// 1. Every read checks `error`: on a page, in the lib/ helpers pages call, and in a route.
 //
 // #46, and again in #68, and again in #77. A Supabase read that fails sets `data` to null, and
 // `?? []` turns that into an empty array — so "the query failed" and "you have no data" render
@@ -32,20 +32,19 @@ import ts from 'typescript'
 // and not `error`: `const { data } = …`, or each object of an array pattern on its own, as in
 // `const [{ data: a }, { data: b }] = await Promise.all(…)`.
 //
-// Scanned: app/(app)/ and lib/. Not app/api/: its unchecked lookups mostly degrade into a 403 or 404
-// rather than a wrong number (0cfdef1), and have not been audited one by one (#91). Not counted: a
-// destructure of `auth.getUser()`. A failed auth check reads as signed out, a different defect (#143).
+// Scanned: app/(app)/, lib/, and since #241 the routes in app/api/ and app/auth/. There, the
+// categories route took five failed reads for no row: it answered "unauthorized" or "not found", or
+// added a category at the top of the list, and logged nothing. Once those checked their error, no
+// other read in a route fired. A route has no error page, so it logs and answers with an error.
+// Not counted: a destructure of `auth.getUser()`. A failed auth check reads as signed out, a
+// different defect (#143). Nor one of a Plaid call's response: Plaid's client rejects a failed call,
+// so there is no `error` to check, and the failure reaches the caller as a throw (#91).
 // app/(app)/layout.tsx is held to it too, though it logs its failed read rather than throwing, because it
 // sits above app/(app)/error.tsx (#202).
 // ---------------------------------------------------------------------------
-const READS_ALLOWED = new Map([
-  [
-    'lib/sync.ts',
-    "Destructures Plaid's transactions/sync response, not a Supabase read. Plaid's client rejects a " +
-      'failed call, so there is no `error` to check: the failure reaches the caller as a throw (#91).',
-  ],
-])
-const READ_SCOPES = ['app/(app)/', 'lib/']
+const READS_ALLOWED = new Map([])
+const READ_SCOPES = ['app/(app)/', 'app/api/', 'app/auth/', 'lib/']
+const ROUTE_SCOPES = ['app/api/', 'app/auth/']
 
 // Index of the bracket that closes the one opening at `open`, in blanked source.
 function closeBracket(code, open) {
@@ -93,6 +92,7 @@ export function checkUncheckedReads(files) {
       // `= await supabase.auth.getUser()`, the awaited call named up to its first parenthesis.
       const callee = /^\s*=\s*await\s+([^(;]*)\(/.exec(code.slice(close + 1))?.[1] ?? ''
       if (/\bauth\s*\.\s*getUser\s*$/.test(callee)) continue
+      if (/^\s*plaidClient\s*\./.test(callee)) continue
       const pattern = code.slice(open, close + 1)
       const objects = pattern[0] === '{' ? [pattern] : parts(pattern.slice(1, -1)).filter((p) => p[0] === '{')
       for (const object of objects) {
@@ -102,9 +102,11 @@ export function checkUncheckedReads(files) {
           check: 'unchecked-read',
           file: path,
           line: lineOf(text, at),
-          message:
-            `destructures \`${name}\` without \`error\`. A failed read must not render identically to no ` +
-            'data (#46, #91) — check `error` and throw, so app/(app)/error.tsx can show a retryable message.',
+          message: ROUTE_SCOPES.some((scope) => path.startsWith(scope))
+            ? `destructures \`${name}\` without \`error\`. A failed read must not be taken for no row ` +
+              '(#241) — check `error`, log it, and answer with an error.'
+            : `destructures \`${name}\` without \`error\`. A failed read must not render identically to no ` +
+              'data (#46, #91) — check `error` and throw, so app/(app)/error.tsx can show a retryable message.',
         })
       }
     }

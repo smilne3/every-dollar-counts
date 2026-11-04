@@ -123,8 +123,27 @@ const sql = 'const { data } = await supabase.from(goals)'`
     expect(checkUncheckedReads(file(PAGE, src))).toEqual([])
   })
 
-  it("allows lib/sync.ts's Plaid response", () => {
+  // Plaid's client rejects a failed call, so its response has no `error` to check (#91). Skipped by
+  // what it calls, not by file, so a Supabase read beside it is still checked.
+  it('allows a Plaid response, and still checks a Supabase read in the same file', () => {
     expect(checkUncheckedReads(file('lib/sync.ts', `const { data } = await plaidClient.transactionsSync({ access_token, cursor: next })`))).toEqual([])
+    expect(checkUncheckedReads(file('app/api/plaid/exchange-public-token/route.ts', `const { data: ex } = await plaidClient.itemPublicTokenExchange({ public_token })`))).toEqual([])
+    expect(checks(checkUncheckedReads(file('lib/sync.ts', `const { data } = await supabaseAdmin.from('plaid_items').select('cursor')`)))).toEqual(['unchecked-read'])
+  })
+
+  // #241: the categories route took a failed read for no row, and answered "unauthorized" or "not
+  // found", or added a category at the top of the list. A route has no error page, so the advice
+  // differs from a page's.
+  it.each(['app/api/categories/route.ts', 'app/auth/confirm/route.ts'])('fires in a route, %s, with advice for a route', (path) => {
+    const found = checkUncheckedReads(file(path, `const { data: cat } = await supabase.from('categories').select('name').eq('id', id).maybeSingle()`))
+    expect(checks(found)).toEqual(['unchecked-read'])
+    expect(found[0].message).toContain('answer with an error')
+    expect(found[0].message).not.toContain('error.tsx')
+    expect(checkUncheckedReads(file(path, `const { data: cat, error: catError } = await supabase.from('categories').select('name').eq('id', id).maybeSingle()`))).toEqual([])
+  })
+
+  it('still gives a page the advice to throw', () => {
+    expect(checkUncheckedReads(file(PAGE, `const { data: goals } = await supabase.from('goals').select('id')`))[0].message).toContain('app/(app)/error.tsx')
   })
 
   // The layout logs its failed read, since on most pages nothing else says why a hung one held the page

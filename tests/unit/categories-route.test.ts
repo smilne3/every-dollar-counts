@@ -3,12 +3,17 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // #28 spec §6.3: deleting a category now deletes its rules through the FK, in the database every
 // environment shares. So DELETE is environment-guarded, before ANY read or write.
 //
-// The stand-in is permissive (#100 tracks making it strict): every chain resolves to { error: null }
-// unless a test gives one write, by table and method, a reply of its own (`replies`), as the add and
-// the rename's tests do for a database that never answered (#173).
-const { calls, replies, getUser, assertEnvMatchesDatabase } = vi.hoisted(() => ({
+// The stand-in is permissive (#100 tracks making it strict): every write resolves to { error: null }
+// unless a test gives it, by table and method, a reply of its own (`replies`), as the add and the
+// rename's tests do for a database that never answered (#173). A read finds a row, or for GET a
+// list, unless a test gives that table's read an answer of its own (`reads`), as the failed-read
+// tests do (#241). There is no .single(): it makes no row an error (PGRST116), the trap
+// .maybeSingle() avoids (#172), so a read sent through it fails here.
+const { calls, replies, reads, inserted, getUser, assertEnvMatchesDatabase } = vi.hoisted(() => ({
   calls: [] as string[],
   replies: new Map<string, unknown>(),
+  reads: new Map<string, unknown>(),
+  inserted: [] as unknown[],
   getUser: vi.fn(),
   assertEnvMatchesDatabase: vi.fn(),
 }))
@@ -20,9 +25,16 @@ vi.mock('@/lib/supabase/server', () => ({
       let write = ''
       const chain: Record<string, unknown> = {}
       for (const m of ['select', 'eq', 'limit', 'order']) chain[m] = () => chain
-      for (const m of ['insert', 'update', 'delete']) chain[m] = () => ((write = `${table}.${m}`), chain)
-      chain.single = async () => ({ data: table === 'memberships' ? { household_id: 'hh-1' } : { name: 'Grocery', sort_order: 3 }, error: null })
-      chain.then = (resolve: (v: unknown) => unknown) => Promise.resolve(replies.get(write) ?? { error: null }).then(resolve)
+      for (const m of ['update', 'delete']) chain[m] = () => ((write = `${table}.${m}`), chain)
+      chain.insert = (row: unknown) => {
+        write = `${table}.insert`
+        inserted.push(row)
+        return chain
+      }
+      chain.maybeSingle = async () =>
+        reads.get(table) ?? { data: table === 'memberships' ? { household_id: 'hh-1' } : { name: 'Grocery', sort_order: 3 }, error: null }
+      chain.then = (resolve: (v: unknown) => unknown) =>
+        Promise.resolve(write ? (replies.get(write) ?? { error: null }) : (reads.get(table) ?? { data: [], error: null })).then(resolve)
       return chain
     },
   }),
@@ -49,6 +61,8 @@ const rename = () => send(PATCH, 'PATCH', { id: 'c-grocery', name: 'Groceries' }
 beforeEach(() => {
   calls.length = 0
   replies.clear()
+  reads.clear()
+  inserted.length = 0
   getUser.mockResolvedValue({ data: { user: { id: 'u1' } }, error: null })
   assertEnvMatchesDatabase.mockReset().mockResolvedValue(undefined)
 })
@@ -184,5 +198,72 @@ describe('POST and PATCH /api/categories: a write the database never answered', 
     expect(res.status).toBe(400)
     expect(res.headers.get('content-type')).toContain('application/json')
     expect(calls).toEqual(['categories', 'categories'])
+  })
+})
+
+// #241: these reads ignored their error. A failed membership read answered "unauthorized", a failed
+// category read "not found", and a failed read of the highest sort_order added the category at 1,
+// at the top of the list, and none was logged. Since #237 a read that hangs fails after 20 seconds,
+// so a hung read reached these too. Each failed read now answers 500 in the handler's own words, logs
+// which read it was, and nothing after it runs.
+describe('/api/categories: a read that fails (#241)', () => {
+  const failed = { code: '', message: 'AbortError: Supabase gave no answer within 20 seconds' }
+  const cases = [
+    ['GET', 'categories', 'the categories', () => GET(), 'Your categories could not be loaded. Please try again.', ['categories']],
+    ['POST', 'memberships', 'the household', add, 'That could not be saved. Please try again.', ['memberships']],
+    ['POST', 'categories', 'the highest sort_order', add, 'That could not be saved. Please try again.', ['memberships', 'categories']],
+    ['PATCH', 'categories', 'the category', rename, 'That could not be saved. Please try again.', ['categories']],
+    ['DELETE', 'categories', 'the category', del, 'That category could not be deleted. Please try again.', ['categories']],
+  ] as const
+
+  it.each(cases)('%s answers 500 in words when its %s read fails, logs it, and goes no further', async (_, table, what, send, words, touched) => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    reads.set(table, { data: null, error: failed })
+    const res = await send()
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: words })
+    expect(logged).toHaveBeenCalledWith(`[categories] could not read ${what}`, failed)
+    expect(calls).toEqual(touched)
+    expect(inserted).toEqual([])
+    logged.mockRestore()
+  })
+})
+
+// The same reads finding no row, which is not a failure: each answers as it did before #241.
+describe('/api/categories: a read that finds no row', () => {
+  it('POST answers 401 and adds nothing for an account with no household', async () => {
+    reads.set('memberships', { data: null, error: null })
+    const res = await add()
+    expect(res.status).toBe(401)
+    expect(await res.json()).toEqual({ error: 'unauthorized' })
+    expect(calls).toEqual(['memberships'])
+  })
+
+  it('POST adds a category after the last one', async () => {
+    expect((await add()).status).toBe(200)
+    expect(inserted).toEqual([{ household_id: 'hh-1', name: 'Pets', pfc_primary: null, sort_order: 4 }])
+  })
+
+  it("POST adds a household's first category at 1", async () => {
+    reads.set('categories', { data: null, error: null })
+    expect((await add()).status).toBe(200)
+    expect(inserted).toEqual([{ household_id: 'hh-1', name: 'Pets', pfc_primary: null, sort_order: 1 }])
+  })
+
+  it.each([
+    ['PATCH', rename],
+    ['DELETE', del],
+  ] as const)('%s answers 404 and writes nothing for a category that is gone', async (_, send) => {
+    reads.set('categories', { data: null, error: null })
+    const res = await send()
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ error: 'not found' })
+    expect(calls).toEqual(['categories'])
+  })
+
+  it('GET lists the categories it read', async () => {
+    const list = [{ id: 'c-food', name: 'Food & Drink', pfc_primary: 'FOOD_AND_DRINK', sort_order: 0 }]
+    reads.set('categories', { data: list, error: null })
+    expect(await (await GET()).json()).toEqual({ categories: list })
   })
 })
