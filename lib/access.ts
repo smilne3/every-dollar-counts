@@ -17,7 +17,13 @@ export async function ensureHouseholdAccess(
     .select('household_id')
     .eq('user_id', userId)
     .limit(1)
-  if (memErr) return true // can't verify membership -> do NOT delete
+  // Logged, because letting someone in unchecked leaves no other trace. An invited first-timer then
+  // finds no household until they sign in again (#202).
+  if (memErr) {
+    // can't verify membership -> do NOT delete
+    console.error('[access] could not read the membership, so let the sign-in through', { code: memErr.code, message: memErr.message })
+    return true
+  }
   if (mem && mem.length) return true
 
   const e = (email ?? '').toLowerCase()
@@ -27,7 +33,11 @@ export async function ensureHouseholdAccess(
       .select('household_id')
       .eq('email', e)
       .maybeSingle()
-    if (invErr) return true // can't verify invite -> do NOT delete
+    if (invErr) {
+      // can't verify invite -> do NOT delete
+      console.error('[access] could not read the invite, so let the sign-in through', { code: invErr.code, message: invErr.message })
+      return true
+    }
     if (inv) {
       const { error: insErr } = await supabaseAdmin
         .from('memberships')

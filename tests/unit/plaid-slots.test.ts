@@ -33,8 +33,23 @@ describe('countSlotsUsed', () => {
   // Settings page that merely wants to print a number must not fall over because of it — and it
   // must not print a wrong one either.
   it('returns null rather than a wrong number when the ledger cannot be read', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     selectResult.mockResolvedValue({ count: null, error: { message: 'relation does not exist' } })
     expect(await countSlotsUsed('hh-1')).toBeNull()
+    logged.mockRestore()
+  })
+
+  // The Banks card just leaves the number out, so the log is the only trace of a failed read, or of one
+  // that hung until its time limit and held Settings up (#231, #202).
+  it('logs why it has no number', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    selectResult.mockResolvedValue({ count: null, error: { code: '', message: 'AbortError: Supabase gave no answer within 20 seconds' } })
+    await countSlotsUsed('hh-1')
+    expect(logged).toHaveBeenCalledWith('[plaid] could not count the spent connection slots', {
+      code: '',
+      message: 'AbortError: Supabase gave no answer within 20 seconds',
+    })
+    logged.mockRestore()
   })
 
   it('returns null when the count comes back empty', async () => {

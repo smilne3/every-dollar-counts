@@ -1,7 +1,6 @@
 // @vitest-environment node
-// jsdom replaces AbortController and Request with its own, which Node's fetch refuses. The server runs
-// on Node's, so these tests do too.
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+// The server runs on Node, so these tests do too.
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { createClient } from '@supabase/supabase-js'
@@ -10,7 +9,8 @@ import { fetchWithDeadline, fetchWithReadDeadline, READ_DEADLINE_MS } from '@/li
 
 // #202: real supabase-js over real sockets, against a loopback server that can stay silent. The retries
 // and the error shape these tests depend on are postgrest-js's own, so a stubbed fetch would only test
-// this file's idea of them. The limit is short, and each delay is a multiple of it.
+// this file's idea of them. The limit is short: an answer in time comes at 250ms, a late one at twice the
+// limit.
 const LIMIT = 400
 const WITHIN_LIMIT = 250
 const PAST_LIMIT = 800
@@ -28,39 +28,48 @@ const never: Answer = () => {}
 
 let answers: Answer[] = []
 let requests: { method: string; path: string }[] = []
-// Each request takes the next answer, and the last one repeats.
-const server = createServer((req, res) => {
-  requests.push({ method: req.method ?? '', path: new URL(req.url ?? '/', 'http://x').pathname })
-  req.resume()
-  // Not kept alive: afterEach closes every connection, and the next test's fetch could land on a closed one.
-  res.setHeader('connection', 'close')
-  const answer = answers.length > 1 ? answers.shift()! : answers[0]
-  answer(res, req)
-})
+// A server of its own for each test, on a port of its own. fetch pools connections by origin, and after an
+// aborted request it can leave a spare one open, so a shared server let a test's request go out on a
+// connection the test before had closed (seen on Node 22, which CI runs).
+let server: ReturnType<typeof createServer>
 let url = ''
 
+// Every attempt postgrest-js makes, counted as it's made. The server's count misses an attempt that dies on
+// the way, such as one sent on a socket that's already closed, and postgrest-js retries those.
+let attempts: string[] = []
 function client(deadlineMs = LIMIT) {
+  const limited = fetchWithDeadline(deadlineMs)
   return createClient(url, 'made-up-key', {
     auth: { autoRefreshToken: false, persistSession: false },
-    global: { fetch: fetchWithDeadline(deadlineMs) },
+    global: {
+      fetch: (input, init) => {
+        attempts.push(`${init?.method ?? 'GET'} ${new URL(input instanceof Request ? input.url : input).pathname}`)
+        return limited(input, init)
+      },
+    },
   })
 }
 
-beforeAll(async () => {
+beforeEach(async () => {
+  answers = []
+  requests = []
+  attempts = []
+  // Each request takes the next answer, and the last one repeats.
+  server = createServer((req, res) => {
+    requests.push({ method: req.method ?? '', path: new URL(req.url ?? '/', 'http://x').pathname })
+    req.resume()
+    const answer = answers.length > 1 ? answers.shift()! : answers[0]
+    answer(res, req)
+  })
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
 })
-afterAll(async () => {
+afterEach(async () => {
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
   server.closeAllConnections()
   await new Promise((resolve) => server.close(resolve))
-})
-beforeEach(() => {
-  answers = []
-  requests = []
-})
-afterEach(() => {
-  vi.useRealTimers()
-  server.closeAllConnections()
 })
 
 const NO_ANSWER = `AbortError: Supabase gave no answer within ${LIMIT / 1000} seconds`
@@ -73,14 +82,18 @@ describe('a database read past its time limit (#202)', () => {
     expect(data).toEqual([{ id: 'a1' }])
   })
 
-  // Once, not four times: a read whose fetch fails is retried, and only an AbortError stops that.
+  // Once, not four times: postgrest-js retries a read whose fetch fails, but not one that fails with an
+  // AbortError. Counted where postgrest-js makes them, so an attempt that never reached the server counts
+  // too, and given time for all three retries (1 + 2 + 4 seconds of waiting), so a retry fails here as
+  // extra attempts rather than as a timeout.
   it('fails with an error naming the limit when no answer comes, and is not retried', async () => {
     answers = [never]
     const { data, error } = await client().from('accounts').select('id')
+    expect(attempts).toEqual(['GET /rest/v1/accounts'])
     expect(data).toBeNull()
     expect(error?.message).toBe(NO_ANSWER)
     expect(requests).toEqual([{ method: 'GET', path: '/rest/v1/accounts' }])
-  })
+  }, 15_000)
 
   it('fails the same way when the answer stalls partway through', async () => {
     answers = [
@@ -98,6 +111,7 @@ describe('a database read past its time limit (#202)', () => {
   it('covers a read that only asks for a count', async () => {
     answers = [never]
     const { count, error } = await client().from('accounts').select('id', { count: 'exact', head: true })
+    expect(attempts).toEqual(['HEAD /rest/v1/accounts'])
     expect(count).toBeNull()
     expect(error?.message).toBe(NO_ANSWER)
     expect(requests).toEqual([{ method: 'HEAD', path: '/rest/v1/accounts' }])
@@ -162,10 +176,10 @@ describe('a database read past its time limit (#202)', () => {
     answers = [json([])]
     const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout')
     await fetchWithDeadline(60_000)(`${url}/rest/v1/accounts`)
-    // By its delay, because Node's HTTP client sets timers of its own.
+    // By its delay, because Node's HTTP client sets timers of its own. afterEach restores the spy.
     const index = setTimeoutSpy.mock.calls.findIndex(([, ms]) => ms === 60_000)
+    expect(index).toBeGreaterThanOrEqual(0)
     const timer = setTimeoutSpy.mock.results[index].value as NodeJS.Timeout
-    setTimeoutSpy.mockRestore()
     expect(timer.hasRef()).toBe(false)
   })
 })
@@ -186,7 +200,7 @@ describe('what the limit leaves alone (#202)', () => {
     expect(requests[0].method).toBe(method)
   })
 
-  // auth-js retries a session refresh for about 25 seconds on purpose (proxy.ts, #143).
+  // getUser() is a GET, so only the path check keeps Supabase Auth out of the limit.
   it('waits for a slow answer from Supabase Auth', async () => {
     answers = [after(PAST_LIMIT, json({ id: 'user-1', aud: 'authenticated' }))]
     const { data, error } = await client().auth.getUser('made-up-token')
@@ -220,20 +234,47 @@ describe('fetchWithDeadline: what it was called with (#202)', () => {
     const res = await limited(`${url}/rest/v1/budgets`, { method: 'POST', body: '{}' })
     expect(res.status).toBe(201)
   })
+
+  it('limits a read whose method is in lower case', async () => {
+    answers = [never]
+    await expect(limited(`${url}/rest/v1/accounts`, { method: 'get' })).rejects.toMatchObject(noAnswer)
+  })
+
+  // Thrown, it would reach auth-js too, which shares this fetch, and read as Supabase Auth being down.
+  it('leaves a URL it cannot read to fetch, rather than throwing', async () => {
+    let call: Promise<Response> | undefined
+    expect(() => (call = limited('not a url'))).not.toThrow()
+    await expect(call).rejects.toThrow(TypeError)
+  })
+
+  it("keeps a Request's own signal", async () => {
+    answers = [never]
+    const controller = new AbortController()
+    controller.abort(new DOMException('the caller gave up', 'AbortError'))
+    await expect(limited(new Request(`${url}/rest/v1/accounts`, { signal: controller.signal }))).rejects.toMatchObject({
+      message: 'the caller gave up',
+    })
+    expect(requests).toEqual([])
+  })
 })
 
 describe('READ_DEADLINE_MS (#202)', () => {
-  // Supabase's own limits: PostgREST's 10 seconds for a connection (db-pool-acquisition-timeout), then
-  // Postgres's 8 for a statement. Below their sum, this would cut off a read Supabase would have answered.
+  // Supabase's own limits: PostgREST's 10 seconds for a connection (db-pool-acquisition-timeout), then the
+  // 8-second statement_timeout Supabase sets for authenticated and, through authenticator, service_role. At
+  // or below their sum, this could cut off a read PostgREST would still have answered.
   it('is longer than the limits Supabase applies itself', () => {
     expect(READ_DEADLINE_MS).toBeGreaterThan(18_000)
   })
 
+  // No socket: a fetch that ends only when its signal aborts. Fake time over a real connection also runs the
+  // HTTP client's own timers, and its 10-second connect timeout fired first whenever this test ran alone.
   it('is the limit the fetch uses', async () => {
-    answers = [never]
+    vi.stubGlobal('fetch', (_: unknown, init?: RequestInit) =>
+      new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal?.reason)))
+    )
     vi.useFakeTimers({ toFake: ['setTimeout'] })
     let settled = false
-    const read = fetchWithReadDeadline(`${url}/rest/v1/accounts`).then(
+    const read = fetchWithReadDeadline('http://127.0.0.1:9/rest/v1/accounts').then(
       () => (settled = true),
       (e: unknown) => {
         settled = true
@@ -246,6 +287,8 @@ describe('READ_DEADLINE_MS (#202)', () => {
     expect(settled).toBe(false)
 
     vi.advanceTimersByTime(1)
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(settled).toBe(true)
     expect(await read).toMatchObject({
       name: 'AbortError',
       message: `Supabase gave no answer within ${READ_DEADLINE_MS / 1000} seconds`,

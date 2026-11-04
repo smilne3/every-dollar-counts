@@ -110,8 +110,8 @@ describe('app/(app)/layout.tsx: signed in', () => {
     expect(logs).toEqual([])
   })
 
-  // A hung read that reached its time limit held up the page, and on a page that reads nothing else
-  // from households this line is the only trace of why (#202).
+  // A hung read that reached its time limit held up a full page load, and on a page that reads nothing
+  // else from households, the layout's log line is the only trace of why (#202).
   it("falls back to a generic name when the household's name can't be read, and logs why", async () => {
     makeSupabase({ id: 'user-1', email: 'sarah@example.com' }, null, {
       data: null,

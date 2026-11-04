@@ -1,31 +1,53 @@
-// How long the server waits for one database read before giving up on it (#202). Without a limit, a read
-// that never answers holds the page until Vercel stops the function, up to five minutes, and nothing logs
-// which read it was.
+// How long the server waits for one request to the database before giving up on it (#202): one page of a
+// paged read, or one try of a retried one. Without a limit, a request that never answers holds its page or
+// API route until Vercel stops the function (300 seconds by default, as
+// app/api/plaid/exchange-public-token/route.ts records), and nothing logs which read it was.
 //
-// A limit only has to be longer than the limits Supabase applies itself, so a slow read it would have
-// answered is never cut off. PostgREST waits up to 10 seconds for a free database connection and answers
-// 504 (PGRST003). Postgres then stops a statement at 8 seconds, the default for authenticated and for
-// service_role, and PostgREST answers with that error. So past 18 seconds, plus the trip there and back,
-// Supabase has gone quiet. Each request gets its own limit, so a paged read's total isn't capped.
+// A limit only has to outlast the ones Supabase applies itself, so that whatever PostgREST answers, rows or
+// an error, still arrives. PostgREST waits up to 10 seconds for a free connection from its pool, its
+// default, then answers 504 (PGRST003). Postgres then stops the statement at 8 seconds, Supabase's default
+// statement_timeout for authenticated and, through authenticator, for service_role, and PostgREST answers
+// 500 with that error. So 18 seconds in, plus the trip there and back, PostgREST has given up. Anything
+// later is Supabase's edge answering for it, such as Cloudflare's 524, and cutting that off loses only an
+// error. Raise this if a role's statement_timeout goes past 10 seconds.
+//
+// A save's own timeout in the browser is also 20 seconds (SAVE_TIMEOUT_MS in lib/save-response.ts), and it
+// starts first. So when a save's read hangs, the browser says it may not have saved before the route's
+// refusal arrives. That's the safe thing to say, since the browser can't tell.
 export const READ_DEADLINE_MS = 20_000
 
 function isDatabaseRead(input: RequestInfo | URL, init?: RequestInit) {
-  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
-  const method = init?.method ?? (input instanceof Request ? input.method : 'GET')
-  // Only PostgREST, because auth-js retries a session refresh for about 25 seconds on purpose (proxy.ts,
-  // #143). Only reads, because a write that's cut off may still have happened, and the caller couldn't
-  // tell. The app has no read that goes through POST /rpc.
-  return new URL(url).pathname.startsWith('/rest/v1/') && (method === 'GET' || method === 'HEAD')
+  const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase()
+  // Only reads, because a write that's cut off may still have happened, and the caller couldn't tell. That
+  // leaves Supabase Auth's session refresh alone too: it's a POST, which auth-js retries for about 25
+  // seconds on purpose (proxy.ts, #143). Only PostgREST, so getUser()'s GET /auth/v1/user, the sign-in
+  // check, has no limit either. The app makes no .rpc() calls.
+  if (method !== 'GET' && method !== 'HEAD') return false
+  try {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    return new URL(url).pathname.startsWith('/rest/v1/')
+  } catch {
+    // Left to fetch, which fails a URL it can't use as it always has. Thrown here, the error would reach
+    // auth-js too, which shares this fetch, and read as Supabase Auth being unreachable.
+    return false
+  }
 }
 
-// The fetch for a server-side Supabase client. The read then fails the way any other failed read does:
-// postgrest-js returns { error: { message: 'AbortError: …' } }, and the caller's own check throws its
-// "could not read <what>" error, which Next logs with the digest the error card shows.
+// The fetch for the server-side Supabase clients. A read past its limit then fails the way any other
+// failed read does: postgrest-js returns { error: { message: 'AbortError: …' } }, and the caller handles it
+// as its own. A page throws its "could not read <what>" error, which Next logs with the digest the error
+// card shows.
 //
 // An AbortError, not the TimeoutError that AbortSignal.timeout() gives: postgrest-js retries a read whose
-// fetch fails, up to 3 times, after 1, 2 and 4 seconds, and only an AbortError stops that. A TimeoutError
-// would run the whole limit four times. Passing it as the abort's reason makes a read that stalls partway
-// through its body fail the same way, which a catch around fetch() wouldn't reach.
+// fetch fails, up to 3 times, after 1, 2 and 4 seconds. An AbortError stops that, but a TimeoutError only
+// when the query's own .abortSignal() fired, and a signal made here isn't that one. So a TimeoutError would
+// run the whole limit four times, with 7 seconds of waiting between. Passing the AbortError as the abort's
+// reason makes a read that stalls partway through its body fail the same way, which a catch around fetch()
+// wouldn't reach.
+//
+// Keep it wrapped in an Error of the caller's own, as every caller does today. Next ignores a thrown error
+// named AbortError, taking it for a request the browser gave up on, so it would log nothing and the error
+// card would have no Error ID. A query using .throwOnError() would throw this one as it is.
 export function fetchWithDeadline(deadlineMs: number): typeof fetch {
   return (input, init) => {
     if (!isDatabaseRead(input, init)) return fetch(input, init)
@@ -38,7 +60,9 @@ export function fetchWithDeadline(deadlineMs: number): typeof fetch {
     // process alive.
     timer.unref()
 
-    const signal = init?.signal ? AbortSignal.any([init.signal, deadline.signal]) : deadline.signal
+    // The caller's own signal still works: a query's .abortSignal(), or a Request's.
+    const own = init?.signal ?? (input instanceof Request ? input.signal : undefined)
+    const signal = own ? AbortSignal.any([own, deadline.signal]) : deadline.signal
     return fetch(input, { ...init, signal })
   }
 }

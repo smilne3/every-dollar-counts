@@ -127,7 +127,8 @@ const sql = 'const { data } = await supabase.from(goals)'`
     expect(checkUncheckedReads(file('lib/sync.ts', `const { data } = await plaidClient.transactionsSync({ access_token, cursor: next })`))).toEqual([])
   })
 
-  // It logs a failed read, because nothing else may say why a hung one held up the page (#202).
+  // The layout logs its failed read, since on most pages nothing else says why a hung one held the page
+  // up (#202), so the check covers it like any other read.
   it("fires on the layout's display-name read if it stops binding its error", () => {
     expect(checkUncheckedReads(file('app/(app)/layout.tsx', `const { data: households } = await supabase.from('households').select('id, name').limit(1)`))).toHaveLength(1)
     expect(checkUncheckedReads(file('app/(app)/layout.tsx', `const { data: households, error: householdError } = await supabase.from('households').select('id, name').limit(1)`))).toEqual([])
