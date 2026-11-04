@@ -124,16 +124,21 @@ const sql = 'const { data } = await supabase.from(goals)'`
   })
 
   // Plaid's client rejects a failed call, so its response has no `error` to check (#91). Skipped by
-  // what it calls, not by file, so a Supabase read beside it is still checked.
+  // what each destructure calls, not by file, so a Supabase read beside one is still checked.
   it('allows a Plaid response, and still checks a Supabase read in the same file', () => {
     expect(checkUncheckedReads(file('lib/sync.ts', `const { data } = await plaidClient.transactionsSync({ access_token, cursor: next })`))).toEqual([])
     expect(checkUncheckedReads(file('app/api/plaid/exchange-public-token/route.ts', `const { data: ex } = await plaidClient.itemPublicTokenExchange({ public_token })`))).toEqual([])
-    expect(checks(checkUncheckedReads(file('lib/sync.ts', `const { data } = await supabaseAdmin.from('plaid_items').select('cursor')`)))).toEqual(['unchecked-read'])
+    const supabaseThenPlaid = `const { data: item } = await supabaseAdmin.from('plaid_items').select('cursor')
+const { data } = await plaidClient.transactionsSync({ access_token, cursor: next })`
+    expect(lines(checkUncheckedReads(file('lib/sync.ts', supabaseThenPlaid)))).toEqual([1])
+    const plaidThenSupabase = `const { data } = await plaidClient.transactionsSync({ access_token, cursor: next })
+const { data: item } = await supabaseAdmin.from('plaid_items').select('cursor')`
+    expect(lines(checkUncheckedReads(file('lib/sync.ts', plaidThenSupabase)))).toEqual([2])
   })
 
   // #241: the categories route took a failed read for no row, and answered "unauthorized" or "not
-  // found", or added a category at the top of the list. A route has no error page, so the advice
-  // differs from a page's.
+  // found", or saved a new category near the top instead of last. A route has no error page, so the
+  // advice differs from a page's.
   it.each(['app/api/categories/route.ts', 'app/auth/confirm/route.ts'])('fires in a route, %s, with advice for a route', (path) => {
     const found = checkUncheckedReads(file(path, `const { data: cat } = await supabase.from('categories').select('name').eq('id', id).maybeSingle()`))
     expect(checks(found)).toEqual(['unchecked-read'])
@@ -142,8 +147,12 @@ const sql = 'const { data } = await supabase.from(goals)'`
     expect(checkUncheckedReads(file(path, `const { data: cat, error: catError } = await supabase.from('categories').select('name').eq('id', id).maybeSingle()`))).toEqual([])
   })
 
-  it('still gives a page the advice to throw', () => {
-    expect(checkUncheckedReads(file(PAGE, `const { data: goals } = await supabase.from('goals').select('id')`))[0].message).toContain('app/(app)/error.tsx')
+  // All of app/ is scanned, so a page outside app/(app)/, such as one under app/auth/, is checked
+  // too, and as a page.
+  it.each([PAGE, 'app/auth/try-again/page.tsx', 'app/login/page.tsx'])('still gives a page the advice to throw: %s', (path) => {
+    const found = checkUncheckedReads(file(path, `const { data: goals } = await supabase.from('goals').select('id')`))
+    expect(checks(found)).toEqual(['unchecked-read'])
+    expect(found[0].message).toContain('app/(app)/error.tsx')
   })
 
   // The layout logs its failed read, since on most pages nothing else says why a hung one held the page

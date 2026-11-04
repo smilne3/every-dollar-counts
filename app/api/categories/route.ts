@@ -40,12 +40,20 @@ async function refusedEnvironment(nothing: 'added' | 'renamed' | 'deleted'): Pro
 }
 
 // A read that failed: a 500 in the handler's own words, before anything is written, and a log line
-// naming the read. Taken as no row, a failed read answered "unauthorized" or "not found", or added a
-// category at the top of the list, and logged nothing (#241).
-function failedRead(what: string, error: { code?: string; message: string }, words: string) {
-  console.error(`[categories] could not read ${what}`, { code: error.code, message: error.message })
+// naming the read. Taken as no row, a failed read answered "unauthorized" or "not found", or saved a
+// new category at sort_order 1, near the top instead of last, and logged nothing (#241).
+function failedRead(
+  what: string,
+  error: { code?: string; message: string },
+  words: string,
+  details: Record<string, unknown> = {}
+) {
+  console.error(`[categories] could not read ${what}`, { ...details, code: error.code, message: error.message })
   return NextResponse.json({ error: words }, { status: 500 })
 }
+// A list read with neither rows nor an error is postgrest-js's reading of an empty reply, so it's a
+// failed read too, as lib/read-all.ts treats it, not an empty list (#222).
+const NO_DATA = { message: 'read returned no data and no error' }
 
 export async function GET() {
   const supabase = await createClient()
@@ -56,7 +64,8 @@ export async function GET() {
     .select('id, name, pfc_primary, sort_order')
     .order('sort_order')
   if (error) return failedRead('the categories', error, NOT_LOADED)
-  return NextResponse.json({ categories: data ?? [] })
+  if (!data) return failedRead('the categories', NO_DATA, NOT_LOADED)
+  return NextResponse.json({ categories: data })
 }
 
 // Add a custom category.
@@ -71,16 +80,17 @@ export async function POST(req: Request) {
   if (mError) return failedRead('the household', mError, TRY_AGAIN)
   if (!m) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
-  // A new category goes last. maybeSingle, so a household with no categories yet starts at 1, and
-  // only a failed read stops the add.
-  const { data: top, error: topError } = await supabase
+  // A new category goes last. Read as a list, not with maybeSingle: that turns an empty reply into no
+  // row as well as an empty list, so a failed read would still save the category at 1. Only an
+  // empty list starts a household's first category at 1.
+  const { data: tops, error: topError } = await supabase
     .from('categories')
     .select('sort_order')
     .order('sort_order', { ascending: false })
     .limit(1)
-    .maybeSingle()
   if (topError) return failedRead('the highest sort_order', topError, TRY_AGAIN)
-  const sort_order = (top?.sort_order ?? 0) + 1
+  if (!tops) return failedRead('the highest sort_order', NO_DATA, TRY_AGAIN)
+  const sort_order = (tops[0]?.sort_order ?? 0) + 1
 
   const { error, status } = await supabase
     .from('categories')
@@ -101,7 +111,7 @@ export async function PATCH(req: Request) {
   if (refused) return refused
 
   const { data: cat, error: catError } = await supabase.from('categories').select('name').eq('id', id).maybeSingle()
-  if (catError) return failedRead('the category', catError, TRY_AGAIN)
+  if (catError) return failedRead('the category', catError, TRY_AGAIN, { id })
   if (!cat) return NextResponse.json({ error: 'not found' }, { status: 404 })
   const oldName = cat.name
 
@@ -124,7 +134,7 @@ export async function DELETE(req: Request) {
   if (refused) return refused
 
   const { data: cat, error: catError } = await supabase.from('categories').select('name').eq('id', id).maybeSingle()
-  if (catError) return failedRead('the category', catError, NOT_DELETED)
+  if (catError) return failedRead('the category', catError, NOT_DELETED, { id })
   if (!cat) return NextResponse.json({ error: 'not found' }, { status: 404 })
   const name = cat.name
 

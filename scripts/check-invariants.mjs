@@ -15,7 +15,7 @@ import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 
 // ---------------------------------------------------------------------------
-// 1. Every read checks `error`: on a page, in the lib/ helpers pages call, and in a route.
+// 1. Every read checks `error`: anywhere in app/, pages and routes alike, and in lib/.
 //
 // #46, and again in #68, and again in #77. A Supabase read that fails sets `data` to null, and
 // `?? []` turns that into an empty array — so "the query failed" and "you have no data" render
@@ -32,10 +32,11 @@ import ts from 'typescript'
 // and not `error`: `const { data } = …`, or each object of an array pattern on its own, as in
 // `const [{ data: a }, { data: b }] = await Promise.all(…)`.
 //
-// Scanned: app/(app)/, lib/, and since #241 the routes in app/api/ and app/auth/. There, the
-// categories route took five failed reads for no row: it answered "unauthorized" or "not found", or
-// added a category at the top of the list, and logged nothing. Once those checked their error, no
-// other read in a route fired. A route has no error page, so it logs and answers with an error.
+// Scanned: all of app/, and lib/. Until #241 only app/(app)/ and lib/ were, and the categories route
+// took five failed reads for no row: it answered "unauthorized" or "not found", or saved a new
+// category near the top instead of last, and logged nothing. Once those checked their error, nothing
+// else in app/ fired. A route (route.ts) has no error page, so it's told to log and answer with an
+// error instead of throwing.
 // Not counted: a destructure of `auth.getUser()`. A failed auth check reads as signed out, a
 // different defect (#143). Nor one of a Plaid call's response: Plaid's client rejects a failed call,
 // so there is no `error` to check, and the failure reaches the caller as a throw (#91).
@@ -43,8 +44,8 @@ import ts from 'typescript'
 // sits above app/(app)/error.tsx (#202).
 // ---------------------------------------------------------------------------
 const READS_ALLOWED = new Map([])
-const READ_SCOPES = ['app/(app)/', 'app/api/', 'app/auth/', 'lib/']
-const ROUTE_SCOPES = ['app/api/', 'app/auth/']
+const READ_SCOPES = ['app/', 'lib/']
+const isRoute = (path) => /(^|\/)route\.tsx?$/.test(path)
 
 // Index of the bracket that closes the one opening at `open`, in blanked source.
 function closeBracket(code, open) {
@@ -102,7 +103,7 @@ export function checkUncheckedReads(files) {
           check: 'unchecked-read',
           file: path,
           line: lineOf(text, at),
-          message: ROUTE_SCOPES.some((scope) => path.startsWith(scope))
+          message: isRoute(path)
             ? `destructures \`${name}\` without \`error\`. A failed read must not be taken for no row ` +
               '(#241) — check `error`, log it, and answer with an error.'
             : `destructures \`${name}\` without \`error\`. A failed read must not render identically to no ` +
