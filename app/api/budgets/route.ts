@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { isAuthRetryableFetchError } from '@supabase/supabase-js'
 import { createClient } from '@/lib/supabase/server'
+import { assertEnvMatchesDatabase, envGuardResponse } from '@/lib/app-env'
 import { unknownIfLost } from '@/lib/lost-reply'
 
 // Budgets → Save budgets (BudgetEditor): one bulk save. A category with a limit above zero is
@@ -56,6 +57,19 @@ export async function POST(req: Request) {
   }
   if (!m) return fail(403, "Your account isn't part of a household.")
   const household_id = m.household_id as string
+
+  // Local dev and Previews share production's database, so a save from either would rewrite the
+  // household's real limits (#148). Its 409 and 500 are the messages worth showing, as in
+  // app/api/manual-assets/route.ts: "please try again" can't fix a misconfiguration.
+  try {
+    await assertEnvMatchesDatabase()
+  } catch (e) {
+    return envGuardResponse(e, {
+      tag: '[budgets]',
+      mismatch: 'This app is pointed at a database from a different environment. Nothing saved.',
+      unreadable: 'Could not verify which database this is, so nothing was saved.',
+    })
+  }
 
   const toUpsert: { household_id: string; category: string; monthly_limit: number }[] = []
   const toDelete: string[] = []
