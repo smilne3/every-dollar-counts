@@ -161,6 +161,15 @@ afterEach(() => {
 
 const METRICS = ['net-worth', 'cash', 'spent', 'saved']
 
+// The metric is whatever the address says. Anything but the four is not found, and reads nothing,
+// including each name every object inherits, which a plain lookup finds (#204).
+describe('Breakdown addresses (#204)', () => {
+  it.each(['nonsense', ...Object.getOwnPropertyNames(Object.prototype)])('answers not found for %s', async (metric) => {
+    await expect(render(metric)).rejects.toMatchObject({ digest: 'NEXT_HTTP_ERROR_FALLBACK;404' })
+    expect(selects).toEqual({})
+  })
+})
+
 describe('Breakdown reads', () => {
   // #91: this page exists to explain the net-worth figure, and rendered as no assets it explained
   // one without the house, the mortgage still subtracted as a live liability.

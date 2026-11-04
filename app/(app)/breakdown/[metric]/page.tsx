@@ -36,7 +36,9 @@ const TITLES: Record<string, { title: string; subtitle: string }> = {
 
 export default async function BreakdownPage({ params }: { params: Promise<{ metric: string }> }) {
   const { metric } = await params
-  if (!TITLES[metric]) notFound()
+  // Its own keys only: a plain lookup also finds what every object inherits, so /breakdown/constructor
+  // rendered a page with an empty title instead of not found (#204).
+  if (!Object.hasOwn(TITLES, metric)) notFound()
 
   const supabase = await createClient()
   // The household beside the accounts rather than after them: every metric needs it for the bank
