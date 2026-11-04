@@ -37,7 +37,7 @@ const userIs = (user: typeof USER | null, error: AuthError | null) => auth.getUs
 let logs: unknown[][]
 beforeEach(() => {
   for (const f of Object.values(auth)) f.mockReset()
-  ensureHouseholdAccess.mockReset().mockResolvedValue(true)
+  ensureHouseholdAccess.mockReset().mockResolvedValue('let-in')
   auth.exchangeCodeForSession.mockResolvedValue(SIGNED_IN)
   auth.verifyOtp.mockResolvedValue(SIGNED_IN)
   // What a local sign-out answers when Supabase Auth can't be told, having removed the session here.
@@ -69,8 +69,33 @@ describe('GET /auth/confirm: signed in', () => {
   })
 
   it('sends someone the invite check turns away to "Not invited yet"', async () => {
-    ensureHouseholdAccess.mockResolvedValue(false)
+    ensureHouseholdAccess.mockResolvedValue('not-invited')
     expect(await sentTo(confirm('code=abc'))).toBe('/auth/not-invited')
+  })
+})
+
+// #240: a non-member whose invite couldn't be read or used. Let in, they'd find no household and the
+// invite never used, with nothing to tell them to sign in again.
+describe('GET /auth/confirm: the invite check could not finish (#240)', () => {
+  it('says sign-in could not be completed, never "Not invited yet"', async () => {
+    ensureHouseholdAccess.mockResolvedValue('try-again')
+    expect(await sentTo(confirm('code=abc&next=/settings'))).toBe('/auth/try-again')
+  })
+
+  // As when Supabase Auth can't be asked: kept, the new session's cookie would let them into the app
+  // with no household.
+  it('signs the new session out here, before it redirects', async () => {
+    ensureHouseholdAccess.mockResolvedValue('try-again')
+    let release!: () => void
+    auth.signOut.mockReturnValue(new Promise((resolve) => (release = () => resolve({ error: null }))))
+    let answered = false
+    const pending = confirm('code=abc').then((res) => ((answered = true), res))
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(auth.signOut).toHaveBeenCalledWith({ scope: 'local' })
+    expect(answered).toBe(false)
+    release()
+    expect(await sentTo(pending)).toBe('/auth/try-again')
+    expect(auth.signOut).toHaveBeenCalledTimes(1)
   })
 })
 

@@ -2,10 +2,10 @@ import Link from 'next/link'
 import { Card } from '@/components/ui/Card'
 import { tapTargetClass } from '@/components/ui/styles'
 
-// Where app/auth/confirm/route.ts sends someone whose sign-in it could not finish because Supabase
-// Auth could not be asked (#143). Nothing showed they aren't invited, so they are not told that,
-// and nothing showed the link was bad. Signing in again finishes it, a first sign-in's invite
-// included.
+// Where app/auth/confirm/route.ts sends someone whose sign-in it could not finish: Supabase Auth
+// could not be asked (#143), or their invite couldn't be read or used (#240). Nothing showed they
+// aren't invited, so they are not told that, and nothing showed the link was bad. Signing in again
+// finishes it, a first sign-in's invite included.
 export default function SignInTryAgain() {
   return (
     <div className="grid min-h-screen place-items-center bg-canvas px-4">
