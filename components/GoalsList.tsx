@@ -174,7 +174,10 @@ export function GoalsList({
       {initialGoals.length === 0 ? (
         <p className="text-sm text-muted">No savings goals yet. Add one above.</p>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2">
+        // Two to a row only from lg: below about 1000px, half the column is too narrow for a card's
+        // Saved row, which pushed the page sideways (#208). grid-cols-1 lets a card be narrower than
+        // its goal's name, which then truncates, rather than widen the page on a phone.
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {initialGoals.map((g) => (
             <GoalCard
               key={g.id}
