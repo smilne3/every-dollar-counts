@@ -7,6 +7,8 @@ import { unknownIfLost } from '@/lib/lost-reply'
 type Supabase = Awaited<ReturnType<typeof createClient>>
 
 const TRY_AGAIN = 'That could not be saved. Please try again.'
+const NOT_LOADED = 'Your categories could not be loaded. Please try again.'
+const NOT_DELETED = 'That category could not be deleted. Please try again.'
 
 // Sign-in, by the rule in lib/auth-check.ts (#143): a 503 when Supabase Auth could not be asked,
 // in words CategoryManager shows as they stand, and a 401 when the session has ended. Null when
@@ -37,20 +39,33 @@ async function refusedEnvironment(nothing: 'added' | 'renamed' | 'deleted'): Pro
   }
 }
 
-async function household(supabase: Supabase) {
-  const { data: m } = await supabase.from('memberships').select('household_id').limit(1).single()
-  return m?.household_id ?? null
+// A read that failed: a 500 in the handler's own words, before anything is written, and a log line
+// naming the read. Taken as no row, a failed read answered "unauthorized" or "not found", or saved a
+// new category at sort_order 1, near the top instead of last, and logged nothing (#241).
+function failedRead(
+  what: string,
+  error: { code?: string; message: string },
+  words: string,
+  details: Record<string, unknown> = {}
+) {
+  console.error(`[categories] could not read ${what}`, { ...details, code: error.code, message: error.message })
+  return NextResponse.json({ error: words }, { status: 500 })
 }
+// A list read with neither rows nor an error is postgrest-js's reading of an empty reply, so it's a
+// failed read too, as lib/read-all.ts treats it, not an empty list (#222).
+const NO_DATA = { message: 'read returned no data and no error' }
 
 export async function GET() {
   const supabase = await createClient()
-  const refused = await refusedSignIn(supabase, 'Your categories could not be loaded. Please try again.')
+  const refused = await refusedSignIn(supabase, NOT_LOADED)
   if (refused) return refused
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('categories')
     .select('id, name, pfc_primary, sort_order')
     .order('sort_order')
-  return NextResponse.json({ categories: data ?? [] })
+  if (error) return failedRead('the categories', error, NOT_LOADED)
+  if (!data) return failedRead('the categories', NO_DATA, NOT_LOADED)
+  return NextResponse.json({ categories: data })
 }
 
 // Add a custom category.
@@ -61,20 +76,25 @@ export async function POST(req: Request) {
   const supabase = await createClient()
   const refused = (await refusedSignIn(supabase, TRY_AGAIN)) ?? (await refusedEnvironment('added'))
   if (refused) return refused
-  const hid = await household(supabase)
-  if (!hid) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  const { data: m, error: mError } = await supabase.from('memberships').select('household_id').limit(1).maybeSingle()
+  if (mError) return failedRead('the household', mError, TRY_AGAIN)
+  if (!m) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
 
-  const { data: top } = await supabase
+  // A new category goes last. Read as a list, not with maybeSingle: that turns an empty reply into no
+  // row as well as an empty list, so a failed read would still save the category at 1. Only an
+  // empty list starts a household's first category at 1.
+  const { data: tops, error: topError } = await supabase
     .from('categories')
     .select('sort_order')
     .order('sort_order', { ascending: false })
     .limit(1)
-    .single()
-  const sort_order = (top?.sort_order ?? 0) + 1
+  if (topError) return failedRead('the highest sort_order', topError, TRY_AGAIN)
+  if (!tops) return failedRead('the highest sort_order', NO_DATA, TRY_AGAIN)
+  const sort_order = (tops[0]?.sort_order ?? 0) + 1
 
   const { error, status } = await supabase
     .from('categories')
-    .insert({ household_id: hid, name: clean, pfc_primary: null, sort_order })
+    .insert({ household_id: m.household_id, name: clean, pfc_primary: null, sort_order })
   // An add the database never answered may have landed, so its outcome is unknown
   // (lib/lost-reply.ts). Names are unique per household, so adding it again cannot make two.
   if (error) return unknownIfLost(status, error) ?? NextResponse.json({ error: error.message }, { status: 400 })
@@ -90,7 +110,8 @@ export async function PATCH(req: Request) {
   const refused = (await refusedSignIn(supabase, TRY_AGAIN)) ?? (await refusedEnvironment('renamed'))
   if (refused) return refused
 
-  const { data: cat } = await supabase.from('categories').select('name').eq('id', id).single()
+  const { data: cat, error: catError } = await supabase.from('categories').select('name').eq('id', id).maybeSingle()
+  if (catError) return failedRead('the category', catError, TRY_AGAIN, { id })
   if (!cat) return NextResponse.json({ error: 'not found' }, { status: 404 })
   const oldName = cat.name
 
@@ -109,12 +130,11 @@ export async function DELETE(req: Request) {
   const { id } = await req.json()
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
   const supabase = await createClient()
-  const refused =
-    (await refusedSignIn(supabase, 'That category could not be deleted. Please try again.')) ??
-    (await refusedEnvironment('deleted'))
+  const refused = (await refusedSignIn(supabase, NOT_DELETED)) ?? (await refusedEnvironment('deleted'))
   if (refused) return refused
 
-  const { data: cat } = await supabase.from('categories').select('name').eq('id', id).single()
+  const { data: cat, error: catError } = await supabase.from('categories').select('name').eq('id', id).maybeSingle()
+  if (catError) return failedRead('the category', catError, NOT_DELETED, { id })
   if (!cat) return NextResponse.json({ error: 'not found' }, { status: 404 })
   const name = cat.name
 
