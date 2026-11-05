@@ -229,7 +229,7 @@ describe('TransactionRow learned marker (#28)', () => {
 
   // A save error renders inside the picker container, so it cannot push the marker off the line.
   it('keeps the marker beside the select while an error shows', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, redirected: false, headers: new Headers({ 'content-type': 'application/json' }), json: async () => ({ error: 'This transaction just changed. Refresh and try again.' }) }))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 400, redirected: false, headers: new Headers({ 'content-type': 'application/json' }), json: async () => ({ error: 'A credit-card payment is already kept out of spending and income.' }) }))
     const { container } = renderRow({}, LEARNED)
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Food' } })
     const alert = await screen.findByRole('alert')
@@ -269,14 +269,16 @@ describe('TransactionRow suggested marker (#28 §14.6)', () => {
 })
 
 // CategoryPicker keys its stale-alert reset on source as well as name, so the row must hand it the
-// source: a rule equal to the bank's category being removed changes the reason, not the name.
+// source: a rule equal to the bank's category being removed changes the reason, not the name. A
+// refusal that isn't about a stale row, since a stale one's words stay through the reload (#139).
 describe('TransactionRow category source', () => {
   it("passes the category's source to the picker, so a change of reason clears its alert", async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
+      status: 400,
       redirected: false,
       headers: new Headers({ 'content-type': 'application/json' }),
-      json: async () => ({ error: 'This transaction just changed. Refresh and try again.' }),
+      json: async () => ({ error: 'A credit-card payment is already kept out of spending and income.' }),
     }))
     const agreeing: ResolvedCategory = { name: 'Food', source: 'rule', ruleId: 'r1', bankName: 'Food' }
     const row = (category: ResolvedCategory) => (

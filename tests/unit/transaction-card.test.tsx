@@ -738,12 +738,14 @@ describe('TransactionCard learned marker (#28)', () => {
 
   // CategoryPicker keys its stale-alert reset on source as well as name, so the sheet must hand it
   // the source: a rule equal to the bank's category being removed changes the reason, not the name.
+  // A refusal that isn't about a stale row, since a stale one's words stay through the reload (#139).
   it("passes the category's source to the picker, so a change of reason clears its alert", async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
+      status: 400,
       redirected: false,
       headers: new Headers({ 'content-type': 'application/json' }),
-      json: async () => ({ error: 'This transaction just changed. Refresh and try again.' }),
+      json: async () => ({ error: 'A credit-card payment is already kept out of spending and income.' }),
     }))
     const agreeing = { name: 'Food', source: 'rule' as const, ruleId: 'r1', bankName: 'Food' }
     const { rerender } = render(<TransactionCard t={txn} category={agreeing} categoryOptions={['Food', 'Grocery']} />)

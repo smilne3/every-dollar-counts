@@ -27,6 +27,10 @@ import { unknownIfLost } from '@/lib/lost-reply'
 //
 // It is not the only writer of user_category: app/api/categories/route.ts also writes it in bulk on
 // rename and delete (a delete clears picks), outside these guards (#100).
+//
+// 404 and 409 mean the picker's row is stale: the transaction is gone, the bank removed it, the
+// category was deleted, or the row changed. CategoryPicker reloads on either, so these say the latest
+// is showing. They used to say "Refresh and try again", which the installed app has no way to do (#139).
 const SAVE_FAILED = 'That could not be saved. Please try again.'
 
 export async function POST(req: Request) {
@@ -68,13 +72,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: SAVE_FAILED }, { status: 500 })
   }
   if (!row) {
-    return NextResponse.json({ error: 'That transaction no longer exists. Refresh and try again.' }, { status: 404 })
+    return NextResponse.json({ error: 'That transaction no longer exists. Showing the latest.' }, { status: 404 })
   }
   if (row.removed) {
-    return NextResponse.json(
-      { error: 'Your bank removed that transaction. Refresh and try again.' },
-      { status: 400 }
-    )
+    return NextResponse.json({ error: 'Your bank removed that transaction. Showing the latest.' }, { status: 409 })
   }
 
   // 4. Card payments, picked or not.
@@ -98,10 +99,7 @@ export async function POST(req: Request) {
   }
   const picked = (cats ?? []).find((c) => c.name === category)
   if (!picked) {
-    return NextResponse.json(
-      { error: 'That category no longer exists. Refresh and try again.' },
-      { status: 400 }
-    )
+    return NextResponse.json({ error: 'That category no longer exists. Showing the latest.' }, { status: 409 })
   }
 
   // 6. Write, with the guards INSIDE the update, so Plaid re-tagging or removing the row between the
@@ -125,7 +123,7 @@ export async function POST(req: Request) {
     // Usually the row changed underneath us. A missing update policy would also land here, which is
     // why the log says both.
     console.error('[categorize] update matched no rows (row changed, or the update policy is missing)', transactionId)
-    return NextResponse.json({ error: 'This transaction just changed. Refresh and try again.' }, { status: 409 })
+    return NextResponse.json({ error: 'This transaction just changed. Showing the latest.' }, { status: 409 })
   }
 
   // 7. A record of every change, so a mistaken pick can be put back from the logs.
