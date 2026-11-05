@@ -477,19 +477,20 @@ describe('CategoryPicker: a refusal that says this row is stale (#139)', () => {
     expect(screen.queryByRole('alert')).toBeNull()
   })
 
-  // A pick after a stale refusal starts afresh: its own refusal of another kind doesn't outlast a
-  // change from the server.
+  // A pick after a stale refusal starts afresh. If that one's outcome is unknown, its message goes
+  // when the server's value changes, as always: the stale refusal before it doesn't keep it.
   it('forgets a stale refusal once the next pick is sent', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(reply(false, { error: STALE[1][1] }, 409))
-      .mockResolvedValueOnce(reply(false, { error: 'nope' }, 400))
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
     vi.stubGlobal('fetch', fetchMock)
     const { rerender } = render(<CategoryPicker {...props} />)
     fireEvent.change(select(), { target: { value: 'Shopping' } })
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe(STALE[1][1]))
     fireEvent.change(select(), { target: { value: 'Travel' } })
-    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('nope'))
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('It may not have saved. Showing the latest.'))
     rerender(<CategoryPicker {...props} value="Shopping" source="pick" />)
     expect(screen.queryByRole('alert')).toBeNull()
   })
