@@ -61,13 +61,15 @@ describe('AuthCodeError page', () => {
 })
 
 // #143: where app/auth/confirm/route.ts sends someone it could not finish signing in because
-// Supabase Auth could not be asked. Nothing showed they aren't invited, or that the link was bad.
+// Supabase Auth could not be asked, and since #240, someone whose invite couldn't be read or used.
+// Nothing showed they aren't invited, or that the link was bad. The words name neither cause, since
+// in #240's the sign-in service answered.
 describe('SignInTryAgain page', () => {
   it('says sign-in could not be completed and to try again, with the way back to sign in', () => {
     render(<SignInTryAgain />)
     expect(screen.getByRole('heading').textContent).toBe("Sign-in couldn't be completed")
     expect(screen.getByText(/^Something went wrong/).textContent).toBe(
-      'Something went wrong reaching the sign-in service. Try again, or come back in a moment.'
+      'Something went wrong while signing you in. Try again, or come back in a moment.'
     )
     expect(screen.getByRole('link', { name: 'Back to sign in' }).getAttribute('href')).toBe('/login')
   })

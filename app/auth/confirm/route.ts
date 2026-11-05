@@ -50,8 +50,13 @@ export async function GET(request: NextRequest) {
     console.error('[auth/confirm] session ended right after sign-in', { status: error?.status, code: error?.code, message: error?.message })
     return NextResponse.redirect(new URL('/login', request.url))
   }
-  if (await ensureHouseholdAccess(signIn.user.id, signIn.user.email)) {
-    return NextResponse.redirect(new URL(next, request.url))
+  const access = await ensureHouseholdAccess(signIn.user.id, signIn.user.email)
+  if (access === 'let-in') return NextResponse.redirect(new URL(next, request.url))
+  if (access === 'try-again') {
+    // Not a member, and their invite couldn't be read or used, so in the app they'd find no household
+    // (#240). Signed out as above, and signing in again runs the invite check again.
+    await supabase.auth.signOut({ scope: 'local' })
+    return NextResponse.redirect(new URL('/auth/try-again', request.url))
   }
   return NextResponse.redirect(new URL('/auth/not-invited', request.url))
 }

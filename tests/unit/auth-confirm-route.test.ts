@@ -37,7 +37,7 @@ const userIs = (user: typeof USER | null, error: AuthError | null) => auth.getUs
 let logs: unknown[][]
 beforeEach(() => {
   for (const f of Object.values(auth)) f.mockReset()
-  ensureHouseholdAccess.mockReset().mockResolvedValue(true)
+  ensureHouseholdAccess.mockReset().mockResolvedValue('let-in')
   auth.exchangeCodeForSession.mockResolvedValue(SIGNED_IN)
   auth.verifyOtp.mockResolvedValue(SIGNED_IN)
   // What a local sign-out answers when Supabase Auth can't be told, having removed the session here.
@@ -69,8 +69,33 @@ describe('GET /auth/confirm: signed in', () => {
   })
 
   it('sends someone the invite check turns away to "Not invited yet"', async () => {
-    ensureHouseholdAccess.mockResolvedValue(false)
+    ensureHouseholdAccess.mockResolvedValue('not-invited')
     expect(await sentTo(confirm('code=abc'))).toBe('/auth/not-invited')
+  })
+})
+
+// #240: a non-member whose invite couldn't be read or used. Let in, they'd find no household and the
+// invite never used, with nothing to tell them to sign in again.
+describe('GET /auth/confirm: the invite check could not finish (#240)', () => {
+  it('says sign-in could not be completed, never "Not invited yet"', async () => {
+    ensureHouseholdAccess.mockResolvedValue('try-again')
+    expect(await sentTo(confirm('code=abc&next=/settings'))).toBe('/auth/try-again')
+  })
+
+  // As when Supabase Auth can't be asked: kept, the new session's cookie would let them into the app
+  // with no household.
+  it('signs the new session out here, before it redirects', async () => {
+    ensureHouseholdAccess.mockResolvedValue('try-again')
+    let release!: () => void
+    auth.signOut.mockReturnValue(new Promise((resolve) => (release = () => resolve({ error: null }))))
+    let answered = false
+    const pending = confirm('code=abc').then((res) => ((answered = true), res))
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(auth.signOut).toHaveBeenCalledWith({ scope: 'local' })
+    expect(answered).toBe(false)
+    release()
+    expect(await sentTo(pending)).toBe('/auth/try-again')
+    expect(auth.signOut).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -131,6 +156,49 @@ describe('a local sign-out with the real Supabase client, when Supabase Auth can
     const { error } = await client.auth.signOut({ scope: 'local' })
     expect(error).toBeInstanceOf(AuthRetryableFetchError)
     expect(written).toContainEqual(expect.objectContaining({ name: 'sb-test-auth-token', value: '', options: expect.objectContaining({ maxAge: 0 }) }))
+  })
+})
+
+// What both try-again paths rely on: the sign-in writes the new session's cookies, and the sign-out
+// later in the same request has to clear those same cookies before the redirect carries them. Next's
+// cookie store in a route handler reads back its own writes, so this one does too. The real client,
+// with Supabase Auth answering the sign-in and then unreachable for the sign-out (#240 review).
+describe('a local sign-out with the real Supabase client, after a sign-in in the same request', () => {
+  it.each([
+    ['in one cookie', ''],
+    ['split across several cookies', 'x'.repeat(6000)],
+  ])('clears every cookie the sign-in wrote, with the session %s', async (_, padding) => {
+    const jar = new Map<string, { value: string; maxAge?: number }>()
+    const session = {
+      access_token: `fresh-access${padding}`,
+      refresh_token: 'fresh-refresh',
+      token_type: 'bearer',
+      expires_in: 3600,
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+      user: { id: 'user-1', aud: 'authenticated', email: 'new@example.com' },
+    }
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/auth/v1/verify')) {
+        return new Response(JSON.stringify(session), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      throw new TypeError('fetch failed')
+    })
+    const client = createServerClient('https://test.supabase.co', 'test-publishable-key', {
+      cookies: {
+        getAll: () => [...jar].filter(([, c]) => c.value !== '').map(([name, c]) => ({ name, value: c.value })),
+        setAll: (list) => list.forEach(({ name, value, options }) => void jar.set(name, { value, maxAge: options?.maxAge })),
+      },
+      global: { fetch },
+    })
+
+    expect((await client.auth.verifyOtp({ type: 'magiclink', token_hash: 'th' })).error).toBeNull()
+    // One cookie, or for the long session more than one: the case where a missed chunk would survive.
+    const written = [...jar.keys()]
+    expect(written.length).toBeGreaterThan(0)
+    expect(written.length > 1).toBe(padding !== '')
+
+    await client.auth.signOut({ scope: 'local' })
+    for (const name of written) expect(jar.get(name)).toEqual({ value: '', maxAge: 0 })
   })
 })
 

@@ -972,7 +972,7 @@ describe('Dashboard reads', () => {
     await expect(render()).rejects.toThrow(/could not read your household: permission denied/)
   })
 
-  // #172: an account with no membership, which sign-in lets through when it cannot check
+  // #172: an account with no membership, which sign-in lets through when it can't read the membership
   // (lib/access.ts), has no household, so no banks and no home value. It renders, and reads neither:
   // both reads are set to fail here, so reading one would throw.
   it('renders for an account with no household, reading no banks and no home value', async () => {
