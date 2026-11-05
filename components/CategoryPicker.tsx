@@ -59,8 +59,8 @@ export function CategoryPicker({
     setPending(category)
     working(true)
     setError(null)
-    // What to do once the request has settled: reload after a save, or after one whose outcome is
-    // unknown. Never while it is in flight, and never after a refusal.
+    // What to do once the request has settled: reload after a save, after one whose outcome is
+    // unknown, or after a refusal that says this row is stale. Never while it is in flight.
     let reload = false
     try {
       // The shared rule (lib/save-response.ts): a redirect to /login or an OK reply that is not JSON
@@ -78,6 +78,14 @@ export function CategoryPicker({
         setPending(null)
         if (result.outcome === 'refused') {
           setError(result.error)
+          // 404 and 409: the route says this row is stale. The transaction is gone or the bank
+          // removed it, the category was deleted, or the bank changed the row during the save. So
+          // show the latest, as the message says. The installed app has no other way to reload
+          // (#139). For a deleted category the row stays and so does the message, and the options
+          // lose the category. A row that's gone takes its message with it, and a pending
+          // transaction that posted shows as the posted one, to pick again (#252). Any other refusal
+          // wrote nothing, and the server still holds what the picker shows.
+          reload = result.status === 404 || result.status === 409
         } else {
           // Failed in flight, timed out, or a reply that could not be read. None of them means the
           // request never reached the server.

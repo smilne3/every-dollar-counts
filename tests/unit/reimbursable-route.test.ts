@@ -179,17 +179,17 @@ describe('PATCH /api/reimbursable', () => {
     const calls = makeSupabase({ row: null })
     const res = await mark()
     expect(res.status).toBe(404)
-    expect(await errorOf(res)).toBe('That transaction no longer exists. Refresh and try again.')
+    expect(await errorOf(res)).toBe('That transaction no longer exists. Showing the latest.')
     expect(calls.updates).toHaveLength(0)
   })
 
   // `removed` is a soft flag (a Plaid repost), not a delete. A mark written to a removed row would be
-  // unreachable while still counting toward what you're owed.
-  it('answers 400 for a transaction the bank removed, and writes nothing', async () => {
+  // unreachable while still counting toward what you're owed. 409, so the editors reload (#139).
+  it('answers 409 for a transaction the bank removed, and writes nothing', async () => {
     const calls = makeSupabase({ row: { ...TXN, removed: true } })
     const res = await mark()
-    expect(res.status).toBe(400)
-    expect(await errorOf(res)).toBe('Your bank removed that transaction. Refresh and try again.')
+    expect(res.status).toBe(409)
+    expect(await errorOf(res)).toBe('Your bank removed that transaction. Showing the latest.')
     expect(calls.updates).toHaveLength(0)
   })
 
@@ -262,7 +262,7 @@ describe('PATCH /api/reimbursable', () => {
     makeSupabase({ row, rowAtWrite })
     const res = await mark()
     expect(res.status).toBe(409)
-    expect(await errorOf(res)).toBe('This transaction just changed. Refresh and try again.')
+    expect(await errorOf(res)).toBe('This transaction just changed. Showing the latest.')
     expect(logs).toContainEqual([
       '[reimbursable] update matched no rows (row changed, or the update policy is missing)',
       { id: 'txn-1' },
@@ -309,7 +309,7 @@ describe('PATCH /api/reimbursable', () => {
     makeSupabase({ update: { error: null, count: 0 } })
     const res = await mark()
     expect(res.status).toBe(409)
-    expect(await errorOf(res)).toBe('This transaction just changed. Refresh and try again.')
+    expect(await errorOf(res)).toBe('This transaction just changed. Showing the latest.')
     expect(logs).toContainEqual([
       '[reimbursable] update matched no rows (row changed, or the update policy is missing)',
       { id: 'txn-1' },

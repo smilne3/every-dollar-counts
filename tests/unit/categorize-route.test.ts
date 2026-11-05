@@ -226,9 +226,13 @@ describe('POST /api/transactions/categorize', () => {
     expect(calls.updates).toHaveLength(0)
   })
 
-  it('answers 404 when the transaction does not exist', async () => {
+  // A stale row answers 404 or 409, which CategoryPicker reloads on, so the words say the latest is
+  // showing. "Refresh and try again" asked for something the installed app has no way to do (#139).
+  it('answers 404 when the transaction does not exist, saying the latest is showing', async () => {
     makeSupabase({ row: null })
-    expect((await post({ transactionId: 'txn-1', category: 'Grocery' })).status).toBe(404)
+    const res = await post({ transactionId: 'txn-1', category: 'Grocery' })
+    expect(res.status).toBe(404)
+    expect((await res.json()).error).toBe('That transaction no longer exists. Showing the latest.')
   })
 
   it('reads every column the later steps need', async () => {
@@ -239,11 +243,12 @@ describe('POST /api/transactions/categorize', () => {
     }
   })
 
-  it('answers 400 for a row the bank removed, and writes nothing', async () => {
+  // 409, not 400, so the picker reloads and the removed row goes from the list (#139).
+  it('answers 409 for a row the bank removed, and writes nothing', async () => {
     const calls = makeSupabase({ row: { ...ROW, removed: true } })
     const res = await post({ transactionId: 'txn-1', category: 'Grocery' })
-    expect(res.status).toBe(400)
-    expect((await res.json()).error).toBe('Your bank removed that transaction. Refresh and try again.')
+    expect(res.status).toBe(409)
+    expect((await res.json()).error).toBe('Your bank removed that transaction. Showing the latest.')
     expect(calls.updates).toHaveLength(0)
   })
 
@@ -282,12 +287,13 @@ describe('POST /api/transactions/categorize', () => {
   })
 
   // A name that is not one of the household's categories, including the display fallback
-  // 'Uncategorized' (spec decision 7: clearing is not supported).
-  it.each(['Uncategorized', 'Not A Category'])('answers 400 for %s, and writes nothing', async (category) => {
+  // 'Uncategorized' (spec decision 7: clearing is not supported). From the picker, that's a category
+  // deleted since the list loaded, so 409, not 400: the picker reloads its options (#139).
+  it.each(['Uncategorized', 'Not A Category'])('answers 409 for %s, and writes nothing', async (category) => {
     const calls = makeSupabase({ row: ROW })
     const res = await post({ transactionId: 'txn-1', category })
-    expect(res.status).toBe(400)
-    expect((await res.json()).error).toBe('That category no longer exists. Refresh and try again.')
+    expect(res.status).toBe(409)
+    expect((await res.json()).error).toBe('That category no longer exists. Showing the latest.')
     expect(calls.updates).toHaveLength(0)
   })
 
@@ -336,7 +342,7 @@ describe('POST /api/transactions/categorize', () => {
     makeSupabase({ row: ROW, update: { error: null, count: 0 } })
     const res = await post({ transactionId: 'txn-1', category: 'Grocery' })
     expect(res.status).toBe(409)
-    expect((await res.json()).error).toBe('This transaction just changed. Refresh and try again.')
+    expect((await res.json()).error).toBe('This transaction just changed. Showing the latest.')
   })
 
   // A count the server did not send is not a count of one. Treating it as a write would report a
@@ -348,10 +354,10 @@ describe('POST /api/transactions/categorize', () => {
   })
 
   // Category names match exactly, as stored. A near-miss is not that category.
-  it('answers 400 for a category in the wrong case, and writes nothing', async () => {
+  it('answers 409 for a category in the wrong case, and writes nothing', async () => {
     const calls = makeSupabase({ row: ROW })
     const res = await post({ transactionId: 'txn-1', category: 'grocery' })
-    expect(res.status).toBe(400)
+    expect(res.status).toBe(409)
     expect(calls.updates).toHaveLength(0)
   })
 

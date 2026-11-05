@@ -14,7 +14,8 @@ afterEach(() => {
 // A real spy, not a bare closure. With `refresh: () => {}` no test can tell whether the list is ever
 // told to reload, so deleting the call, or making it run after a refused save, leaves the suite
 // green. A refused save writes nothing: the server holds the old value, which the picker already
-// shows while the error explains why, so a reload there is a wasted round trip.
+// shows while the error explains why, so a reload there is a wasted round trip. The exception is a
+// refusal that says the row is stale, where showing the latest is the point (#139).
 const refresh = vi.hoisted(() => vi.fn())
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }))
 
@@ -30,8 +31,9 @@ const select = () => screen.getByRole('combobox') as HTMLSelectElement
 
 // The route always answers in JSON, so every stand-in for its reply carries that content type.
 const JSON_TYPE = { 'content-type': 'application/json' }
-const reply = (ok: boolean, body: unknown) => ({
+const reply = (ok: boolean, body: unknown, status = ok ? 200 : 400) => ({
   ok,
+  status,
   redirected: false,
   headers: new Headers(JSON_TYPE),
   json: async () => body,
@@ -41,7 +43,7 @@ describe('CategoryPicker', () => {
   // #28 spec §8.2: keyed on source and value, so a row whose REASON for a name changes (a rule equal
   // to the bank's category is removed: rule → bank, same name) still drops a stale alert.
   it('clears its alert when the source changes and the name does not', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply(false, { error: 'This transaction just changed. Refresh and try again.' })))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply(false, { error: 'A credit-card payment is already kept out of spending and income.' })))
     const { rerender } = render(<CategoryPicker {...props} source="rule" />)
     fireEvent.change(select(), { target: { value: 'Shopping' } })
     expect(await screen.findByRole('alert')).toBeTruthy()
@@ -95,7 +97,8 @@ describe('CategoryPicker', () => {
   })
 
   // A refused save wrote nothing, so the server still holds the old value. The picker already shows
-  // it while the error explains why; a refresh would only re-render the same value.
+  // it while the error explains why; a refresh would only re-render the same value. A refusal that
+  // says the row is stale (404 or 409) is the exception, below.
   it('does not reload the page when the save is refused', async () => {
     vi.stubGlobal(
       'fetch',
@@ -427,5 +430,49 @@ describe('CategoryPicker', () => {
     expect(select().disabled).toBe(false)
     expect(onBusyChange.mock.calls.map((c) => c[0])).toEqual([true, false])
     expect(refresh).toHaveBeenCalledTimes(1)
+  })
+})
+
+
+// #139: the route's 404 and 409 mean this row is stale: the transaction is gone or the bank removed
+// it, the category was deleted, or the bank changed the row during the save. The route used to say
+// "Refresh and try again", and in the installed app there's nothing to refresh with. So the picker
+// reloads itself, and the words now say the latest is showing.
+describe('CategoryPicker: a refusal that says this row is stale (#139)', () => {
+  const STALE = [
+    [404, 'That transaction no longer exists. Showing the latest.'],
+    [409, 'That category no longer exists. Showing the latest.'],
+  ] as const
+
+  it.each(STALE)('reloads after a %s, and shows its words', async (status, words) => {
+    vi.stubGlobal('fetch', vi.fn(async () => reply(false, { error: words }, status)))
+    render(<CategoryPicker {...props} />)
+    fireEvent.change(select(), { target: { value: 'Shopping' } })
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe(words))
+    expect(select().value).toBe('Food & Drink')
+    expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  // A deleted category: the reload leaves the row as it was, so the message stays while the options
+  // lose the category. Like any refusal's, it goes when the server's value next changes.
+  it('keeps its message while the reload leaves the row as it was', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => reply(false, { error: STALE[1][1] }, 409)))
+    const { rerender } = render(<CategoryPicker {...props} />)
+    fireEvent.change(select(), { target: { value: 'Shopping' } })
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy())
+    rerender(<CategoryPicker {...props} options={['Food & Drink', 'Travel']} />)
+    expect(screen.getByRole('alert').textContent).toBe(STALE[1][1])
+    expect([...select().options].map((o) => o.value)).toEqual(['Food & Drink', 'Travel'])
+    rerender(<CategoryPicker {...props} options={['Food & Drink', 'Travel']} value="Travel" source="pick" />)
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  // Any other refusal wrote nothing and left the row as it was, so there's nothing to reload.
+  it.each([400, 500, 503])('does not reload after a %s', async (status) => {
+    vi.stubGlobal('fetch', vi.fn(async () => reply(false, { error: 'nope' }, status)))
+    render(<CategoryPicker {...props} />)
+    fireEvent.change(select(), { target: { value: 'Shopping' } })
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy())
+    expect(refresh).not.toHaveBeenCalled()
   })
 })

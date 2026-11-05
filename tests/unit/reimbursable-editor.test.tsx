@@ -208,9 +208,9 @@ describe('ReimbursableEditor', () => {
   // what was typed, so a retry is one tap, and says why. A refusal wrote nothing and needs no reload
   // unless it says this row is stale (404, 409); an unknown outcome may have written, so it reloads.
   it.each([
-    ['a refusal', () => refused(400, 'Your bank removed that transaction. Refresh and try again.'), 'Your bank removed that transaction. Refresh and try again.', 0],
-    ['a 404', () => refused(404, 'That transaction no longer exists. Refresh and try again.'), 'That transaction no longer exists. Refresh and try again.', 1],
-    ['a 409', () => refused(409, 'This transaction just changed. Refresh and try again.'), 'This transaction just changed. Refresh and try again.', 1],
+    ['a refusal', () => refused(400, 'A credit-card payment is already kept out of spending and income.'), 'A credit-card payment is already kept out of spending and income.', 0],
+    ['a 404', () => refused(404, 'That transaction no longer exists. Showing the latest.'), 'That transaction no longer exists. Showing the latest.', 1],
+    ['a 409', () => refused(409, 'This transaction just changed. Showing the latest.'), 'This transaction just changed. Showing the latest.', 1],
     ['a redirect to the login page', redirectedToLogin, 'Your session ended. Sign in again.', 0],
     // The #103 bug: any OK reply used to close the dialog as if saved.
     ['a 200 without ok: true', () => new Response('{}', { headers: { 'content-type': 'application/json' } }), 'That could not be saved.', 0],
@@ -276,8 +276,8 @@ describe('ReimbursableEditor', () => {
     const escape = () => fireEvent(screen.getByRole('dialog'), new Event('cancel', { bubbles: false, cancelable: true }))
     escape()
     expect(screen.getByRole('dialog')).toBeTruthy()
-    settle(refused(400, 'Your bank removed that transaction. Refresh and try again.'))
-    expect((await screen.findByRole('alert')).textContent).toBe('Your bank removed that transaction. Refresh and try again.')
+    settle(refused(400, 'A credit-card payment is already kept out of spending and income.'))
+    expect((await screen.findByRole('alert')).textContent).toBe('A credit-card payment is already kept out of spending and income.')
     expect(screen.getByRole('dialog')).toBeTruthy()
     // Settled, so Escape is the way out again.
     escape()
