@@ -201,7 +201,7 @@ describe('Breakdown reads', () => {
     await expect(render(metric)).rejects.toThrow(/could not read linked banks: statement timeout/)
   })
 
-  // #172: an account with no membership, which sign-in lets through when it cannot check
+  // #172: an account with no membership, which sign-in lets through when it can't read the membership
   // (lib/access.ts), has no household, so no banks, and on net worth no home value. Every metric
   // renders, and reads neither: both reads are set to fail here, so reading one would throw.
   it.each(METRICS)('renders %s for an account with no household, reading no banks', async (metric) => {

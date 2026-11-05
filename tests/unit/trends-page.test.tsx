@@ -163,7 +163,7 @@ describe('Trends banks (#135)', () => {
     await expect(TrendsPage()).rejects.toThrow(/could not read your household: permission denied/)
   })
 
-  // #172: an account with no membership, which sign-in lets through when it cannot check
+  // #172: an account with no membership, which sign-in lets through when it can't read the membership
   // (lib/access.ts), has no household, so no banks. The page renders, as it did before it read
   // banks, and reads none: the read is set to fail here, so reading it would throw.
   it('renders for an account with no household, reading no banks', async () => {

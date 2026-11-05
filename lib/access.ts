@@ -8,14 +8,19 @@ import { supabaseAdmin } from '@/lib/supabase/admin'
 // - 'try-again': not a member, and their invite couldn't be read or used. Let in, they'd find no
 //   household and the invite never used (#240), so they're signed out and asked to sign in again,
 //   which runs this check again.
-// - 'not-invited': affirmatively neither a member nor invited. Their throwaway account is deleted.
+// - 'not-invited': affirmatively neither a member nor invited. Their throwaway account is deleted,
+//   though that delete's own failure isn't checked yet (#249).
 export type Access = 'let-in' | 'try-again' | 'not-invited'
+
+// Postgres's unique violation. On the membership insert, the membership already exists.
+const ALREADY_EXISTS = '23505'
 
 // Enforce invite-only access at login (any provider).
 //
 // Safety rule: NEVER delete a user on a query/insert error — a transient failure
 // must not nuke a legitimate account. Only 'not-invited' deletes, and only once
-// both reads have answered that there's nothing to find.
+// the reads have answered that there's nothing to find: no membership, and no
+// invite, or no email for one to name.
 export async function ensureHouseholdAccess(
   userId: string,
   email: string | undefined
@@ -52,11 +57,18 @@ export async function ensureHouseholdAccess(
         .insert({ user_id: userId, household_id: inv.household_id })
       // Only consume the invite once the membership actually exists; on failure
       // keep the invite so signing in again can retry, and never delete the user.
-      if (insErr) {
+      // A membership that already exists is one a second sign-in, racing this one,
+      // has just made: they're a member, so on as if this insert had made it.
+      if (insErr && insErr.code !== ALREADY_EXISTS) {
         console.error('[access] could not add the invited person to the household, so ask them to sign in again', { code: insErr.code, message: insErr.message })
         return 'try-again'
       }
-      await supabaseAdmin.from('invites').delete().eq('email', e)
+      const { error: delErr } = await supabaseAdmin.from('invites').delete().eq('email', e)
+      // They're a member, so they're let in either way. Logged, because the invite left behind would
+      // add them back if they were ever removed from the household by hand (#248).
+      if (delErr) {
+        console.error('[access] could not use up the invite of someone now in the household', { code: delErr.code, message: delErr.message })
+      }
       return 'let-in'
     }
   }

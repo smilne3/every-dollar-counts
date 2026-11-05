@@ -159,6 +159,49 @@ describe('a local sign-out with the real Supabase client, when Supabase Auth can
   })
 })
 
+// What both try-again paths rely on: the sign-in writes the new session's cookies, and the sign-out
+// later in the same request has to clear those same cookies before the redirect carries them. Next's
+// cookie store in a route handler reads back its own writes, so this one does too. The real client,
+// with Supabase Auth answering the sign-in and then unreachable for the sign-out (#240 review).
+describe('a local sign-out with the real Supabase client, after a sign-in in the same request', () => {
+  it.each([
+    ['in one cookie', ''],
+    ['split across several cookies', 'x'.repeat(6000)],
+  ])('clears every cookie the sign-in wrote, with the session %s', async (_, padding) => {
+    const jar = new Map<string, { value: string; maxAge?: number }>()
+    const session = {
+      access_token: `fresh-access${padding}`,
+      refresh_token: 'fresh-refresh',
+      token_type: 'bearer',
+      expires_in: 3600,
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+      user: { id: 'user-1', aud: 'authenticated', email: 'new@example.com' },
+    }
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/auth/v1/verify')) {
+        return new Response(JSON.stringify(session), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      throw new TypeError('fetch failed')
+    })
+    const client = createServerClient('https://test.supabase.co', 'test-publishable-key', {
+      cookies: {
+        getAll: () => [...jar].filter(([, c]) => c.value !== '').map(([name, c]) => ({ name, value: c.value })),
+        setAll: (list) => list.forEach(({ name, value, options }) => void jar.set(name, { value, maxAge: options?.maxAge })),
+      },
+      global: { fetch },
+    })
+
+    expect((await client.auth.verifyOtp({ type: 'magiclink', token_hash: 'th' })).error).toBeNull()
+    // One cookie, or for the long session more than one: the case where a missed chunk would survive.
+    const written = [...jar.keys()]
+    expect(written.length).toBeGreaterThan(0)
+    expect(written.length > 1).toBe(padding !== '')
+
+    await client.auth.signOut({ scope: 'local' })
+    for (const name of written) expect(jar.get(name)).toEqual({ value: '', maxAge: 0 })
+  })
+})
+
 describe('GET /auth/confirm: the session ended right after sign-in', () => {
   it.each([
     ['no session', new AuthSessionMissingError()],

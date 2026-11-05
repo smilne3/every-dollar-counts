@@ -5,14 +5,15 @@ import { tapTargetClass } from '@/components/ui/styles'
 // Where app/auth/confirm/route.ts sends someone whose sign-in it could not finish: Supabase Auth
 // could not be asked (#143), or their invite couldn't be read or used (#240). Nothing showed they
 // aren't invited, so they are not told that, and nothing showed the link was bad. Signing in again
-// finishes it, a first sign-in's invite included.
+// finishes it, a first sign-in's invite included. The words fit both causes: in #240's, the
+// sign-in service answered and the database didn't.
 export default function SignInTryAgain() {
   return (
     <div className="grid min-h-screen place-items-center bg-canvas px-4">
       <Card className="max-w-sm p-8 text-center">
         <h1 className="text-lg font-semibold text-ink">Sign-in couldn&apos;t be completed</h1>
         <p className="mt-2 text-sm text-muted">
-          Something went wrong reaching the sign-in service. Try again, or come back in a moment.
+          Something went wrong while signing you in. Try again, or come back in a moment.
         </p>
         <Link
           href="/login"

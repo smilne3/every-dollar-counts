@@ -26,8 +26,8 @@ export const householdTimezone = cache(async (): Promise<string> => {
 // household a page cannot ask which banks are syncing, and an empty answer would hide the "isn't
 // syncing" banner (#46, #135).
 //
-// Null for an account with no membership, which sign-in lets through when it cannot check
-// (lib/access.ts fails open). That account has no household and so no banks, which is the truth,
+// Null for an account with no membership, which sign-in lets through when it can't read the
+// membership (lib/access.ts). That account has no household and so no banks, which is the truth,
 // not a failed read. maybeSingle, not single: single makes no row an error (PGRST116), which put
 // such an account on the error page on every visit, with nothing a retry could fix.
 export async function currentHouseholdId(): Promise<string | null> {

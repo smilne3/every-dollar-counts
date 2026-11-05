@@ -89,7 +89,8 @@ describe('currentHouseholdId', () => {
     await expect(currentHouseholdId()).rejects.toThrow(new Error(message))
   })
 
-  // #172: sign-in lets an account with no membership through when it cannot check (lib/access.ts).
+  // #172: sign-in lets an account with no membership through when it can't read the membership
+  // (lib/access.ts).
   // That account has no household, so no banks: a true answer, not a failed read, and the pages
   // render for it. As an error it put them on the error page on every visit.
   it('returns null for an account with no household, rather than failing', async () => {

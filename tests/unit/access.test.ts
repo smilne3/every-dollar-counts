@@ -95,6 +95,26 @@ describe('ensureHouseholdAccess', () => {
     expect(logs).toEqual([['[access] could not add the invited person to the household, so ask them to sign in again', NO_ANSWER]])
   })
 
+  // Two first sign-ins at once: the other has just made the membership, so this one is a member too.
+  it('lets in an invited first-timer whose membership a second sign-in has just made, and uses up the invite', async () => {
+    membership.mockResolvedValue({ data: [], error: null })
+    invite.mockResolvedValue({ data: { household_id: 'hh-1' }, error: null })
+    insert.mockResolvedValue({ error: { code: '23505', message: 'duplicate key value violates unique constraint "memberships_pkey"' } })
+    expect(await ensureHouseholdAccess('user-2', 'new@example.com')).toBe('let-in')
+    expect(inviteDelete).toHaveBeenCalledWith('new@example.com')
+    expect(deleteUser).not.toHaveBeenCalled()
+    expect(logs).toEqual([])
+  })
+
+  // Left behind, the invite would add them back if they were ever removed by hand (#248).
+  it('lets in someone just added to the household, and logs it, when using up their invite fails', async () => {
+    membership.mockResolvedValue({ data: [], error: null })
+    invite.mockResolvedValue({ data: { household_id: 'hh-1' }, error: null })
+    inviteDelete.mockResolvedValue({ error: NO_ANSWER })
+    expect(await ensureHouseholdAccess('user-2', 'new@example.com')).toBe('let-in')
+    expect(logs).toEqual([['[access] could not use up the invite of someone now in the household', NO_ANSWER]])
+  })
+
   it('removes an account that is neither a member nor invited', async () => {
     membership.mockResolvedValue({ data: [], error: null })
     invite.mockResolvedValue({ data: null, error: null })

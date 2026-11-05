@@ -500,7 +500,7 @@ describe('Transactions banks (#171)', () => {
     await expect(render()).rejects.toThrow(/could not read your household: permission denied/)
   })
 
-  // An account with no membership, which sign-in lets through when it cannot check
+  // An account with no membership, which sign-in lets through when it can't read the membership
   // (lib/access.ts), has no household, so no banks. The page renders, as it did before it read
   // banks, and reads none: the read is set to fail here, so reading it would throw.
   it('renders for an account with no household, reading no banks', async () => {
