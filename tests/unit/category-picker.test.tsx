@@ -432,10 +432,11 @@ describe('CategoryPicker', () => {
   })
 })
 
-// #139: the route's 404 and 409 mean this row is stale: the transaction is gone, the bank removed it,
-// the category was deleted, or it changed on another device. The route used to say "Refresh and try
-// again", and in the installed app there's nothing to refresh with. So the picker reloads itself, and
-// the words, which now say the latest is showing, stay as the reload moves the select.
+// #139: the route's 404 and 409 mean this row is stale: the transaction is gone or the bank removed
+// it, the category was deleted, or the bank changed the row during the save. The route used to say
+// "Refresh and try again", and in the installed app there's nothing to refresh with. So the picker
+// reloads itself, and the words, which now say the latest is showing, stay if the reload moves the
+// select.
 describe('CategoryPicker: a refusal that says this row is stale (#139)', () => {
   const STALE = [
     [404, 'That transaction no longer exists. Showing the latest.'],
@@ -451,8 +452,9 @@ describe('CategoryPicker: a refusal that says this row is stale (#139)', () => {
     expect(refresh).toHaveBeenCalledTimes(1)
   })
 
-  // The reload brings another device's pick. The words stay, so the select doesn't change with nothing
-  // to say why. The next change from the server clears them, as before.
+  // The reload changes this row, say a category deleted elsewhere took the row's pick with it. The
+  // words stay, so the select doesn't change with nothing to say why. The next change from the server
+  // clears them, as before.
   it('keeps the words when the reload moves the select, and drops them at the next change', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => reply(false, { error: STALE[1][1] }, 409)))
     const { rerender } = render(<CategoryPicker {...props} />)

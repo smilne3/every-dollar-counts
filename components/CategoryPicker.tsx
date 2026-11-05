@@ -35,9 +35,9 @@ export function CategoryPicker({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Set when a refusal that says this row is stale (404 or 409) triggers the reload, and consumed by
-  // the re-sync that reload brings. That reload is what moves the select to another device's pick,
-  // so the refusal's words, which say the latest is showing, stay with it rather than vanish as the
-  // select moves (#139). As CategoryRulesCard's refusedStale.
+  // the re-sync below if that reload changes this row. The refusal's words, which say the latest is
+  // showing, stay through that change rather than vanish as the select moves (#139). As
+  // CategoryRulesCard's refusedStale.
   const [refusedStale, setRefusedStale] = useState(false)
   // Follow the server. When a refresh brings a new value, or the same name for a new reason (a rule
   // equal to the bank's category is removed: rule → bank), show it and drop any optimistic choice
@@ -85,10 +85,11 @@ export function CategoryPicker({
         setPending(null)
         if (result.outcome === 'refused') {
           setError(result.error)
-          // 404 and 409: the route says this row is stale. The transaction is gone, the bank removed
-          // it, the category was deleted, or it changed on another device. So show the latest under
-          // the message, which says so. The installed app has no other way to reload (#139). Any
-          // other refusal wrote nothing, and the server still holds what the picker shows.
+          // 404 and 409: the route says this row is stale. The transaction is gone or the bank
+          // removed it, the category was deleted, or the bank changed the row during the save. So
+          // show the latest under the message, which says so. The installed app has no other way to
+          // reload (#139). Any other refusal wrote nothing, and the server still holds what the
+          // picker shows.
           reload = result.status === 404 || result.status === 409
           setRefusedStale(reload)
         } else {
