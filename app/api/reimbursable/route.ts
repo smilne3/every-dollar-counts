@@ -50,12 +50,14 @@ export async function PATCH(req: Request) {
     console.error('[reimbursable] transaction read failed', { id: transactionId, code: readError.code, message: readError.message })
     return fail(500, TRY_AGAIN)
   }
-  if (!txn) return fail(404, 'That transaction no longer exists. Refresh and try again.')
+  if (!txn) return fail(404, 'That transaction no longer exists. Showing the latest.')
 
   // `removed` is a soft flag (a Plaid repost), not a delete, so nothing stops a mark being written
   // to a row that no longer renders anywhere. That mark would then be unreachable while still
-  // counting toward what you are owed.
-  if (txn.removed) return fail(400, 'Your bank removed that transaction. Refresh and try again.')
+  // counting toward what you are owed. A 409, like the other stale-row refusals here, so the
+  // editors reload and the removed row goes. These used to say "Refresh and try again", which the
+  // installed app has no way to do (#139).
+  if (txn.removed) return fail(409, 'Your bank removed that transaction. Showing the latest.')
 
   // Guards #31. A credit-card payment is already excluded from both spending and income — the
   // purchases were counted when they happened — so marking it reduces nothing while still inflating
@@ -94,7 +96,7 @@ export async function PATCH(req: Request) {
   if (!count) {
     // A stale-card refusal: the editors reload on a 409 to show the latest.
     console.error('[reimbursable] update matched no rows (row changed, or the update policy is missing)', { id: transactionId })
-    return fail(409, 'This transaction just changed. Refresh and try again.')
+    return fail(409, 'This transaction just changed. Showing the latest.')
   }
 
   return NextResponse.json({ ok: true })

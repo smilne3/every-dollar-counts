@@ -34,11 +34,6 @@ export function CategoryPicker({
   const val = pending ?? value
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // Set when a refusal that says this row is stale (404 or 409) triggers the reload, and consumed by
-  // the re-sync below if that reload changes this row. The refusal's words, which say the latest is
-  // showing, stay through that change rather than vanish as the select moves (#139). As
-  // CategoryRulesCard's refusedStale.
-  const [refusedStale, setRefusedStale] = useState(false)
   // Follow the server. When a refresh brings a new value, or the same name for a new reason (a rule
   // equal to the bank's category is removed: rule → bank), show it and drop any optimistic choice
   // or alert. React's documented way to adjust state when a prop changes; the same idiom as
@@ -48,8 +43,7 @@ export function CategoryPicker({
   if (seen !== serverKey) {
     setSeen(serverKey)
     setPending(null)
-    if (!refusedStale) setError(null)
-    setRefusedStale(false)
+    setError(null)
   }
 
   // The current value is always selectable, even when it is 'Uncategorized' or a stale name.
@@ -65,7 +59,6 @@ export function CategoryPicker({
     setPending(category)
     working(true)
     setError(null)
-    setRefusedStale(false)
     // What to do once the request has settled: reload after a save, after one whose outcome is
     // unknown, or after a refusal that says this row is stale. Never while it is in flight.
     let reload = false
@@ -87,11 +80,12 @@ export function CategoryPicker({
           setError(result.error)
           // 404 and 409: the route says this row is stale. The transaction is gone or the bank
           // removed it, the category was deleted, or the bank changed the row during the save. So
-          // show the latest under the message, which says so. The installed app has no other way to
-          // reload (#139). Any other refusal wrote nothing, and the server still holds what the
-          // picker shows.
+          // show the latest, as the message says. The installed app has no other way to reload
+          // (#139). For a deleted category the row stays and so does the message, and the options
+          // lose the category. A row that's gone takes its message with it, and a pending
+          // transaction that posted shows as the posted one, to pick again (#252). Any other refusal
+          // wrote nothing, and the server still holds what the picker shows.
           reload = result.status === 404 || result.status === 409
-          setRefusedStale(reload)
         } else {
           // Failed in flight, timed out, or a reply that could not be read. None of them means the
           // request never reached the server.
