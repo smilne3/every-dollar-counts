@@ -265,17 +265,17 @@ describe('PATCH and DELETE /api/categories: one call to the database', () => {
   })
 
   // A call whose reply was lost may have run, all of it or none (#173). It's logged with its status,
-  // so the log can tell a dropped connection (0) from a gateway's page.
+  // so the log can tell a dropped connection (0) from a gateway's page, which has no code at all.
   it.each([
-    ['PATCH', 'rename_category', () => rename(), 'rename the category', NO_ANSWER],
-    ['PATCH', 'rename_category', () => rename(), 'rename the category', GATEWAY_502],
-    ['DELETE', 'delete_category', del, 'delete the category', NO_ANSWER],
-    ['DELETE', 'delete_category', del, 'delete the category', GATEWAY_502],
-  ] as const)('%s answers that it may not have saved when the reply was lost, and logs it', async (_, fn, send, what, reply) => {
+    ['PATCH', 'rename_category', () => rename(), 'rename the category', NO_ANSWER, ''],
+    ['PATCH', 'rename_category', () => rename(), 'rename the category', GATEWAY_502, undefined],
+    ['DELETE', 'delete_category', del, 'delete the category', NO_ANSWER, ''],
+    ['DELETE', 'delete_category', del, 'delete the category', GATEWAY_502, undefined],
+  ] as const)('%s answers that it may not have saved when the reply was lost, and logs it', async (_, fn, send, what, reply, code) => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
     rpcReplies.set(fn, reply)
     expect(await answerOf(await send())).toEqual(UNKNOWN_ANSWER)
-    expect(spy.mock.calls).toEqual([[`[categories] could not ${what}`, { id: 'c-grocery', status: reply.status, code: reply.error.code, message: reply.error.message }]])
+    expect(spy.mock.calls).toEqual([[`[categories] could not ${what}`, { id: 'c-grocery', status: reply.status, code, message: reply.error.message }]])
     spy.mockRestore()
   })
 
