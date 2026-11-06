@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { refusedCategoryName } from '@/lib/category-names'
 import { resolveCategory } from '@/lib/category-rules'
 import { NONE } from '@/lib/category-suggest-request'
@@ -49,5 +51,26 @@ describe('the names the app uses are refused', () => {
 
   it("Jev's answer when none of the categories fits", () => {
     expect(refusedCategoryName(NONE)).not.toBeNull()
+  })
+})
+
+// db/seeds/023_category_rename_delete_checks.sql finds categories already using a refused name, with
+// lists of its own, which have to say the same.
+describe('the checks query in db/seeds lists the same names', () => {
+  const sql = readFileSync(join(__dirname, '../../db/seeds/023_category_rename_delete_checks.sql'), 'utf8')
+  const quoted = (list: string) => [...list.matchAll(/'([^']+)'/g)].map((m) => m[1])
+  const anyCase = quoted(/lower\(btrim\(c\.name\)\) in \(([^)]*)\)/.exec(sql)![1])
+  const exact = quoted(/or c\.name in \(([^)]*)\)/.exec(sql)![1])
+
+  it('every name it lists is one the app refuses', () => {
+    for (const name of [...anyCase, ...exact]) expect(refusedCategoryName(name)).not.toBeNull()
+  })
+
+  it('lists the names the app shows for something else, lowercased', () => {
+    expect([...anyCase].sort()).toEqual(['none', 'other', 'uncategorized'])
+  })
+
+  it('lists every name every object has', () => {
+    expect([...exact].sort()).toEqual(Object.getOwnPropertyNames(Object.prototype).sort())
   })
 })

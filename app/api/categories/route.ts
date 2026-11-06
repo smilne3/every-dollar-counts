@@ -4,6 +4,7 @@ import { checkSignIn } from '@/lib/auth-check'
 import { assertEnvMatchesDatabase, envGuardResponse } from '@/lib/app-env'
 import { refusedCategoryName } from '@/lib/category-names'
 import { unknownIfLost } from '@/lib/lost-reply'
+import { SESSION_ENDED } from '@/lib/save-response'
 
 type Supabase = Awaited<ReturnType<typeof createClient>>
 
@@ -14,17 +15,17 @@ const NOT_DELETED = 'That category could not be deleted. Please try again.'
 const GONE = 'That category no longer exists. Showing the latest.'
 const NAME_TAKEN = 'That name is already a category.'
 
-// The refusals a write's handler answers in words of its own.
+// The two refusals a write answers with a status of its own, 404 and 409, rather than a 500.
 const ALREADY_EXISTS = '23505' // unique (household_id, name) on categories, 007
 const NO_SUCH_CATEGORY = 'P0002' // raised by rename_category and delete_category, 023
 
 // Sign-in, by the rule in lib/auth-check.ts (#143): a 503 when Supabase Auth could not be asked,
-// in words CategoryManager shows as they stand, and a 401 when the session has ended. Null when
-// signed in. Every handler runs it before touching the database.
+// and a 401 when the session has ended, each in words CategoryManager shows as they stand. Null
+// when signed in. Every handler runs it before touching the database.
 async function refusedSignIn(supabase: Supabase, unchecked: string): Promise<NextResponse | null> {
   const signIn = await checkSignIn(supabase, '[categories]')
   if (signIn.state === 'unknown') return NextResponse.json({ error: unchecked }, { status: 503 })
-  if (signIn.state === 'ended') return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  if (signIn.state === 'ended') return NextResponse.json({ error: SESSION_ENDED }, { status: 401 })
   return null
 }
 
@@ -48,8 +49,9 @@ async function refusedEnvironment(nothing: 'added' | 'renamed' | 'deleted'): Pro
 }
 
 // A read that failed: a 500 in the handler's own words, before anything is written, and a log line
-// naming the read. Taken as no row, a failed read answered "unauthorized" or "not found", or saved a
-// new category at sort_order 1, near the top instead of last, and logged nothing (#241).
+// naming the read. Before #241 a failed read was taken as no row: the membership read answered
+// "unauthorized", the highest sort_order read saved a new category at 1, near the top instead of
+// last, and nothing was logged.
 function failedRead(
   what: string,
   error: { code?: string; message: string },
@@ -63,11 +65,12 @@ function failedRead(
 // failed read too, as lib/read-all.ts treats it, not an empty list (#222).
 const NO_DATA = { message: 'read returned no data and no error' }
 
-// A write that failed. One whose reply was lost may have landed, so its outcome is unknown
+// A write that failed, logged first with its status, as every write route logs before deciding
+// what to answer. One whose reply was lost may have landed, so its outcome is unknown
 // (lib/lost-reply.ts). A refusal wrote nothing. A category that's gone is a 404, and a name another
-// category has a 409. Any other refusal is logged and answered in the handler's words. The
-// database's own words, such as "duplicate key value violates unique constraint", reached the
-// screen as they stood (#246).
+// category has a 409. Any other refusal is answered in the handler's words. The database's own
+// words, such as "duplicate key value violates unique constraint", reached the screen as they
+// stood (#246).
 function failedWrite(
   what: string,
   status: number,
@@ -75,11 +78,11 @@ function failedWrite(
   words: string,
   details: Record<string, unknown> = {}
 ) {
+  console.error(`[categories] could not ${what}`, { ...details, status, code: error.code, message: error.message })
   const lost = unknownIfLost(status, error)
   if (lost) return lost
   if (error.code === NO_SUCH_CATEGORY) return NextResponse.json({ error: GONE }, { status: 404 })
   if (error.code === ALREADY_EXISTS) return NextResponse.json({ error: NAME_TAKEN }, { status: 409 })
-  console.error(`[categories] could not ${what}`, { ...details, code: error.code, message: error.message })
   return NextResponse.json({ error: words }, { status: 500 })
 }
 

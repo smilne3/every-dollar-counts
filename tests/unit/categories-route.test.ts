@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 // #28 spec §6.3: deleting a category now deletes its rules through the FK, in the database every
 // environment shares. So DELETE is environment-guarded, before ANY read or write.
@@ -129,7 +131,7 @@ describe('/api/categories sign-in', () => {
       getUser.mockResolvedValue({ data: { user: null }, error })
       const res = await send()
       expect(res.status).toBe(401)
-      expect(await res.json()).toEqual({ error: 'unauthorized' })
+      expect(await res.json()).toEqual({ error: 'Your session ended. Sign in again.' })
       expect(calls).toEqual([])
       expect(assertEnvMatchesDatabase).not.toHaveBeenCalled()
     }
@@ -241,29 +243,40 @@ describe('PATCH and DELETE /api/categories: one call to the database', () => {
   it.each([
     ['PATCH', 'rename_category', () => rename()],
     ['DELETE', 'delete_category', del],
-  ] as const)('%s answers 404 in words for a category that is gone', async (_, fn, send) => {
+  ] as const)('%s answers 404 in words for a category that is gone, and logs it', async (_, fn, send) => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
     rpcReplies.set(fn, GONE)
     const res = await send()
     expect(res.status).toBe(404)
     expect(await res.json()).toEqual({ error: 'That category no longer exists. Showing the latest.' })
+    const what = fn === 'rename_category' ? 'rename the category' : 'delete the category'
+    expect(spy.mock.calls).toEqual([[`[categories] could not ${what}`, { id: 'c-grocery', status: 500, code: 'P0002', message: GONE.error.message }]])
+    spy.mockRestore()
   })
 
   it('PATCH answers 409 in words for a name another category has, not the database words (#246)', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
     rpcReplies.set('rename_category', DUPLICATE)
     const res = await rename()
     expect(res.status).toBe(409)
     expect(await res.json()).toEqual({ error: 'That name is already a category.' })
+    expect(spy.mock.calls).toEqual([['[categories] could not rename the category', { id: 'c-grocery', status: 409, code: '23505', message: DUPLICATE.error.message }]])
+    spy.mockRestore()
   })
 
-  // A call whose reply was lost may have run, all of it or none (#173).
+  // A call whose reply was lost may have run, all of it or none (#173). It's logged with its status,
+  // so the log can tell a dropped connection (0) from a gateway's page.
   it.each([
-    ['PATCH', 'rename_category', () => rename(), NO_ANSWER],
-    ['PATCH', 'rename_category', () => rename(), GATEWAY_502],
-    ['DELETE', 'delete_category', del, NO_ANSWER],
-    ['DELETE', 'delete_category', del, GATEWAY_502],
-  ] as const)('%s answers that it may not have saved when the reply was lost', async (_, fn, send, reply) => {
+    ['PATCH', 'rename_category', () => rename(), 'rename the category', NO_ANSWER],
+    ['PATCH', 'rename_category', () => rename(), 'rename the category', GATEWAY_502],
+    ['DELETE', 'delete_category', del, 'delete the category', NO_ANSWER],
+    ['DELETE', 'delete_category', del, 'delete the category', GATEWAY_502],
+  ] as const)('%s answers that it may not have saved when the reply was lost, and logs it', async (_, fn, send, what, reply) => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
     rpcReplies.set(fn, reply)
     expect(await answerOf(await send())).toEqual(UNKNOWN_ANSWER)
+    expect(spy.mock.calls).toEqual([[`[categories] could not ${what}`, { id: 'c-grocery', status: reply.status, code: reply.error.code, message: reply.error.message }]])
+    spy.mockRestore()
   })
 
   // Any other refusal wrote nothing. It is logged with its code, and answered in words of the
@@ -279,7 +292,7 @@ describe('PATCH and DELETE /api/categories: one call to the database', () => {
     const res = await send()
     expect(res.status).toBe(500)
     expect(await res.json()).toEqual({ error: words })
-    expect(spy.mock.calls).toEqual([[`[categories] could not ${what}`, { id: 'c-grocery', code: reply.error.code, message: reply.error.message }]])
+    expect(spy.mock.calls).toEqual([[`[categories] could not ${what}`, { id: 'c-grocery', status: reply.status, code: reply.error.code, message: reply.error.message }]])
     spy.mockRestore()
   })
 })
@@ -287,17 +300,23 @@ describe('PATCH and DELETE /api/categories: one call to the database', () => {
 // #173: an add the database never answered may have landed, so the answer is that it may not have
 // saved, not a 400 carrying the fetch error's words. #246: a refusal is answered in words.
 describe('POST /api/categories: a write that fails', () => {
-  it('answers that an add may not have saved', async () => {
+  it('answers that an add may not have saved, and logs it', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
     replies.set('categories.insert', NO_ANSWER)
     expect(await answerOf(await add())).toEqual(UNKNOWN_ANSWER)
+    expect(spy.mock.calls).toEqual([['[categories] could not add the category', { status: 0, code: '', message: NO_ANSWER.error.message }]])
+    spy.mockRestore()
   })
 
   // The retry after a lost reply, when the first add had landed, comes here too.
   it('answers 409 in words for a name another category has, not the database words (#246)', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
     replies.set('categories.insert', DUPLICATE)
     const res = await add()
     expect(res.status).toBe(409)
     expect(await res.json()).toEqual({ error: 'That name is already a category.' })
+    expect(spy.mock.calls).toEqual([['[categories] could not add the category', { status: 409, code: '23505', message: DUPLICATE.error.message }]])
+    spy.mockRestore()
   })
 
   it('answers 500 in words and logs any other refusal', async () => {
@@ -306,8 +325,54 @@ describe('POST /api/categories: a write that fails', () => {
     const res = await add()
     expect(res.status).toBe(500)
     expect(await res.json()).toEqual({ error: 'That could not be saved. Please try again.' })
-    expect(spy.mock.calls).toEqual([['[categories] could not add the category', { code: REFUSED_5XX.error.code, message: REFUSED_5XX.error.message }]])
+    expect(spy.mock.calls).toEqual([['[categories] could not add the category', { status: 500, code: REFUSED_5XX.error.code, message: REFUSED_5XX.error.message }]])
     spy.mockRestore()
+  })
+})
+
+// A request missing what it needs is refused before anything is checked or written. CategoryManager
+// never sends one.
+describe('/api/categories: a request missing its id or name', () => {
+  it.each([
+    ['POST with no name', () => send(POST, 'POST', {}), 'name required'],
+    ['POST with a blank name', () => send(POST, 'POST', { name: '   ' }), 'name required'],
+    ['PATCH with no id', () => send(PATCH, 'PATCH', { name: 'Groceries' }), 'id and name required'],
+    ['PATCH with a blank name', () => send(PATCH, 'PATCH', { id: 'c-grocery', name: ' ' }), 'id and name required'],
+    ['DELETE with no id', () => send(DELETE, 'DELETE', {}), 'id required'],
+  ] as const)('%s answers 400 and touches nothing', async (_, request, words) => {
+    const res = await request()
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: words })
+    expect(calls).toEqual([])
+    expect(assertEnvMatchesDatabase).not.toHaveBeenCalled()
+  })
+})
+
+// PostgREST finds a function by the names of the arguments it's sent, so a name that differs from
+// the function's own answers PGRST202 to every rename or delete. These read the functions from 023,
+// as the SQL editor runs them, and hold the route's calls to them.
+describe('/api/categories and db/migrations/023: the same functions and argument names', () => {
+  const sql = readFileSync(join(__dirname, '../../db/migrations/023_category_rename_delete.sql'), 'utf8')
+  const params = (fn: string) => {
+    const signature = new RegExp(`create or replace function public\\.${fn}\\(([^)]*)\\)`).exec(sql)
+    if (!signature) throw new Error(`023 defines no ${fn}`)
+    return signature[1].split(',').map((p) => p.trim().split(/\s+/)[0])
+  }
+  const body = (fn: string) => sql.slice(sql.indexOf(`function public.${fn}(`)).split('\n$$;')[0]
+
+  it.each([
+    ['rename_category', () => rename()],
+    ['delete_category', del],
+  ] as const)('calls %s with exactly its parameters, in order', async (fn, send) => {
+    await send()
+    expect(rpcs.map((r) => r.fn)).toEqual([fn])
+    expect(Object.keys(rpcs[0].args as object)).toEqual(params(fn))
+  })
+
+  // What a concurrent rename or delete of the same category waits on. No test here can run two at
+  // once, so this holds the lock in place.
+  it.each(['rename_category', 'delete_category'])('%s locks the category row before writing', (fn) => {
+    expect(body(fn)).toMatch(/where c\.id = \w+\.category_id\s+for update;/)
   })
 })
 
