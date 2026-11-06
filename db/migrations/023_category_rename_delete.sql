@@ -8,16 +8,17 @@
 -- together, or none of them do.
 --
 -- SECURITY INVOKER: each function runs as the signed-in person, so RLS limits every statement to
--- their own household, as it did when the route sent the three requests itself. Each returns false
--- when it can see no category with that id (already deleted, or another household's), which the
--- route answers 404.
+-- their own household, as it did when the route sent the three requests itself. Each raises
+-- no_data_found (P0002) when it can see no category with that id (already deleted, or another
+-- household's), which the route answers 404. Otherwise each returns nothing, so any reply without
+-- an error means the change was made.
 --
 -- Hand-run in the SQL editor and safe to re-run. Changes no rows. Apply it before deploying the
 -- code that calls these functions (the route's PATCH and DELETE), which can't rename or delete
 -- anything without them. One database serves local, Preview and production (017_app_env.sql).
 
 create or replace function public.rename_category(category_id uuid, new_name text)
-returns boolean
+returns void
 language plpgsql
 security invoker
 set search_path = ''
@@ -33,10 +34,10 @@ begin
   where c.id = rename_category.category_id
   for update;
   if not found then
-    return false;
+    raise exception 'no category % to rename', rename_category.category_id using errcode = 'no_data_found';
   end if;
   if old_name = new_name then
-    return true;
+    return;
   end if;
 
   -- Fails with 23505 when another category has new_name (unique (household_id, name), 007), which
@@ -55,12 +56,11 @@ begin
     delete from public.budgets where household_id = household and category = new_name;
     update public.budgets set category = new_name where household_id = household and category = old_name;
   end if;
-  return true;
 end;
 $$;
 
 create or replace function public.delete_category(category_id uuid)
-returns boolean
+returns void
 language plpgsql
 security invoker
 set search_path = ''
@@ -74,7 +74,7 @@ begin
   where c.id = delete_category.category_id
   for update;
   if not found then
-    return false;
+    raise exception 'no category % to delete', delete_category.category_id using errcode = 'no_data_found';
   end if;
 
   -- Its merchant rules and Jev's suggestions of it go with it, through their FKs (021, 022). Its
@@ -83,7 +83,6 @@ begin
   update public.transactions set user_category = null
   where household_id = household and user_category = old_name;
   delete from public.budgets where household_id = household and category = old_name;
-  return true;
 end;
 $$;
 
