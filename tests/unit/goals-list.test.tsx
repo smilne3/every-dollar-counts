@@ -107,11 +107,13 @@ describe('GoalsList', () => {
     expect(bars.length).toBeGreaterThan(0)
   })
 
-  // Two goals across from md, where the app switches between its phone and desktop layouts (#123),
-  // and one below it. At sm, 640-767px got two goals across beside the phone layout around them.
-  it('puts the goals two across from md up and one across below it', () => {
+  // Two goals across only from lg, and one below it. From md, two across left each card too narrow
+  // for its Saved row beside the sidebar, up to about 1000px, so the page scrolled sideways (#208).
+  // grid-cols-1, not a bare grid: a bare grid's one column grows to fit a long goal name, which then
+  // widened the page on a phone instead of truncating.
+  it('puts the goals two across from lg up and one across below it', () => {
     const { container } = render(<GoalsList {...props} />)
-    expect(container.querySelector('[data-goal-card]')!.parentElement!.className).toBe('grid gap-4 md:grid-cols-2')
+    expect(container.querySelector('[data-goal-card]')!.parentElement!.className).toBe('grid grid-cols-1 gap-4 lg:grid-cols-2')
   })
 
   // Stacking must not cost the form any of its fields, nor the list any of its goals.
