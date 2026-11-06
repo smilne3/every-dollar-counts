@@ -72,9 +72,11 @@ Never prefix a secret with `NEXT_PUBLIC_`; that ships it to the browser. `npm ru
 
 In the Supabase dashboard, open the **SQL Editor** and run each file from `db/migrations/` in order — paste a file's contents, click **Run**, replace with the next file, repeat:
 
-`001 → 002 → 003 → 004 → 006 → 007 → 008 → 009 → 010 → 011 → 012 → 013 → 014 → 015 → 016 → 017 → 018 → 019 → 020 → 021 → 022` (there is no 005 — the gap is historical, you're not missing a file).
+`001 → 002 → 003 → 004 → 006 → 007 → 008 → 009 → 010 → 011 → 012 → 013 → 014 → 015 → 016 → 017 → 018 → 019 → 020 → 021 → 022 → 023` (there is no 005 — the gap is historical, you're not missing a file).
 
 `022_category_suggestions.sql` must be applied before the code that reads it (#28 PR 4, Jev suggestions) deploys: every money page and Settings select it, whether or not suggestions are switched on.
+
+`023_category_rename_delete.sql` must be applied before the code that calls it (#100) deploys: renaming or deleting a category in Settings fails without its two functions.
 
 Two warning dialogs will pop up along the way; both are expected:
 

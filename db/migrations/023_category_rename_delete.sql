@@ -16,6 +16,7 @@
 -- Hand-run in the SQL editor and safe to re-run. Changes no rows. Apply it before deploying the
 -- code that calls these functions (the route's PATCH and DELETE), which can't rename or delete
 -- anything without them. One database serves local, Preview and production (017_app_env.sql).
+-- db/seeds/023_category_rename_delete_checks.sql finds anything earlier failures left behind.
 
 create or replace function public.rename_category(category_id uuid, new_name text)
 returns void
