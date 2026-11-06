@@ -25,8 +25,9 @@ import { unknownIfLost } from '@/lib/lost-reply'
 //   test is pfc_detailed alone, because isCreditCardPayment turns false once a pick is set;
 // - write a row the bank removed.
 //
-// It is not the only writer of user_category: app/api/categories/route.ts also writes it in bulk on
-// rename and delete (a delete clears picks), outside these guards (#100).
+// It is not the only writer of user_category. Renaming or deleting a category writes it in bulk,
+// outside these guards: rename_category and delete_category (db/migrations/023), which
+// app/api/categories/route.ts calls. A delete clears picks.
 //
 // 404 and 409 mean the picker's row is stale: the transaction is gone, the bank removed it, the
 // category was deleted, or the row changed. CategoryPicker reloads on either, so these say the latest

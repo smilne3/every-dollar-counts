@@ -54,8 +54,9 @@ export function CategoryManager({
       } else if (result.outcome === 'refused') {
         setErr(result.error)
         // 404: the list is stale (a category deleted on the other phone, say), so show the latest
-        // under the message. 409 is the route's environment guard (#148), which wrote nothing, so the
-        // reload shows the same list.
+        // under the message. 409 is a name another category has, perhaps one added on the other phone
+        // or by an add whose reply was lost (#246), so the reload shows it. Or it's the route's
+        // environment guard (#148), which wrote nothing, so the reload shows the same list.
         reload = result.status === 404 || result.status === 409
       } else {
         console.error('[CategoryManager] save failed', result.cause)

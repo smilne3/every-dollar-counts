@@ -207,7 +207,9 @@ describe('CategoryManager saves', () => {
 
   // Nothing saved, or it may have: either way the name stays, and the message says which.
   it.each([
-    ['a refusal', () => answering(() => refused(400, 'That name is already a category.')), 'That name is already a category.', 0],
+    ['a refusal', () => answering(() => refused(500, 'That could not be saved. Please try again.')), 'That could not be saved. Please try again.', 0],
+    // 409 reloads: the name may be one an earlier add, whose reply was lost, saved after all (#246).
+    ['a name another category has', () => answering(() => refused(409, 'That name is already a category.')), 'That name is already a category.', 1],
     ['a redirect to the login page', () => answering(redirectedToLogin), 'Your session ended. Sign in again.', 0],
     ['a 200 without ok: true', () => answering(() => new Response('{}', { headers: { 'content-type': 'application/json' } })), 'That could not be saved.', 0],
     ['a gateway error page', () => answering(badGateway), 'It may not have saved. Showing the latest.', 1],
@@ -243,14 +245,14 @@ describe('CategoryManager saves', () => {
   })
 
   it('renames, says so and reloads; on a refusal keeps the typed name and says why', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(refused(400, 'That name is already a category.')).mockResolvedValueOnce(saved()))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(refused(500, 'That could not be saved. Please try again.')).mockResolvedValueOnce(saved()))
     render(<CategoryManager {...props} />)
     // Queried afresh each time: a row that remounted would leave a stale element still saying "Food".
     const field = () => screen.getByLabelText('Rename category Groceries') as HTMLInputElement
     const save = () => within(field().closest('[data-category-row]') as HTMLElement).getByRole('button', { name: 'Save' })
     fireEvent.change(field(), { target: { value: 'Food' } })
     fireEvent.click(save())
-    expect((await screen.findByRole('alert')).textContent).toBe('That name is already a category.')
+    expect((await screen.findByRole('alert')).textContent).toBe('That could not be saved. Please try again.')
     expect(field().value).toBe('Food')
     expect(refresh).not.toHaveBeenCalled()
     fireEvent.click(save())
@@ -308,7 +310,7 @@ describe('CategoryManager saves', () => {
 
   // An "Added …" left beside the next save's failure would claim that save worked too.
   it('clears an earlier success message once the next save fails', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(saved()).mockResolvedValueOnce(refused(400, 'That name is already a category.')))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(saved()).mockResolvedValueOnce(refused(409, 'That name is already a category.')))
     render(<CategoryManager {...props} />)
     addPets()
     expect(await screen.findByText('Added “Pets”.')).toBeTruthy()
@@ -332,10 +334,10 @@ describe('CategoryManager saves', () => {
   // 404: the category is already gone (deleted on the other phone), so the list is stale. Show the
   // latest under the message, as Settings → Category rules does.
   it('says why and reloads when a delete is refused because the category is gone', async () => {
-    vi.stubGlobal('fetch', answering(() => refused(404, 'That category no longer exists.')))
+    vi.stubGlobal('fetch', answering(() => refused(404, 'That category no longer exists. Showing the latest.')))
     render(<CategoryManager {...props} />)
     confirmDeleteGroceries()
-    expect((await screen.findByRole('alert')).textContent).toBe('That category no longer exists.')
+    expect((await screen.findByRole('alert')).textContent).toBe('That category no longer exists. Showing the latest.')
     await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
   })
 })

@@ -2,21 +2,30 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { checkSignIn } from '@/lib/auth-check'
 import { assertEnvMatchesDatabase, envGuardResponse } from '@/lib/app-env'
+import { refusedCategoryName } from '@/lib/category-names'
 import { unknownIfLost } from '@/lib/lost-reply'
+import { SESSION_ENDED } from '@/lib/save-response'
 
 type Supabase = Awaited<ReturnType<typeof createClient>>
 
 const TRY_AGAIN = 'That could not be saved. Please try again.'
 const NOT_LOADED = 'Your categories could not be loaded. Please try again.'
 const NOT_DELETED = 'That category could not be deleted. Please try again.'
+// CategoryManager reloads on a 404 or a 409, so the list under these is the latest.
+const GONE = 'That category no longer exists. Showing the latest.'
+const NAME_TAKEN = 'That name is already a category.'
+
+// The two refusals a write answers with a status of its own, 404 and 409, rather than a 500.
+const ALREADY_EXISTS = '23505' // unique (household_id, name) on categories, 007
+const NO_SUCH_CATEGORY = 'P0002' // raised by rename_category and delete_category, 023
 
 // Sign-in, by the rule in lib/auth-check.ts (#143): a 503 when Supabase Auth could not be asked,
-// in words CategoryManager shows as they stand, and a 401 when the session has ended. Null when
-// signed in. Every handler runs it before touching the database.
+// and a 401 when the session has ended, each in words CategoryManager shows as they stand. Null
+// when signed in. Every handler runs it before touching the database.
 async function refusedSignIn(supabase: Supabase, unchecked: string): Promise<NextResponse | null> {
   const signIn = await checkSignIn(supabase, '[categories]')
   if (signIn.state === 'unknown') return NextResponse.json({ error: unchecked }, { status: 503 })
-  if (signIn.state === 'ended') return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  if (signIn.state === 'ended') return NextResponse.json({ error: SESSION_ENDED }, { status: 401 })
   return null
 }
 
@@ -40,8 +49,9 @@ async function refusedEnvironment(nothing: 'added' | 'renamed' | 'deleted'): Pro
 }
 
 // A read that failed: a 500 in the handler's own words, before anything is written, and a log line
-// naming the read. Taken as no row, a failed read answered "unauthorized" or "not found", or saved a
-// new category at sort_order 1, near the top instead of last, and logged nothing (#241).
+// naming the read. Before #241 a failed read was taken as no row: the membership read answered
+// "unauthorized", the highest sort_order read saved a new category at 1, near the top instead of
+// last, and nothing was logged.
 function failedRead(
   what: string,
   error: { code?: string; message: string },
@@ -54,6 +64,34 @@ function failedRead(
 // A list read with neither rows nor an error is postgrest-js's reading of an empty reply, so it's a
 // failed read too, as lib/read-all.ts treats it, not an empty list (#222).
 const NO_DATA = { message: 'read returned no data and no error' }
+
+// A write that failed, logged first with its status, as every write route logs before deciding
+// what to answer. One whose reply was lost may have landed, so its outcome is unknown
+// (lib/lost-reply.ts). A refusal wrote nothing. A category that's gone is a 404, and a name another
+// category has a 409. Any other refusal is answered in the handler's words. The database's own
+// words, such as "duplicate key value violates unique constraint", reached the screen as they
+// stood (#246).
+function failedWrite(
+  what: string,
+  status: number,
+  error: { code?: string; message: string },
+  words: string,
+  details: Record<string, unknown> = {}
+) {
+  console.error(`[categories] could not ${what}`, { ...details, status, code: error.code, message: error.message })
+  const lost = unknownIfLost(status, error)
+  if (lost) return lost
+  if (error.code === NO_SUCH_CATEGORY) return NextResponse.json({ error: GONE }, { status: 404 })
+  if (error.code === ALREADY_EXISTS) return NextResponse.json({ error: NAME_TAKEN }, { status: 409 })
+  return NextResponse.json({ error: words }, { status: 500 })
+}
+
+// A name the app already uses for something else (lib/category-names.ts), refused before anything
+// else, as it can never be saved. Null for any other name.
+function refusedName(name: string): NextResponse | null {
+  const words = refusedCategoryName(name)
+  return words ? NextResponse.json({ error: words }, { status: 400 }) : null
+}
 
 export async function GET() {
   const supabase = await createClient()
@@ -74,11 +112,11 @@ export async function POST(req: Request) {
   const clean = (name ?? '').trim()
   if (!clean) return NextResponse.json({ error: 'name required' }, { status: 400 })
   const supabase = await createClient()
-  const refused = (await refusedSignIn(supabase, TRY_AGAIN)) ?? (await refusedEnvironment('added'))
+  const refused = refusedName(clean) ?? (await refusedSignIn(supabase, TRY_AGAIN)) ?? (await refusedEnvironment('added'))
   if (refused) return refused
   const { data: m, error: mError } = await supabase.from('memberships').select('household_id').limit(1).maybeSingle()
   if (mError) return failedRead('the household', mError, TRY_AGAIN)
-  if (!m) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  if (!m) return NextResponse.json({ error: "Your account isn't part of a household." }, { status: 403 })
 
   // A new category goes last. Read as a list, not with maybeSingle: that turns an empty reply into no
   // row as well as an empty list, so a failed read would still save the category at 1. Only an
@@ -95,37 +133,29 @@ export async function POST(req: Request) {
   const { error, status } = await supabase
     .from('categories')
     .insert({ household_id: m.household_id, name: clean, pfc_primary: null, sort_order })
-  // An add the database never answered may have landed, so its outcome is unknown
-  // (lib/lost-reply.ts). Names are unique per household, so adding it again cannot make two.
-  if (error) return unknownIfLost(status, error) ?? NextResponse.json({ error: error.message }, { status: 400 })
+  // Names are unique per household, so adding one again after a lost reply can't make two. If the
+  // first landed, the second is answered as a name that's taken.
+  if (error) return failedWrite('add the category', status, error, TRY_AGAIN)
   return NextResponse.json({ ok: true })
 }
 
-// Rename a category (cascades the name onto transactions + budgets).
+// Rename a category. rename_category (db/migrations/023) moves its picks and budget onto the new
+// name in the same transaction, so all of it happens or none does (#100).
 export async function PATCH(req: Request) {
   const { id, name } = await req.json()
   const clean = (name ?? '').trim()
   if (!id || !clean) return NextResponse.json({ error: 'id and name required' }, { status: 400 })
   const supabase = await createClient()
-  const refused = (await refusedSignIn(supabase, TRY_AGAIN)) ?? (await refusedEnvironment('renamed'))
+  const refused = refusedName(clean) ?? (await refusedSignIn(supabase, TRY_AGAIN)) ?? (await refusedEnvironment('renamed'))
   if (refused) return refused
 
-  const { data: cat, error: catError } = await supabase.from('categories').select('name').eq('id', id).maybeSingle()
-  if (catError) return failedRead('the category', catError, TRY_AGAIN, { id })
-  if (!cat) return NextResponse.json({ error: 'not found' }, { status: 404 })
-  const oldName = cat.name
-
-  const { error, status } = await supabase.from('categories').update({ name: clean }).eq('id', id)
-  // A rename the database never answered may have landed, so its outcome is unknown
-  // (lib/lost-reply.ts), and the cascades below do not run. Their own errors are never read (#100),
-  // so a lost reply there still answers ok.
-  if (error) return unknownIfLost(status, error) ?? NextResponse.json({ error: error.message }, { status: 400 })
-  await supabase.from('transactions').update({ user_category: clean }).eq('user_category', oldName)
-  await supabase.from('budgets').update({ category: clean }).eq('category', oldName)
+  const { error, status } = await supabase.rpc('rename_category', { category_id: id, new_name: clean })
+  if (error) return failedWrite('rename the category', status, error, TRY_AGAIN, { id })
   return NextResponse.json({ ok: true })
 }
 
-// Delete a category: its rules go with it (FK), its picks revert to auto, its budget is dropped.
+// Delete a category. delete_category (db/migrations/023) takes its rules with it (FK), returns its
+// picks to automatic and drops its budget, all in one transaction (#100).
 export async function DELETE(req: Request) {
   const { id } = await req.json()
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
@@ -133,15 +163,7 @@ export async function DELETE(req: Request) {
   const refused = (await refusedSignIn(supabase, NOT_DELETED)) ?? (await refusedEnvironment('deleted'))
   if (refused) return refused
 
-  const { data: cat, error: catError } = await supabase.from('categories').select('name').eq('id', id).maybeSingle()
-  if (catError) return failedRead('the category', catError, NOT_DELETED, { id })
-  if (!cat) return NextResponse.json({ error: 'not found' }, { status: 404 })
-  const name = cat.name
-
-  // None of these three reads its error, so a refusal answers ok as well as a lost reply does (#100).
-  // Once they do, a delete the database never answered is unknown (lib/lost-reply.ts), as above.
-  await supabase.from('categories').delete().eq('id', id)
-  await supabase.from('transactions').update({ user_category: null }).eq('user_category', name)
-  await supabase.from('budgets').delete().eq('category', name)
+  const { error, status } = await supabase.rpc('delete_category', { category_id: id })
+  if (error) return failedWrite('delete the category', status, error, NOT_DELETED, { id })
   return NextResponse.json({ ok: true })
 }

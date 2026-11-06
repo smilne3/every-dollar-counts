@@ -21,7 +21,8 @@ function isDatabaseRead(input: RequestInfo | URL, init?: RequestInit) {
   // Only reads, because a write that's cut off may still have happened, and the caller couldn't tell. That
   // leaves Supabase Auth's session refresh alone too: it's a POST, which auth-js retries for about 25
   // seconds on purpose (proxy.ts, #143). Only PostgREST, so getUser()'s GET /auth/v1/user, the sign-in
-  // check, has no limit either. The app makes no .rpc() calls.
+  // check, has no limit either. Nor do the app's .rpc() calls, rename_category and delete_category
+  // (app/api/categories/route.ts): each is a POST, and each writes.
   if (method !== 'GET' && method !== 'HEAD') return false
   try {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
