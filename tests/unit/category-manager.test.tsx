@@ -331,13 +331,63 @@ describe('CategoryManager saves', () => {
     expect(refresh).toHaveBeenCalledTimes(1)
   })
 
-  // 404: the category is already gone (deleted on the other phone), so the list is stale. Show the
-  // latest under the message, as Settings → Category rules does.
+  // 404: the category is already gone (deleted on the other phone), so the list is stale. Reload to
+  // show the latest, as Settings → Category rules does.
   it('says why and reloads when a delete is refused because the category is gone', async () => {
     vi.stubGlobal('fetch', answering(() => refused(404, 'That category no longer exists. Showing the latest.')))
     render(<CategoryManager {...props} />)
     confirmDeleteGroceries()
     expect((await screen.findByRole('alert')).textContent).toBe('That category no longer exists. Showing the latest.')
     await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+  })
+})
+
+// #253: every message showed at the top of the list. On a phone the add box is a long scroll below
+// that, so a refused "Other" looked like nothing happened. Each shows under what it came from.
+describe('CategoryManager messages', () => {
+  const rowOf = (name: string) => screen.getByLabelText(`Rename category ${name}`).closest('[data-category-row]') as HTMLElement
+  const [groceries, homeImprovement] = props.initialCategories
+  function confirmDelete(name: string) {
+    fireEvent.click(screen.getByLabelText(`Delete ${name}`))
+    fireEvent.click(within(screen.getByRole('dialog', { name: `Delete “${name}”?` })).getByRole('button', { name: 'Delete' }))
+  }
+
+  it("shows an add's message under the add box", async () => {
+    vi.stubGlobal('fetch', answering(() => refused(400, '“Other” is a name the app uses. Choose another.')))
+    const { container } = render(<CategoryManager {...props} />)
+    fireEvent.change(screen.getByLabelText('New category name'), { target: { value: 'Other' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    const alert = await screen.findByRole('alert')
+    expect(container.querySelector('form')?.nextElementSibling).toBe(alert)
+  })
+
+  it("shows a rename's message under its row", async () => {
+    vi.stubGlobal('fetch', answering(() => refused(400, '“none” is a name the app uses. Choose another.')))
+    render(<CategoryManager {...props} />)
+    fireEvent.change(screen.getByLabelText('Rename category Groceries'), { target: { value: 'none' } })
+    fireEvent.click(within(rowOf('Groceries')).getByRole('button', { name: 'Save' }))
+    const alert = await screen.findByRole('alert')
+    expect(rowOf('Groceries').nextElementSibling).toBe(alert)
+  })
+
+  // The reload drops the deleted row. Its message stays where the row was, so on a phone it is still
+  // where the person is looking.
+  it("keeps a deleted row's message in the row's place", async () => {
+    vi.stubGlobal('fetch', answering(saved))
+    const { rerender } = render(<CategoryManager {...props} />)
+    confirmDelete('Groceries')
+    const message = await screen.findByText('Deleted “Groceries”.')
+    expect(rowOf('Groceries').nextElementSibling).toBe(message)
+    rerender(<CategoryManager initialCategories={[homeImprovement]} usage={props.usage} />)
+    expect(screen.getByText('Deleted “Groceries”.').nextElementSibling).toBe(rowOf('Home improvement and garden supplies'))
+  })
+
+  it("keeps the last row's message above the add box once the row is gone", async () => {
+    vi.stubGlobal('fetch', answering(() => refused(404, 'That category no longer exists. Showing the latest.')))
+    const { container, rerender } = render(<CategoryManager {...props} />)
+    confirmDelete('Home improvement and garden supplies')
+    await screen.findByRole('alert')
+    rerender(<CategoryManager initialCategories={[groceries]} usage={props.usage} />)
+    expect(container.querySelector('form')?.previousElementSibling).toBe(screen.getByRole('alert'))
   })
 })

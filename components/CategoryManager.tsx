@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/Button'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -17,6 +17,11 @@ const NO_USAGE: CategoryUsage[string] = {
   impact: { uncategorized: 0, moved: [], movedMore: 0, rulesRemoved: 0, toSpending: 0 },
 }
 
+// A save's message shows under the row it came from, or under the add box (`row: null`). It used to
+// show at the top of the list, which on a phone is a long scroll above the add box, so a refusal
+// looked like nothing happened (#253). `index` is where the row was, for when the row is gone.
+type Note = { text: string; ok: boolean; row: { id: string; index: number } | null }
+
 export function CategoryManager({
   initialCategories,
   usage = {},
@@ -27,17 +32,15 @@ export function CategoryManager({
   const router = useRouter()
   const [newName, setNewName] = useState('')
   const [busy, setBusy] = useState(false)
-  const [msg, setMsg] = useState('')
-  const [err, setErr] = useState('')
+  const [note, setNote] = useState<Note | null>(null)
   // Bumped after a save whose outcome is unknown, so every row drops what was typed and shows the
   // server's name, as "Showing the latest" says. See the rows' key below.
   const [resets, setResets] = useState(0)
 
   // Add, rename and delete all save through here (#147). True only when the route said it saved.
-  async function call(method: 'POST' | 'PATCH' | 'DELETE', body: unknown, okMsg: string): Promise<boolean> {
+  async function call(method: 'POST' | 'PATCH' | 'DELETE', body: unknown, okMsg: string, row: Note['row']): Promise<boolean> {
     setBusy(true)
-    setMsg('')
-    setErr('')
+    setNote(null)
     let reload = false
     let saved = false
     try {
@@ -49,18 +52,18 @@ export function CategoryManager({
       })
       if (result.outcome === 'saved') {
         saved = true
-        setMsg(okMsg)
+        setNote({ text: okMsg, ok: true, row })
         reload = true
       } else if (result.outcome === 'refused') {
-        setErr(result.error)
-        // 404: the list is stale (a category deleted on the other phone, say), so show the latest
-        // under the message. 409 is a name another category has, perhaps one added on the other phone
+        setNote({ text: result.error, ok: false, row })
+        // 404: the list is stale (a category deleted on the other phone, say), so reload to show the
+        // latest. 409 is a name another category has, perhaps one added on the other phone
         // or by an add whose reply was lost (#246), so the reload shows it. Or it's the route's
         // environment guard (#148), which wrote nothing, so the reload shows the same list.
         reload = result.status === 404 || result.status === 409
       } else {
         console.error('[CategoryManager] save failed', result.cause)
-        setErr(MAY_NOT_HAVE_SAVED)
+        setNote({ text: MAY_NOT_HAVE_SAVED, ok: false, row })
         setResets((n) => n + 1)
         reload = true
       }
@@ -73,29 +76,42 @@ export function CategoryManager({
     return saved
   }
 
+  const shown =
+    note &&
+    (note.ok ? (
+      <p className="text-sm text-emerald">{note.text}</p>
+    ) : (
+      <p role="alert" className="text-sm text-coral">
+        {note.text}
+      </p>
+    ))
+  // A row that's gone, deleted here or on the other phone, leaves its message in its place: above the
+  // row that moved up, or after the last.
+  const row = note?.row
+  const goneAt = row && !initialCategories.some((c) => c.id === row.id) ? row.index : -1
+
   return (
     <div className="space-y-2">
-      {msg && <p className="text-sm text-emerald">{msg}</p>}
-      {err && (
-        <p role="alert" className="text-sm text-coral">
-          {err}
-        </p>
-      )}
-
-      {initialCategories.map((c) => (
-        <CategoryRow
+      {initialCategories.map((c, i) => (
+        <Fragment
           // A row fills its field from the server's name once, when it mounts, so the key holds what
           // must refill it: a new name from the server (renamed on the other phone, or a rename that
           // landed) or a save whose outcome is unknown. A refusal changes neither, so what was typed
           // stays for another try.
           key={`${c.id}:${c.name}:${resets}`}
-          cat={c}
-          busy={busy}
-          usage={usage[c.name] ?? NO_USAGE}
-          onSave={(name) => call('PATCH', { id: c.id, name }, `Renamed to “${name}”.`)}
-          onDelete={() => call('DELETE', { id: c.id }, `Deleted “${c.name}”.`)}
-        />
+        >
+          {goneAt === i && shown}
+          <CategoryRow
+            cat={c}
+            busy={busy}
+            usage={usage[c.name] ?? NO_USAGE}
+            onSave={(name) => call('PATCH', { id: c.id, name }, `Renamed to “${name}”.`, { id: c.id, index: i })}
+            onDelete={() => call('DELETE', { id: c.id }, `Deleted “${c.name}”.`, { id: c.id, index: i })}
+          />
+          {row?.id === c.id && shown}
+        </Fragment>
       ))}
+      {goneAt >= initialCategories.length && shown}
 
       <form
         className="flex flex-wrap gap-2 pt-3 md:max-w-md md:flex-nowrap"
@@ -105,7 +121,7 @@ export function CategoryManager({
           if (!n) return
           // Cleared only once it saved (#147): cleared before the reply, a failed add lost what was
           // typed. And only if the field still holds that name, so one typed meanwhile stays.
-          if (await call('POST', { name: n }, `Added “${n}”.`)) {
+          if (await call('POST', { name: n }, `Added “${n}”.`, null)) {
             setNewName((current) => (current.trim() === n ? '' : current))
           }
         }}
@@ -121,6 +137,7 @@ export function CategoryManager({
           Add
         </Button>
       </form>
+      {note && !note.row && shown}
     </div>
   )
 }
