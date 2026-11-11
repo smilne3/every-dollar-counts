@@ -164,7 +164,7 @@ const { data: item } = await supabaseAdmin.from('plaid_items').select('cursor')`
 })
 
 // Tripwire 4 (#28 spec §7.4): a page that reads categories or rules on its own, a write of
-// user_category outside the two routes allowed it, or a cast that fakes a branded context.
+// user_category outside the one route allowed it, or a cast that fakes a branded context.
 describe('category-read', () => {
   it('fires on a page reading categories itself', () => {
     expect(checks(checkCategoryReads(file('app/(app)/x/page.tsx', `supabase.from('categories').select('id')`)))).toEqual(['category-read'])
@@ -195,7 +195,7 @@ describe('rules-read', () => {
 })
 
 describe('user-category-write', () => {
-  it('fires on clearing picks outside the allowed routes', () => {
+  it('fires on clearing picks outside the allowed route', () => {
     expect(checks(checkUserCategoryWrites(file('lib/x.ts', `await supabase.from('transactions').update({ user_category: null }).eq('id', id)`)))).toEqual(['user-category-write'])
   })
   it('fires on a multi-line update whose third key is user_category', () => {
@@ -220,14 +220,18 @@ describe('user-category-write', () => {
     expect(checkUserCategoryWrites(file('components/X.tsx', `isCreditCardPayment({ pfc_detailed: p, user_category: c })`))).toEqual([])
     expect(checkUserCategoryWrites(file('lib/x.ts', `supabase.from('transactions').select('id, user_category').eq('removed', false)`))).toEqual([])
   })
-  it('allows the categorize and categories routes, and variable payloads in ingest and the sandbox seed', () => {
+  it('allows the categorize route, and variable payloads in ingest and the sandbox seed', () => {
     expect(checkUserCategoryWrites(file('app/api/transactions/categorize/route.ts', `supabase.from('transactions').update({ user_category: picked.name }, { count: 'exact' })`))).toEqual([])
-    expect(checkUserCategoryWrites(file('app/api/categories/route.ts', `supabase.from('transactions').update({ user_category: null }).eq('user_category', name)`))).toEqual([])
     expect(checkUserCategoryWrites(file('lib/ingest.ts', `supabase.from('transactions').upsert(upserts, { onConflict: 'plaid_transaction_id' })`))).toEqual([])
     expect(checkUserCategoryWrites(file('scripts/seed-sandbox-bank.mjs', `db.from('transactions').insert(rows)`))).toEqual([])
   })
   it('passes an inline write that does not touch user_category', () => {
     expect(checkUserCategoryWrites(file('app/api/reimbursable/route.ts', `supabase.from('transactions').update({ reimbursable_amount: 5 }, { count: 'exact' })`))).toEqual([])
+  })
+  // A rename or a delete moves picks in the database, all or nothing (#100). Done from the route,
+  // as three requests, a failure partway stranded them.
+  it('fires in the categories route, whose rename and delete move picks in the database', () => {
+    expect(checks(checkUserCategoryWrites(file('app/api/categories/route.ts', `supabase.from('transactions').update({ user_category: null }).eq('user_category', name)`)))).toEqual(['user-category-write'])
   })
   it('covers the suggestion job too (#28 spec §14.9)', () => {
     expect(checks(checkUserCategoryWrites(file('lib/category-suggest.ts', `await supabaseAdmin.from('transactions').update({ user_category: 'x' })`)))).toEqual(['user-category-write'])

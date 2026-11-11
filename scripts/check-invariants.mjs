@@ -296,7 +296,7 @@ export function checkTxnReads(files) {
 }
 
 // ---------------------------------------------------------------------------
-// 4. Categories and rules are read in one place, and only two routes write user_category.
+// 4. Categories and rules are read in one place, and only one route writes user_category.
 //
 // #28. A category name comes from resolveCategory (lib/category-rules.ts), over a context only
 // fetchCategoryContext (lib/category-context.ts) can produce. A page that read categories itself
@@ -304,6 +304,10 @@ export function checkTxnReads(files) {
 // one page and Grocery on the next. And a rule must never write user_category: any value there on
 // a card payment re-enters it into every total. With illustrative figures, on a $6,412.58 autopay (#59),
 // one pick would take September's spending from $3,210.47 to -$3,202.11.
+//
+// Renaming or deleting a category moves picks too, but inside the database, in rename_category and
+// delete_category (db/migrations/023), so that no failure partway can strand them (#100). The
+// categories route itself writes no transactions.
 // ---------------------------------------------------------------------------
 const CATEGORY_READS_ALLOWED = new Map([
   ['lib/category-context.ts', 'The one read every page goes through.'],
@@ -319,7 +323,6 @@ const RULES_READS_ALLOWED = new Map([
 ])
 const USER_CATEGORY_WRITERS = new Map([
   ['app/api/transactions/categorize/route.ts', 'Sets a pick on one transaction, with guards (spec §6.1).'],
-  ['app/api/categories/route.ts', 'Rename and delete cascade a category name onto picks (#100).'],
 ])
 const VARIABLE_PAYLOADS_ALLOWED = new Map([
   ['lib/ingest.ts', 'Its upserts come from transactionUpsertRow, which never carries user_category (tests/unit/ingest-reimbursable.test.ts).'],
@@ -390,8 +393,9 @@ export function checkUserCategoryWrites(files) {
       const chain = commentFree.slice(at, calls[calls.length - 1].close + 1)
       if (/\buser_category\b/.test(chain) && !USER_CATEGORY_WRITERS.has(path)) {
         out.push({ check: 'user-category-write', file: path, line, message:
-          'writes user_category outside the categorize and categories routes. A rule must never write it, ' +
-          'and any value on a card payment re-enters it into every total (#28, #59).' })
+          'writes user_category outside the categorize route. A rule must never write it, any value on a ' +
+          'card payment re-enters it into every total (#28, #59), and a rename or delete moves picks in the ' +
+          'database, all or nothing (#100).' })
         continue
       }
       const payload = firstArg(write.codeArgs).trim()

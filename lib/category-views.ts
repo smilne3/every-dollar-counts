@@ -125,8 +125,9 @@ export type DeleteImpact = {
 
 // What deleting a category would do to each row, for the delete dialog (spec §8.4). Evaluates
 // EVERY row, not only those showing the category: deleting a category can also expose another
-// category that shares its Plaid primary. "After" mirrors the DELETE route, which removes the
-// category (and, through the FK, its rules) and then clears picks carrying its name.
+// category that shares its Plaid primary. "After" mirrors delete_category (db/migrations/023), which
+// the DELETE route calls: it removes the category (and, through the FK, its rules) and clears picks
+// carrying its name, in one transaction.
 export function deleteImpact(rows: CategorizableTxn[], data: CategoryData, categoryId: string): DeleteImpact {
   const deleted = data.categories.find((c) => c.id === categoryId)
   const rulesRemoved = data.rules.filter((r) => r.category_id === categoryId).length
