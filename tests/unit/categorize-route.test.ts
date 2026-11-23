@@ -4,8 +4,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 // strict on purpose, because a permissive one hid three dead guards here before (#99):
 // - select() PROJECTS the fixture to the requested columns, so a narrowed read starves the guards;
 // - the categories read only resolves through .eq('household_id', …).order('sort_order');
+// - the row read records what it's filtered by, so reading the wrong row fails a test (#140);
 // - update() resolves only through two .eq()s and an .or(); the tests below assert which columns
-//   and values those are (#140 tracks tightening the stand-in itself).
+//   and values those are.
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }))
 const { assertEnvMatchesDatabase } = vi.hoisted(() => ({ assertEnvMatchesDatabase: vi.fn() }))
 vi.mock('@/lib/plaid', () => ({ plaidEnv: 'production' }))
@@ -68,6 +69,7 @@ function makeSupabase({
 }> = {}) {
   const calls = {
     readColumns: '' as string,
+    readFilters: [] as unknown[][],
     categories: [] as unknown[][],
     updates: [] as { payload: Row; options: unknown; filters: unknown[][] }[],
     upserts: [] as { payload: Row; options: unknown; select: string }[],
@@ -107,7 +109,12 @@ function makeSupabase({
       return {
         select: (cols: string) => {
           calls.readColumns = cols
-          return { eq: () => ({ maybeSingle: () => Promise.resolve({ data: project(row, cols), error: readError }) }) }
+          return {
+            eq: (c: string, v: unknown) => {
+              calls.readFilters.push(['eq', c, v])
+              return { maybeSingle: () => Promise.resolve({ data: project(row, cols), error: readError }) }
+            },
+          }
         },
         update: (payload: Row, options: unknown) => {
           const entry = { payload, options, filters: [] as unknown[][] }
@@ -219,11 +226,24 @@ describe('POST /api/transactions/categorize', () => {
     expect(calls.updates).toHaveLength(0)
   })
 
-  it('answers 500, not 404, when the read fails, and writes nothing', async () => {
-    const calls = makeSupabase({ readError: { message: 'boom' } })
+  // The database's words are logged and never shown (#140): each failure path below checks both halves.
+  it('answers 500, not 404, when the read fails, logs why, and writes nothing', async () => {
+    const calls = makeSupabase({ readError: { message: 'permission denied for table transactions' } })
     const res = await post({ transactionId: 'txn-1', category: 'Grocery' })
     expect(res.status).toBe(500)
+    const body = await res.text()
+    expect(JSON.parse(body).error).toBe('That could not be saved. Please try again.')
+    expect(body).not.toContain('permission denied')
+    expect(logs).toContainEqual(['[categorize] transaction read failed', 'permission denied for table transactions'])
     expect(calls.updates).toHaveLength(0)
+  })
+
+  // By the id that was posted, and nothing else: a read by another column, or another value, would
+  // check one row's guards and then write another.
+  it('reads the posted transaction by its id', async () => {
+    const calls = makeSupabase({ row: ROW })
+    await post({ transactionId: 'txn-42', category: 'Grocery' })
+    expect(calls.readFilters).toEqual([['eq', 'id', 'txn-42']])
   })
 
   // A stale row answers 404 or 409, which CategoryPicker reloads on, so the words say the latest is
@@ -278,11 +298,14 @@ describe('POST /api/transactions/categorize', () => {
     ])
   })
 
-  it('answers 500 when the categories read fails, and writes nothing', async () => {
-    const calls = makeSupabase({ row: ROW, categoriesError: { message: 'boom' } })
+  it('answers 500 when the categories read fails, logs why, and writes nothing', async () => {
+    const calls = makeSupabase({ row: ROW, categoriesError: { message: 'canceling statement due to statement timeout' } })
     const res = await post({ transactionId: 'txn-1', category: 'Grocery' })
     expect(res.status).toBe(500)
-    expect((await res.json()).error).toBe('That could not be saved. Please try again.')
+    const body = await res.text()
+    expect(JSON.parse(body).error).toBe('That could not be saved. Please try again.')
+    expect(body).not.toContain('statement timeout')
+    expect(logs).toContainEqual(['[categorize] categories read failed', 'canceling statement due to statement timeout'])
     expect(calls.updates).toHaveLength(0)
   })
 
@@ -338,11 +361,13 @@ describe('POST /api/transactions/categorize', () => {
   })
 
   // The row changed between the read and the write: Plaid removed or re-tagged it.
-  it('answers 409 when the write matched no rows', async () => {
+  // Logged, because a missing update policy lands here too, and only the log can tell it apart.
+  it('answers 409 when the write matched no rows, and logs which row', async () => {
     makeSupabase({ row: ROW, update: { error: null, count: 0 } })
     const res = await post({ transactionId: 'txn-1', category: 'Grocery' })
     expect(res.status).toBe(409)
     expect((await res.json()).error).toBe('This transaction just changed. Showing the latest.')
+    expect(logs).toContainEqual(['[categorize] update matched no rows (row changed, or the update policy is missing)', 'txn-1'])
   })
 
   // A count the server did not send is not a count of one. Treating it as a write would report a
