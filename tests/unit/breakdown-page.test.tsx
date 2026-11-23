@@ -111,6 +111,7 @@ import { NotSyncingBanner } from '@/components/NotSyncingBanner'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { catalogFingerprint } from '@/lib/category-rules'
 import { sug } from './helpers/category-context'
+import { SUGGESTION_EMBED } from '@/lib/category-context'
 import { blocks, bannerText, balancesNote } from './helpers/banner'
 import { storedItem, FOREIGN_ITEMS } from '../stubs/plaid-items'
 import { render as renderDom, screen, cleanup } from '@testing-library/react'
@@ -575,6 +576,21 @@ describe('Breakdown categories and rules (#28)', () => {
     const off = (await spentRows(rows)).map((r) => [r.label, r.amount])
     expect(on).toContainEqual(['Food & Drink', 72])
     expect(on).toEqual(off)
+  })
+
+  // #227: the stand-in answers with every column whatever a read asked for, so only this notices a read
+  // losing one. Without reimbursable_amount a repaid expense would count in full in spending, and
+  // net worth would lose the house without the manual assets' value.
+  it.each([
+    ['spent', { accounts: ['*'], memberships: ['household_id'], transactions: [`id, amount, date, merchant_name, user_category, pfc_primary, pfc_detailed, reimbursable_amount, ${SUGGESTION_EMBED}`, `id, amount, date, merchant_name, user_category, pfc_primary, pfc_detailed, reimbursable_amount, ${SUGGESTION_EMBED}`] }],
+    ['saved', { accounts: ['*'], memberships: ['household_id'], transactions: [`id, amount, date, merchant_name, user_category, pfc_primary, pfc_detailed, reimbursable_amount, ${SUGGESTION_EMBED}`, `id, amount, date, merchant_name, user_category, pfc_primary, pfc_detailed, reimbursable_amount, ${SUGGESTION_EMBED}`] }],
+    ['cash', { accounts: ['*'], memberships: ['household_id'] }],
+    ['net-worth', { accounts: ['*'], memberships: ['household_id'], manual_assets: ['id, name, value, updated_at'] }],
+  ])('still asks for what each read asked for on %s', async (metric, expected) => {
+    results.categories = { data: [FOOD, GROCERY], error: null }
+    results.transactions = { data: [wholeFoods(null)], error: null }
+    await render(metric)
+    expect(selects).toEqual(expected)
   })
 
   // Spec §7.4's coverage guard: every transactions read the page resolves carries the embed.
