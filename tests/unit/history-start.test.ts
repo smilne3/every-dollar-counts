@@ -118,18 +118,25 @@ describe('historyStart', () => {
   })
 
   // #46: a failed read must not pass for "no history yet".
-  it.each(['accounts', 'transactions'])('throws when the %s read fails', async (table) => {
+  // Each says what it was reading, so the log tells the accounts read from the Dashboard's own (#231).
+  it.each([
+    ['accounts', /^could not read accounts for the history start: /],
+    ['transactions', /^could not read the first transaction: /],
+  ])('throws when the %s read fails', async (table, message) => {
     db.tables.accounts = [acct('platinum', 'amex', 'credit'), acct('checking', 'capone')]
     db.tables.transactions = [txn('platinum', '2025-10-18')]
     db.fail = table
-    await expect(historyStart()).rejects.toThrow(/could not read/)
+    await expect(historyStart()).rejects.toThrow(message)
   })
 
   // postgrest-js reports an empty-body response as no data and no error.
-  it.each(['accounts', 'transactions'])('throws when the %s read returns no data and no error', async (table) => {
+  it.each([
+    ['accounts', 'could not read accounts for the history start: no data and no error'],
+    ['transactions', 'could not read the first transaction: no data and no error'],
+  ])('throws when the %s read returns no data and no error', async (table, message) => {
     db.tables.accounts = [acct('platinum', 'amex', 'credit'), acct('checking', 'capone')]
     db.tables.transactions = [txn('platinum', '2025-10-18')]
     db.emptyBody = table
-    await expect(historyStart()).rejects.toThrow(/no data and no error/)
+    await expect(historyStart()).rejects.toThrow(message)
   })
 })
