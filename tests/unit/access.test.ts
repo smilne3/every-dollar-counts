@@ -25,7 +25,17 @@ vi.mock('@/lib/supabase/admin', () => ({
       if (table === 'invites') {
         return {
           select: () => ({ eq: () => ({ maybeSingle: () => invite() }) }),
-          delete: () => ({ eq: (_: string, email: string) => inviteDelete(email) }),
+          // Reachable only through .eq(), and run with every filter it was given, so a delete that
+          // loses a filter shows in what inviteDelete is called with.
+          delete: () => {
+            const filters: Record<string, unknown> = {}
+            const filtered = {
+              eq: (column: string, value: unknown) => ((filters[column] = value), filtered),
+              then: (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) =>
+                Promise.resolve(inviteDelete({ ...filters })).then(resolve, reject),
+            }
+            return { eq: filtered.eq }
+          },
         }
       }
       throw new Error(`unexpected table ${table}`)
@@ -58,12 +68,39 @@ describe('ensureHouseholdAccess', () => {
     expect(logs).toEqual([])
   })
 
+  // #248: an invite left behind, by a failed use or by an insert whose reply was lost, would add them
+  // back if they were ever removed by hand. Only their own household's: another's is not theirs to clear.
+  it("clears a member's leftover invite to their own household, by its lower-cased email", async () => {
+    membership.mockResolvedValue({ data: [{ household_id: 'hh-1' }], error: null })
+    expect(await ensureHouseholdAccess('user-1', 'Member@Example.com')).toBe('let-in')
+    expect(inviteDelete).toHaveBeenCalledTimes(1)
+    expect(inviteDelete).toHaveBeenCalledWith({ email: 'member@example.com', household_id: 'hh-1' })
+    expect(invite).not.toHaveBeenCalled()
+    expect(insert).not.toHaveBeenCalled()
+    expect(deleteUser).not.toHaveBeenCalled()
+  })
+
+  it('lets a member in, and logs it, when clearing their leftover invite fails', async () => {
+    membership.mockResolvedValue({ data: [{ household_id: 'hh-1' }], error: null })
+    inviteDelete.mockResolvedValue({ error: NO_ANSWER })
+    expect(await ensureHouseholdAccess('user-1', 'member@example.com')).toBe('let-in')
+    expect(logs).toEqual([['[access] could not clear the used invite of a member', NO_ANSWER]])
+  })
+
+  it('lets in a member with no email, with no invite to clear', async () => {
+    membership.mockResolvedValue({ data: [{ household_id: 'hh-1' }], error: null })
+    expect(await ensureHouseholdAccess('user-1', undefined)).toBe('let-in')
+    expect(inviteDelete).not.toHaveBeenCalled()
+    expect(logs).toEqual([])
+  })
+
   // An existing member gets through a passing failure, and RLS still guards the data (#240 kept this).
   it('lets the sign-in through, deletes no one and logs why, when the membership read fails', async () => {
     membership.mockResolvedValue({ data: null, error: NO_ANSWER })
     expect(await ensureHouseholdAccess('user-1', 'new@example.com')).toBe('let-in')
     expect(deleteUser).not.toHaveBeenCalled()
     expect(invite).not.toHaveBeenCalled()
+    expect(inviteDelete).not.toHaveBeenCalled()
     expect(logs).toEqual([['[access] could not read the membership, so let the sign-in through', NO_ANSWER]])
   })
 
@@ -81,7 +118,7 @@ describe('ensureHouseholdAccess', () => {
     invite.mockResolvedValue({ data: { household_id: 'hh-1' }, error: null })
     expect(await ensureHouseholdAccess('user-2', 'New@Example.com')).toBe('let-in')
     expect(insert).toHaveBeenCalledWith({ user_id: 'user-2', household_id: 'hh-1' })
-    expect(inviteDelete).toHaveBeenCalledWith('new@example.com')
+    expect(inviteDelete).toHaveBeenCalledWith({ email: 'new@example.com' })
     expect(logs).toEqual([])
   })
 
@@ -101,7 +138,7 @@ describe('ensureHouseholdAccess', () => {
     invite.mockResolvedValue({ data: { household_id: 'hh-1' }, error: null })
     insert.mockResolvedValue({ error: { code: '23505', message: 'duplicate key value violates unique constraint "memberships_pkey"' } })
     expect(await ensureHouseholdAccess('user-2', 'new@example.com')).toBe('let-in')
-    expect(inviteDelete).toHaveBeenCalledWith('new@example.com')
+    expect(inviteDelete).toHaveBeenCalledWith({ email: 'new@example.com' })
     expect(deleteUser).not.toHaveBeenCalled()
     expect(logs).toEqual([])
   })
@@ -120,6 +157,19 @@ describe('ensureHouseholdAccess', () => {
     invite.mockResolvedValue({ data: null, error: null })
     expect(await ensureHouseholdAccess('user-3', 'stranger@example.com')).toBe('not-invited')
     expect(deleteUser).toHaveBeenCalledWith('user-3')
+    expect(logs).toEqual([])
+  })
+
+  // #249: the account is left, so the email form (which won't create one) can now send it links. Still
+  // not invited, so the answer stands; the route signs the session out.
+  it('still answers not invited, and logs it, when removing the account fails', async () => {
+    membership.mockResolvedValue({ data: [], error: null })
+    invite.mockResolvedValue({ data: null, error: null })
+    deleteUser.mockResolvedValue({ data: null, error: { status: 500, code: 'unexpected_failure', message: 'Database error deleting user', name: 'AuthApiError' } })
+    expect(await ensureHouseholdAccess('user-3', 'stranger@example.com')).toBe('not-invited')
+    expect(logs).toEqual([
+      ['[access] could not remove the uninvited account', { status: 500, code: 'unexpected_failure', message: 'Database error deleting user' }],
+    ])
   })
 
   it('removes an account with no email, which no invite can name', async () => {
