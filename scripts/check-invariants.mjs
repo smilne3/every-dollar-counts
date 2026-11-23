@@ -9,9 +9,9 @@
 // Every known violation is ALLOWED BY NAME below, with a reason and an issue number. The allowlist
 // is the outstanding debt, written down. Adding to it should feel like a decision; removing from it
 // is how the debt gets paid.
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs'
 import { join, posix, relative } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 
 // ---------------------------------------------------------------------------
@@ -995,4 +995,17 @@ function main() {
   console.log('invariants ok')
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main()
+// Run when started as a script, not when a test imports it. Compared as real paths: for the entry module
+// Node resolves symlinks in import.meta.url but leaves argv[1] as it was typed, so started through a
+// symlinked path (macOS's /tmp is one) the two differed, main() never ran, and the script exited 0
+// having checked nothing (#207).
+function startedAsScript() {
+  if (!process.argv[1]) return false
+  try {
+    return realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)
+  } catch {
+    return false // argv[1] names no file: not this script
+  }
+}
+
+if (startedAsScript()) main()
