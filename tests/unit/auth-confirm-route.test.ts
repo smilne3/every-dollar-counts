@@ -72,6 +72,22 @@ describe('GET /auth/confirm: signed in', () => {
     ensureHouseholdAccess.mockResolvedValue('not-invited')
     expect(await sentTo(confirm('code=abc'))).toBe('/auth/not-invited')
   })
+
+  // #249: if deleting their throwaway account failed, the new session's cookie would keep a working
+  // session for someone just told they aren't invited.
+  it('signs the new session out before "Not invited yet"', async () => {
+    ensureHouseholdAccess.mockResolvedValue('not-invited')
+    let release!: () => void
+    auth.signOut.mockReturnValue(new Promise((resolve) => (release = () => resolve({ error: null }))))
+    let answered = false
+    const pending = confirm('code=abc').then((res) => ((answered = true), res))
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(auth.signOut).toHaveBeenCalledWith({ scope: 'local' })
+    expect(answered).toBe(false)
+    release()
+    expect(await sentTo(pending)).toBe('/auth/not-invited')
+    expect(auth.signOut).toHaveBeenCalledTimes(1)
+  })
 })
 
 // #240: a non-member whose invite couldn't be read or used. Let in, they'd find no household and the

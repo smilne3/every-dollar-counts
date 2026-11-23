@@ -58,5 +58,8 @@ export async function GET(request: NextRequest) {
     await supabase.auth.signOut({ scope: 'local' })
     return NextResponse.redirect(new URL('/auth/try-again', request.url))
   }
+  // Not invited, and their throwaway account deleted. Signed out too, as above: if that delete failed,
+  // the cookie would otherwise keep a working session for someone told they aren't invited (#249).
+  await supabase.auth.signOut({ scope: 'local' })
   return NextResponse.redirect(new URL('/auth/not-invited', request.url))
 }
