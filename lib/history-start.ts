@@ -24,8 +24,9 @@ export async function historyStart(): Promise<HistoryStarts> {
   const supabase = await createClient()
 
   const { data: accounts, error } = await supabase.from('accounts').select('account_id, type, plaid_item_id')
-  if (error) throw new Error(`could not read accounts: ${error.message}`)
-  if (!accounts) throw new Error('could not read accounts: no data and no error')
+  // It names its purpose, so the log tells it from the Dashboard's own accounts read (#231).
+  if (error) throw new Error(`could not read accounts for the history start: ${error.message}`)
+  if (!accounts) throw new Error('could not read accounts for the history start: no data and no error')
   const cashFlow = accounts.filter((a) => isCashFlowAccount(a.type as string | null))
 
   const firsts = await Promise.all(

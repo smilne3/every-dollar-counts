@@ -169,7 +169,7 @@ vi.mock('@/lib/history-start', () => ({
   historyStart: async () => {
     started.push('history start')
     await gates['history start']
-    if (results['history start']?.error) throw new Error(`could not read accounts: ${results['history start'].error.message}`)
+    if (results['history start']?.error) throw new Error(`could not read accounts for the history start: ${results['history start'].error.message}`)
     return history.value
   },
 }))
@@ -1425,7 +1425,7 @@ describe('Dashboard waits only for its longest chain (#199)', () => {
     ['categories', 'could not read categories: boom'],
     ['transactions', 'could not read transactions: boom'],
     ['receivable', 'could not read reimbursable transactions: boom'],
-    ['history start', 'could not read accounts: boom'],
+    ['history start', 'could not read accounts for the history start: boom'],
     ['budgets', 'could not read budgets: boom'],
     ['recent transactions', 'could not read recent transactions: boom'],
   ])('fails at once when the %s read fails, with the others still running: %s', async (name, message) => {
