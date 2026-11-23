@@ -102,6 +102,7 @@ import { NotSyncingBanner } from '@/components/NotSyncingBanner'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { catalogFingerprint } from '@/lib/category-rules'
 import { sug } from './helpers/category-context'
+import { SUGGESTION_EMBED } from '@/lib/category-context'
 import { blocks, bannerText } from './helpers/banner'
 import { controlWithText, expectTapTarget } from './helpers/tap-target'
 import { storedItem, FOREIGN_ITEMS } from '../stubs/plaid-items'
@@ -266,6 +267,18 @@ describe('Budgets categories and rules (#28)', () => {
     const off = await spendWith(rows)
     expect(on).toEqual({ 'Food & Drink': 42 })
     expect(on).toEqual(off)
+  })
+
+  // #227: the stand-in answers with every column whatever a read asked for, so only this notices a read
+  // losing one. Without reimbursable_amount a repaid expense would count in full in spending; without
+  // monthly_limit there'd be no limit to compare against.
+  it('still asks for what each read asked for', async () => {
+    await spendWith([])
+    expect(selects).toEqual({
+      memberships: ['household_id'],
+      budgets: ['category, monthly_limit'],
+      transactions: [`id, amount, date, merchant_name, user_category, pfc_primary, pfc_detailed, reimbursable_amount, ${SUGGESTION_EMBED}`],
+    })
   })
 
   // Spec §7.4's coverage guard: every transactions read the page resolves carries the embed.
