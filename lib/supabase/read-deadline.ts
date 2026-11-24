@@ -1,5 +1,5 @@
 // How long the server waits for one request to the database before giving up on it (#202): one page of a
-// paged read, or one try of a retried one. Without a limit, a request that never answers holds its page or
+// paged read, or one try of a retried one. Supabase Auth's sign-in check gets the same limit (#239). Without a limit, a request that never answers holds its page or
 // API route until Vercel stops the function (300 seconds by default, as
 // app/api/plaid/exchange-public-token/route.ts records), and nothing logs which read it was.
 //
@@ -16,16 +16,22 @@
 // refusal arrives. That's the safe thing to say, since the browser can't tell.
 export const READ_DEADLINE_MS = 20_000
 
-function isDatabaseRead(input: RequestInfo | URL, init?: RequestInit) {
+function isLimited(input: RequestInfo | URL, init?: RequestInit) {
   const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase()
   // Only reads, because a write that's cut off may still have happened, and the caller couldn't tell. That
   // leaves Supabase Auth's session refresh alone too: it's a POST, which auth-js retries for about 25
-  // seconds on purpose (proxy.ts, #143). Only PostgREST, so getUser()'s GET /auth/v1/user, the sign-in
-  // check, has no limit either. The app makes no .rpc() calls.
+  // seconds on purpose (proxy.ts, #143). The app makes no .rpc() calls.
   if (method !== 'GET' && method !== 'HEAD') return false
   try {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
-    return new URL(url).pathname.startsWith('/rest/v1/')
+    const { pathname } = new URL(url)
+    // PostgREST's reads, and Supabase Auth's sign-in check: getUser()'s GET /auth/v1/user, which the proxy
+    // and every page and API route make. Unlimited, an Auth service gone quiet held all of them until
+    // Vercel stopped the function, with nothing logged (#239). auth-js finishes any session refresh before
+    // it sends this GET, and the limit starts with the GET, so it never fires while a refresh is retried.
+    // Cut off, the check comes back as AuthRetryableFetchError, which checkSignIn logs and reads as
+    // "couldn't check your sign-in" (#143).
+    return pathname.startsWith('/rest/v1/') || pathname === '/auth/v1/user'
   } catch {
     // Left to fetch, which fails a URL it can't use as it always has. Thrown here, the error would reach
     // auth-js too, which shares this fetch, and read as Supabase Auth being unreachable.
@@ -50,7 +56,7 @@ function isDatabaseRead(input: RequestInfo | URL, init?: RequestInit) {
 // card would have no Error ID. A query using .throwOnError() would throw this one as it is.
 export function fetchWithDeadline(deadlineMs: number): typeof fetch {
   return (input, init) => {
-    if (!isDatabaseRead(input, init)) return fetch(input, init)
+    if (!isLimited(input, init)) return fetch(input, init)
 
     const deadline = new AbortController()
     const timer = setTimeout(() => {

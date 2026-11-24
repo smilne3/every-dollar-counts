@@ -1,4 +1,5 @@
 import { createServerClient } from '@supabase/ssr'
+import { fetchWithReadDeadline } from '@/lib/supabase/read-deadline'
 import { NextResponse, type NextRequest } from 'next/server'
 import { checkSignIn } from '@/lib/auth-check'
 
@@ -44,6 +45,9 @@ export async function proxy(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
     {
+      // The sign-in check below has the same time limit as the pages' (#239): without one, an Auth
+      // service gone quiet held every request here until Vercel stopped it, with nothing logged.
+      global: { fetch: fetchWithReadDeadline },
       cookies: {
         getAll() {
           return request.cookies.getAll()
