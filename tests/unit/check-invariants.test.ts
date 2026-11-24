@@ -1,6 +1,9 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest'
 import ts from 'typescript'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   checkUncheckedReads,
   checkCategoryReads,
@@ -10,6 +13,8 @@ import {
   checkBrandCasts,
   checkTapTargets,
   checkSmBreakpoint,
+  checkPresentation,
+  PRESENTATION_ALLOWED,
   TAP_TARGETS_ALLOWED,
   PASS_THROUGH,
   SHARED_CLASSES,
@@ -852,5 +857,110 @@ describe('sm-breakpoint', () => {
     expect(checkSmBreakpoint(file('lib/x.ts', `const c = 'sm:block'`))).toEqual([])
     expect(checkSmBreakpoint(file('scripts/x.mjs', `const c = 'sm:block'`))).toEqual([])
     expect(checks(checkSmBreakpoint(file('app/x.tsx', `const c = 'sm:block'`)))).toEqual(['sm-breakpoint'])
+  })
+})
+
+// Tripwire 7 (#108): what a transaction means on screen is worked out by presentTransaction, once.
+// A copy of one of its rules in app/ or components/ fires, wherever it appears.
+describe('presentation', () => {
+  const C = 'components/X.tsx'
+  const at = (src: string, path = C) => checkPresentation(file(path, src), new Map())
+
+  describe('the label fallback', () => {
+    it.each([
+      ['?? to the name', 'const label = t.merchant_name ?? t.name'],
+      ['|| to the name', 'const label = t.merchant_name || t.name'],
+      ['through ?.', "const label = row?.merchant_name ?? 'Transaction'"],
+      ['the other way round', 'const label = t.name ?? t.merchant_name'],
+      ['destructured', "const label = merchant_name ?? name ?? 'Transaction'"],
+      ['in JSX', '<span>{t.merchant_name ?? t.name}</span>'],
+    ])('fires on merchant_name with a fallback, %s', (_name, src) => {
+      const found = at(`export function X() {\n  ${src}\n}`)
+      expect(found.map((f) => [f.check, f.line])).toEqual([['presentation', 2]])
+      expect(found[0].message).toContain('transactionLabel')
+    })
+
+    it('leaves alone merchant_name read for itself, and a mention in a comment or string', () => {
+      expect(at("const m = t.merchant_name\nconst key = { merchant: t.merchant_name }")).toEqual([])
+      expect(at("// the label is merchant_name ?? name\nconst hint = 'merchant_name ?? name'")).toEqual([])
+      expect(at('const label = transactionLabel(t)')).toEqual([])
+    })
+  })
+
+  describe('the sign flip', () => {
+    it.each([
+      ['on a property', 'const shown = -t.amount'],
+      ['through ?.', 'const shown = -row?.amount'],
+      ['in parentheses', 'const shown = -(t.amount)'],
+      ['on a destructured amount', 'const shown = -amount'],
+      ['in JSX', '<span>{formatMoney(-t.amount)}</span>'],
+    ])('fires on an amount negated %s', (_name, src) => {
+      const found = at(`export function X() {\n  ${src}\n}`)
+      expect(found.map((f) => [f.check, f.line])).toEqual([['presentation', 2]])
+      expect(found[0].message).toContain('presentTransaction(t).display')
+    })
+
+    it('leaves alone a subtraction, and a negation of anything else', () => {
+      expect(at('const left = total - t.amount\nconst rest = budget -amount')).toEqual([])
+      expect(at('const n = -t.reimbursable_amount\nconst m = -offset\nconst k = -1')).toEqual([])
+    })
+  })
+
+  // Toned by sign, a card payment's crediting leg read as income (#31): presentTransaction's tone
+  // keeps card payments and transfers neutral.
+  describe('the tone by sign', () => {
+    it.each([
+      ['an amount below zero', "<span className={t.amount < 0 ? 'text-coral' : 'text-emerald'} />"],
+      ['the display figure, with backgrounds', "<span className={p.display > 0 ? 'bg-emerald-050 text-emerald' : 'bg-coral-050 text-coral'} />"],
+      ['zero on the left', "<span className={0 > amount ? 'text-coral' : ''} />"],
+      ['a hover tone in a template', "<span className={`tabular-nums ${t.amount >= 0 ? 'hover:text-emerald-600' : ''}`} />"],
+      ['&&', "<span className={`tabular-nums ${t.amount < 0 && 'text-coral'}`} />"],
+      ['a condition with more in it', "<span className={!isCC && t.amount < 0 ? 'text-coral' : 'text-ink'} />"],
+      ['a branch that is a template', "<span className={t.amount < 0 ? `font-medium text-coral ${size}` : 'text-ink'} />"],
+    ])('fires on a colour chosen by %s', (_name, src) => {
+      const found = at(`export function X() {\n  return ${src}\n}`)
+      expect(found.map((f) => [f.check, f.line])).toEqual([['presentation', 2]])
+      expect(found[0].message).toContain('presentTransaction(t).tone')
+    })
+
+    // The dashboard's average and ReimbursableEditor's question, as they are written today.
+    it("leaves alone another figure's colour, a sign that picks words, and a colour by tone", () => {
+      expect(at("<span className={`block ${avg.value < 0 ? 'text-coral' : 'text-muted'}`} />")).toEqual([])
+      expect(at("const question = amount < 0 ? 'How much of this is a repayment?' : 'How much is coming back?'")).toEqual([])
+      expect(at("<span className={p.tone === 'out' ? 'text-coral' : 'text-ink'} />\n<span className={TONE_CLASS[p.tone]} />")).toEqual([])
+    })
+  })
+
+  // The module's own code holds two of the rules, and trips them anywhere but lib/.
+  it('passes lib/transaction-presentation.ts where it is, and would fail its rules anywhere in components/', () => {
+    const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../lib/transaction-presentation.ts'), 'utf8')
+    expect(at(source, 'lib/transaction-presentation.ts')).toEqual([])
+    const found = at(source, 'components/transaction-presentation.ts')
+    expect(found.map((f) => f.message.split('.')[0]).sort()).toEqual([
+      "flips a transaction's amount by hand",
+      "works out a transaction's label by hand, from merchant_name with a fallback",
+    ])
+  })
+
+  it('passes a file PRESENTATION_ALLOWED names, and only that file', () => {
+    const src = 'const label = t.merchant_name ?? t.name'
+    const allowed = new Map([[C, 'A copy kept until it moves onto presentTransaction (#106).']])
+    expect(checkPresentation([...file(C, src), ...file('components/Y.tsx', src)], allowed).map((f) => f.file)).toEqual(['components/Y.tsx'])
+  })
+
+  it('names each real allowlisted file under app/ or components/, with an issue number', () => {
+    for (const [path, reason] of PRESENTATION_ALLOWED) {
+      expect(path).toMatch(/^(app|components)\/.+\.tsx?$/)
+      expect(reason).toMatch(/#\d+/)
+    }
+  })
+
+  // lib/ is where the module is, and where rule keys, ingest and the suggestion request read
+  // merchant_name for what it is.
+  it('reads only app/ and components/, routes and all', () => {
+    const src = 'const label = t.merchant_name ?? t.name'
+    expect(at(src, 'lib/category-suggest-request.ts')).toEqual([])
+    expect(checks(at(src, 'app/api/x/route.ts'))).toEqual(['presentation'])
+    expect(checks(at(src, 'app/(app)/x/page.tsx'))).toEqual(['presentation'])
   })
 })
