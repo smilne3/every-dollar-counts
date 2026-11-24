@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
-const { calls, tz, results, selects, onRead } = vi.hoisted(() => ({
+const { calls, tz, results, selects, onRead, gates, started } = vi.hoisted(() => ({
+  // A read waits for its gate, if a test set one, so a test can hold it and see what else starts
+  // meanwhile (#226). `started` is the order the reads were sent in.
+  gates: {} as Record<string, Promise<void> | undefined>,
+  started: [] as string[],
   // Every `.select()` the page sends, per table, so a test can pin the suggestion embed (§7.4).
   selects: {} as Record<string, string[]>,
   calls: { gte: [] as string[], lt: [] as string[] },
@@ -37,12 +41,17 @@ const chainFor = (table: string) => {
   }
   // maybeSingle only. Null data and no error is its answer for no row; .single() makes no row an
   // error (PGRST116), which a stand-in answering null would hide (#172).
-  chain.maybeSingle = async () => results[table] ?? { data: null, error: null }
+  chain.maybeSingle = async () => {
+    started.push(table)
+    await gates[table]
+    return results[table] ?? { data: null, error: null }
+  }
   chain.then = (resolve: (v: unknown) => unknown) => {
+    if (!afterCursor) started.push(table)
     onRead[table]?.()
-    return Promise.resolve(
-      afterCursor ? { data: [], error: null } : (results[table] ?? { data: [], error: null })
-    ).then(resolve)
+    return Promise.resolve(gates[table])
+      .then(() => (afterCursor ? { data: [], error: null } : (results[table] ?? { data: [], error: null })))
+      .then(resolve)
   }
   return chain
 }
@@ -60,6 +69,7 @@ vi.mock('@/lib/supabase/admin', async () => {
     supabaseAdmin: {
       from: (table: string) => {
         if (table !== 'plaid_items') throw new Error(`budgets page read ${table} through the service-role client`)
+        started.push('plaid_items')
         return plaidItemsQuery(results.plaid_items ?? { data: [], error: null })
       },
     },
@@ -77,6 +87,8 @@ vi.mock('@/lib/category-context', async (importOriginal) => {
   return {
     ...actual,
     fetchCategoryContext: async () => {
+      started.push('categories')
+      await gates.categories
       const c = results.categories ?? { data: [], error: null }
       if (c.error) throw new Error(`could not read categories: ${c.error.message}`)
       const r = results.category_rules ?? { data: [], error: null }
@@ -93,7 +105,11 @@ vi.mock('@/lib/category-context', async (importOriginal) => {
 // The real module but for the timezone, so currentHouseholdId reads `results.memberships`.
 vi.mock('@/lib/household', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/household')>()),
-  householdTimezone: async () => tz.value,
+  householdTimezone: async () => {
+    started.push('timezone')
+    await gates.timezone
+    return tz.value
+  },
 }))
 
 import BudgetsPage from '@/app/(app)/budgets/page'
@@ -138,6 +154,8 @@ beforeEach(() => {
   results.plaid_items = { data: [], error: null }
   for (const k of Object.keys(selects)) delete selects[k]
   for (const k of Object.keys(onRead)) delete onRead[k]
+  for (const k of Object.keys(gates)) delete gates[k]
+  started.length = 0
   vi.unstubAllEnvs()
 })
 
@@ -146,6 +164,56 @@ afterEach(() => {
 })
 
 // The dashboard's banner, above this month's spending against each budget (#135).
+// #226: each read starts as soon as what it needs is known. The categories and the limits need
+// nothing, the month's transactions only the timezone, the banks only the household.
+describe('Budgets reads start together (#226)', () => {
+  function hold() {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    return { gate, release }
+  }
+  // Lets every started read run as far as it can. The timers are fake, so this, not a real wait.
+  const settle = () => vi.advanceTimersByTimeAsync(1)
+
+  it('starts the categories and the limits while the household is still being read', async () => {
+    const timezone = hold()
+    const membership = hold()
+    gates.timezone = timezone.gate
+    gates.memberships = membership.gate
+    const page = BudgetsPage()
+    await settle()
+    expect(started).toEqual(expect.arrayContaining(['timezone', 'memberships', 'categories', 'budgets']))
+    expect(started).not.toContain('transactions')
+    expect(started).not.toContain('plaid_items')
+    timezone.release()
+    membership.release()
+    await page
+  })
+
+  it("starts the month's transactions once the timezone is known, without waiting for the household", async () => {
+    const membership = hold()
+    gates.memberships = membership.gate
+    const page = BudgetsPage()
+    await settle()
+    expect(started).toContain('transactions')
+    expect(started).not.toContain('plaid_items')
+    membership.release()
+    await page
+    expect(started).toContain('plaid_items')
+  })
+
+  it('fails at once when the limits cannot be read, with the household still held', async () => {
+    const timezone = hold()
+    const membership = hold()
+    gates.timezone = timezone.gate
+    gates.memberships = membership.gate
+    results.budgets = { data: null, error: { message: 'boom' } }
+    await expect(BudgetsPage()).rejects.toThrow('could not read budgets: boom')
+    timezone.release()
+    membership.release()
+  })
+})
+
 describe('Budgets banks (#135)', () => {
   beforeEach(() => {
     vi.setSystemTime(new Date('2026-09-15T12:00:00Z'))
