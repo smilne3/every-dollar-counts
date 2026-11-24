@@ -1007,6 +1007,120 @@ export function checkSmBreakpoint(files) {
 }
 
 // ---------------------------------------------------------------------------
+// 7. A transaction's meaning is worked out in one place.
+//
+// #108. presentTransaction (lib/transaction-presentation.ts) is what a transaction means on screen:
+// the label, falling back from merchant_name to name; Plaid's sign flipped, since its amount is above
+// zero for money out; and the tone, emerald or coral by that sign, with card payments and transfers
+// kept neutral. Copies of those rules have drifted before. The desktop row and the phone card each
+// had their own answer for a transaction with no name, the Reimbursements page carried its own label
+// expression in two places (#106), and a card payment toned by its sign read as income (#31). The
+// dashboard test pins one call site to presentTransaction; this pins the rules wherever a new copy
+// would appear.
+//
+// So no file under app/ or components/ does any of these by hand:
+// - a label fallback: `??` or `||` with a merchant_name read on either side;
+// - a sign flip: unary minus on an `amount` read (`-t.amount`, `-amount`). A subtraction isn't one;
+// - a tone by sign: `?:` whose condition compares an `amount` or `display` read with 0, with an
+//   emerald or coral text or background class in a branch, or `&&` with such a comparison before
+//   one. A colour keyed on `tone`, presentTransaction's answer, is the way to do it, and passes.
+// Code, not text: it parses with the TypeScript compiler, so a comment or a string that mentions a
+// rule doesn't trip it. lib/ isn't read. The module is there, and so are the rule keys, ingest and
+// the suggestion request, which read merchant_name for what it is, not to label a row.
+//
+// A file that has to keep a copy is named in PRESENTATION_ALLOWED, with why and an issue number.
+// ---------------------------------------------------------------------------
+/** @type {Map<string, string>} */
+export const PRESENTATION_ALLOWED = new Map([])
+
+// The name an expression reads, through parentheses and `!`: `amount` for t.amount, t?.amount,
+// t['amount'] and (amount). Null for anything else.
+function readName(e) {
+  while (ts.isParenthesizedExpression(e) || ts.isNonNullExpression(e)) e = e.expression
+  if (ts.isIdentifier(e)) return e.text
+  if (ts.isPropertyAccessExpression(e)) return e.name.text
+  if (ts.isElementAccessExpression(e) && ts.isStringLiteralLike(e.argumentExpression)) return e.argumentExpression.text
+  return null
+}
+
+// Whether a node compares an `amount` or `display` read with zero, in it or anywhere inside it.
+const RELATIONAL = new Set([
+  ts.SyntaxKind.LessThanToken,
+  ts.SyntaxKind.GreaterThanToken,
+  ts.SyntaxKind.LessThanEqualsToken,
+  ts.SyntaxKind.GreaterThanEqualsToken,
+])
+function testsSign(node) {
+  if (ts.isBinaryExpression(node) && RELATIONAL.has(node.operatorToken.kind)) {
+    const zero = (e) => ts.isNumericLiteral(e) && Number(e.text) === 0
+    const signed = (e) => ['amount', 'display'].includes(readName(e))
+    if ((signed(node.left) && zero(node.right)) || (zero(node.left) && signed(node.right))) return true
+  }
+  return ts.forEachChild(node, testsSign) ?? false
+}
+
+// Whether a string or template text in a node holds an emerald or coral text or background class.
+const TONE_CLASS_TEXT = /(^|[\s:])(text|bg)-(emerald|coral)\b/
+const TEXTS = [ts.isStringLiteral, ts.isNoSubstitutionTemplateLiteral, ts.isTemplateHead, ts.isTemplateMiddle, ts.isTemplateTail]
+function holdsTone(node) {
+  if (TEXTS.some((is) => is(node)) && TONE_CLASS_TEXT.test(node.text)) return true
+  return ts.forEachChild(node, holdsTone) ?? false
+}
+
+const ASK =
+  'lib/transaction-presentation.ts is the one answer, so a change to the rule reaches every surface or ' +
+  'none (#108). If this is not a transaction shown on screen, name the file in PRESENTATION_ALLOWED, ' +
+  'with why and an issue number.'
+
+export function checkPresentation(files, allowed = PRESENTATION_ALLOWED) {
+  const out = []
+  for (const { path, text } of files) {
+    if (!/^(app|components)\/.+\.tsx?$/.test(path) || allowed.has(path)) continue
+    const kind = path.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS
+    const sf = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, kind)
+    const fail = (node, message) =>
+      out.push({ check: 'presentation', file: path, line: lineOf(text, node.getStart(sf)), message })
+    const visit = (node) => {
+      if (ts.isBinaryExpression(node)) {
+        const op = node.operatorToken.kind
+        const either = (name) => readName(node.left) === name || readName(node.right) === name
+        if ((op === ts.SyntaxKind.QuestionQuestionToken || op === ts.SyntaxKind.BarBarToken) && either('merchant_name')) {
+          fail(
+            node,
+            "works out a transaction's label by hand, from merchant_name with a fallback. Ask " +
+              `transactionLabel(t), or presentTransaction(t).label: ${ASK}`
+          )
+        }
+      }
+      const toneBySign = ts.isConditionalExpression(node)
+        ? testsSign(node.condition) && (holdsTone(node.whenTrue) || holdsTone(node.whenFalse))
+        : ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+          ? testsSign(node.left) && holdsTone(node.right)
+          : false
+      if (toneBySign) {
+        fail(
+          node,
+          "picks a transaction's colour by the sign of its amount. presentTransaction(t).tone is the " +
+            'colour to use: it keeps card payments and transfers neutral, and toned by its sign a card ' +
+            `payment read as income (#31): ${ASK}`
+        )
+      }
+      if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.MinusToken && readName(node.operand) === 'amount') {
+        fail(
+          node,
+          "flips a transaction's amount by hand. Plaid's amount is above zero for money out, and " +
+            'presentTransaction(t).display is the figure to show, which also keeps a zero from reading ' +
+            `"-$0.00": ${ASK}`
+        )
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(sf)
+  }
+  return out
+}
+
+// ---------------------------------------------------------------------------
 
 function walk(dir, out = [], ext = /\.tsx?$/) {
   for (const entry of readdirSync(dir)) {
@@ -1041,6 +1155,7 @@ function main() {
     // Every file under app/ and components/ is in `files`, so an entry for one that is not is stale.
     ...checkTapTargets(files, TAP_TARGETS_ALLOWED, { wholeTree: true }),
     ...checkSmBreakpoint(files),
+    ...checkPresentation(files),
   ]
   if (failures.length) {
     console.error(`\ncheck:invariants — ${failures.length} problem(s):\n`)
