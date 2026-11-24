@@ -2,11 +2,15 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 // vi.hoisted for the same reason as tests/unit/budgets-page.test.tsx and tests/unit/trends-page.test.tsx:
 // the static page import below is linked before this file's body runs, firing the mock factory.
-const { results, calls, tz, history, selects, receivable } = vi.hoisted(() => ({
+const { results, calls, tz, history, selects, receivable, gates, started } = vi.hoisted(() => ({
+  // A read waits for its gate, if a test set one, so a test can hold it and see what else starts
+  // meanwhile (#226). `started` is the order the reads were sent in.
+  gates: {} as Record<string, Promise<void> | undefined>,
+  started: [] as string[],
   // Every `.select()` the page sends, per table, so a test can pin the suggestion embed (§7.4).
   selects: {} as Record<string, string[]>,
   // What lib/receivable answers: what the household is owed, 0 unless a test says otherwise.
-  receivable: { value: 0 },
+  receivable: { value: 0, error: null as string | null },
   // What lib/history-start answers; see tests/unit/dashboard-page.test.tsx for why it is mocked.
   history: { value: new Map() as ReadonlyMap<string, string | null> },
   results: {} as Record<string, { data: unknown; error: { message: string } | null }>,
@@ -37,11 +41,17 @@ const chainFor = (table: string) => {
   }
   // maybeSingle only. Null data and no error is its answer for no row; .single() makes no row an
   // error (PGRST116), which a stand-in answering null would hide (#172).
-  chain.maybeSingle = async () => results[table] ?? { data: null, error: null }
-  chain.then = (resolve: (v: unknown) => unknown) =>
-    Promise.resolve(
-      afterCursor ? { data: [], error: null } : (results[table] ?? { data: [], error: null })
-    ).then(resolve)
+  chain.maybeSingle = async () => {
+    started.push(table)
+    await gates[table]
+    return results[table] ?? { data: null, error: null }
+  }
+  chain.then = (resolve: (v: unknown) => unknown) => {
+    if (!afterCursor) started.push(table)
+    return Promise.resolve(gates[table])
+      .then(() => (afterCursor ? { data: [], error: null } : (results[table] ?? { data: [], error: null })))
+      .then(resolve)
+  }
   return chain
 }
 
@@ -65,8 +75,11 @@ vi.mock('@/lib/supabase/admin', async () => {
   const { plaidItemsQuery } = await import('../stubs/plaid-items')
   return {
     supabaseAdmin: {
-      from: (table: string) =>
-        table === 'plaid_items' ? plaidItemsQuery(results.plaid_items ?? { data: [], error: null }) : chainFor(table),
+      from: (table: string) => {
+        if (table !== 'plaid_items') return chainFor(table)
+        started.push('plaid_items')
+        return plaidItemsQuery(results.plaid_items ?? { data: [], error: null })
+      },
     },
   }
 })
@@ -83,6 +96,8 @@ vi.mock('@/lib/category-context', async (importOriginal) => {
   return {
     ...actual,
     fetchCategoryContext: async () => {
+      started.push('categories')
+      await gates.categories
       const c = results.categories ?? { data: [], error: null }
       if (c.error) throw new Error(`could not read categories: ${c.error.message}`)
       const r = results.category_rules ?? { data: [], error: null }
@@ -99,10 +114,27 @@ vi.mock('@/lib/category-context', async (importOriginal) => {
 // The real module but for the timezone, so currentHouseholdId reads `results.memberships`.
 vi.mock('@/lib/household', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/household')>()),
-  householdTimezone: async () => tz.value,
+  householdTimezone: async () => {
+    started.push('timezone')
+    await gates.timezone
+    return tz.value
+  },
 }))
-vi.mock('@/lib/receivable', () => ({ fetchReceivable: async () => receivable.value }))
-vi.mock('@/lib/history-start', () => ({ historyStart: async () => history.value }))
+vi.mock('@/lib/receivable', () => ({
+  fetchReceivable: async () => {
+    started.push('receivable')
+    await gates.receivable
+    if (receivable.error) throw new Error(`could not read reimbursable transactions: ${receivable.error}`)
+    return receivable.value
+  },
+}))
+vi.mock('@/lib/history-start', () => ({
+  historyStart: async () => {
+    started.push('history start')
+    await gates['history start']
+    return history.value
+  },
+}))
 
 import BreakdownPage from '@/app/(app)/breakdown/[metric]/page'
 import { BreakdownList } from '@/components/BreakdownList'
@@ -152,8 +184,71 @@ beforeEach(() => {
   results.manual_assets = { data: [], error: null }
   results.plaid_items = { data: [], error: null }
   receivable.value = 0
+  receivable.error = null
   for (const k of Object.keys(selects)) delete selects[k]
+  for (const k of Object.keys(gates)) delete gates[k]
+  started.length = 0
   vi.unstubAllEnvs()
+})
+
+// #226: each metric starts the reads it shows as soon as what they need is known, and only those.
+describe('Breakdown reads start together (#226)', () => {
+  function hold() {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    return { gate, release }
+  }
+  // Lets every started read run as far as it can. The timers are fake, so this, not a real wait.
+  const settle = () => vi.advanceTimersByTimeAsync(1)
+
+  it("starts what's owed with the accounts on net worth, while the household is still being read", async () => {
+    const membership = hold()
+    gates.memberships = membership.gate
+    const page = render('net-worth')
+    await settle()
+    expect(started).toEqual(expect.arrayContaining(['accounts', 'memberships', 'receivable']))
+    expect(started).not.toContain('plaid_items')
+    expect(started).not.toContain('manual_assets')
+    membership.release()
+    await page
+    expect(started).toEqual(expect.arrayContaining(['plaid_items', 'manual_assets']))
+  })
+
+  it('starts the categories and the history start on saved, while the household and timezone are held', async () => {
+    const membership = hold()
+    const timezone = hold()
+    gates.memberships = membership.gate
+    gates.timezone = timezone.gate
+    const page = render('saved')
+    await settle()
+    expect(started).toEqual(expect.arrayContaining(['accounts', 'memberships', 'timezone', 'categories', 'history start']))
+    expect(started).not.toContain('transactions')
+    expect(started).not.toContain('plaid_items')
+    timezone.release()
+    await settle()
+    expect(started).toContain('transactions')
+    expect(started).not.toContain('plaid_items')
+    membership.release()
+    await page
+  })
+
+  it.each([
+    ['net-worth', ['accounts', 'manual_assets', 'memberships', 'plaid_items', 'receivable']],
+    ['cash', ['accounts', 'memberships', 'plaid_items']],
+    ['spent', ['accounts', 'categories', 'memberships', 'plaid_items', 'timezone', 'transactions']],
+    ['saved', ['accounts', 'categories', 'history start', 'memberships', 'plaid_items', 'timezone', 'transactions']],
+  ])('reads only what %s shows', async (metric, reads) => {
+    await render(metric)
+    expect([...new Set(started)].sort()).toEqual(reads)
+  })
+
+  it("fails at once when what's owed can't be read, with the household still held", async () => {
+    const membership = hold()
+    gates.memberships = membership.gate
+    receivable.error = 'boom'
+    await expect(render('net-worth')).rejects.toThrow('could not read reimbursable transactions: boom')
+    membership.release()
+  })
 })
 
 afterEach(() => {

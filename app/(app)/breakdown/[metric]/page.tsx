@@ -34,6 +34,40 @@ const TITLES: Record<string, { title: string; subtitle: string }> = {
   saved: { title: 'Saved this month', subtitle: 'Money in versus money out' },
 }
 
+type Supabase = Awaited<ReturnType<typeof createClient>>
+type Accounts = Awaited<ReturnType<typeof readAccounts>>
+
+async function readAccounts(supabase: Supabase) {
+  const { data, error } = await supabase.from('accounts').select('*').order('name').order('account_id')
+  // This page exists to explain a net-worth figure. Explaining it from an empty list would be a
+  // confident wrong answer (#46).
+  if (error) throw new Error(`could not read accounts: ${error.message}`)
+  // An empty response body comes back as no data and no error. That's a failed read too, not "none" (#222).
+  if (!data) throw new Error('could not read accounts: read returned no data and no error')
+  return data
+}
+
+const currencyOf = (accounts: Accounts) => accounts[0]?.iso_currency_code ?? 'USD'
+
+// Spent and Saved's transactions. The household's day, not the server's — this month key is also
+// embedded in the outbound /transactions?...&month= links, so a wrong month here propagates (#73).
+// Seven months: this one, plus the six complete months Saved's average draws on (#126). Spent reads
+// only this month. Paged so the window cannot silently pass the 1,000-row cap (#69).
+async function readFlows(supabase: Supabase, tz: string, metric: string) {
+  const months = lastNMonths(todayIn(tz), AVERAGE_SAVED_MONTHS + 1)
+  const thisKey = months[months.length - 1].key
+  const readFrom = metric === 'saved' ? `${months[0].key}-01` : `${thisKey}-01`
+  const { data: txns, error } = await readAllRows(() =>
+    supabase
+      .from('transactions')
+      .select(`id, amount, date, merchant_name, user_category, pfc_primary, pfc_detailed, reimbursable_amount, ${SUGGESTION_EMBED}`)
+      .eq('removed', false)
+      .gte('date', readFrom)
+  )
+  if (error) throw new Error(`could not read transactions: ${error.message}`)
+  return { months, thisKey, txns }
+}
+
 export default async function BreakdownPage({ params }: { params: Promise<{ metric: string }> }) {
   const { metric } = await params
   // Its own keys only: a plain lookup also finds what every object inherits, so /breakdown/constructor
@@ -41,19 +75,18 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
   if (!Object.hasOwn(TITLES, metric)) notFound()
 
   const supabase = await createClient()
-  // The household beside the accounts rather than after them: every metric needs it for the bank
-  // list (#135), and net worth for the home value as well.
-  const [{ data: accountsData, error: accountsError }, householdId] = await Promise.all([
-    supabase.from('accounts').select('*').order('name').order('account_id'),
-    currentHouseholdId(),
-  ])
-  // This page exists to explain a net-worth figure. Explaining it from an empty list would be a
-  // confident wrong answer (#46).
-  if (accountsError) throw new Error(`could not read accounts: ${accountsError.message}`)
-  // An empty response body comes back as no data and no error. That's a failed read too, not "none" (#222).
-  if (!accountsData) throw new Error('could not read accounts: read returned no data and no error')
-  const accounts = accountsData
-  const currency = accounts[0]?.iso_currency_code ?? 'USD'
+  // Every read a metric shows starts as soon as what it needs is known, and none waits for one it
+  // doesn't need (#226, as #225 did for the Dashboard). The metric is known from the URL before any
+  // read, so each branch below starts only its own: a read the page doesn't show can't put it on the
+  // error page. Each branch awaits all of its reads in one Promise.all, so the first failure fails the
+  // page at once, and none is left unhandled while another is awaited.
+  //
+  // The household's banks are for the "isn't syncing" banner every metric shows (#135), so they're read
+  // as soon as the household is known. A failed read throws, as on the dashboard: rendered as no banks,
+  // every bank would look healthy (#46). An account with no household has no banks, and none is read.
+  const household = currentHouseholdId()
+  const banksRead = household.then((householdId) => (householdId ? listItemsForHousehold(householdId) : []))
+  let accounts: Accounts
 
   const header = TITLES[metric]
   let rows: BreakdownRow[] = []
@@ -64,22 +97,23 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
     | { rows: BreakdownRow[]; total: NonNullable<typeof total>; count: number }
     | { reason: string }
     | undefined
-  // The household's banks, for the "isn't syncing" banner every metric shows (#135). Each branch
-  // reads them beside its own first read, not after it. A failed read throws, as on the dashboard:
-  // rendered as no banks, every bank would look healthy (#46). An account with no household has no
-  // banks, and none is read.
-  const readBanks = async () => (householdId ? listItemsForHousehold(householdId) : [])
   let items: ItemSummary[]
 
   if (metric === 'net-worth') {
     // Manual assets (the home) count on the asset side of net worth, netting against the live
     // mortgage. Read here rather than for every metric: only net worth shows them, and a failed read
     // throws (#91), which would otherwise take down Cash, Spent and Saved over a value none of them shows.
-    const [banks, manualAssets] = await Promise.all([
-      readBanks(),
-      householdId ? listManualAssets(householdId) : [],
+    //
+    // What's owed back (fetchReceivable) needs nothing, so it starts with the rest rather than after.
+    const [accountList, banks, manualAssets, receivable] = await Promise.all([
+      readAccounts(supabase),
+      banksRead,
+      household.then((householdId) => (householdId ? listManualAssets(householdId) : [])),
+      fetchReceivable(),
     ])
+    accounts = accountList
     items = banks
+    const currency = currencyOf(accounts)
 
     const g = groupAccountsByKind(accounts)
     const accountRows: BreakdownRow[] = [...g.assets, ...g.liabilities].map((a) => ({
@@ -103,7 +137,6 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
     // Money owed back is an asset: the cash has left the account but is coming back, so net worth
     // counts it (see fetchReceivable). It has no single transaction behind it, so it drills through
     // to the reimbursements page instead of a transaction list.
-    const receivable = await fetchReceivable()
     const receivableRows: BreakdownRow[] =
       receivable > 0
         ? [
@@ -137,9 +170,11 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
       currency,
     }
   } else if (metric === 'cash') {
-    // Cash has no read of its own to pair this with: the bank list needs the household first, so
-    // here it is one wait more than the accounts alone.
-    items = await readBanks()
+    // Cash reads only the accounts and the banks.
+    const [accountList, banks] = await Promise.all([readAccounts(supabase), banksRead])
+    accounts = accountList
+    items = banks
+    const currency = currencyOf(accounts)
     // Cash = depository accounts only; reuse cashOnHand() for the total.
     const depository = accounts.filter((a) => a.type === 'depository')
     rows = depository.map((a) => ({
@@ -152,28 +187,21 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
     }))
     total = { label: 'Cash on hand', amount: cashOnHand(accounts), currency }
   } else {
-    // spent / saved both need this month's flows
-    // Throws on a failed read. Same trap as the dashboard: with no categories a paycheck is counted
-    // as negative spending and this breakdown explains a number that never happened (#46).
-    const [banks, data] = await Promise.all([readBanks(), fetchCategoryContext()])
+    // spent / saved both need this month's flows, which need only the timezone. The categories need
+    // nothing. Saved's history start needs nothing either, so it starts with the rest, and Spent, which
+    // doesn't show it, doesn't read it.
+    // The categories throw on a failed read. Same trap as the dashboard: with no categories a paycheck
+    // is counted as negative spending and this breakdown explains a number that never happened (#46).
+    const [accountList, banks, data, { months, thisKey, txns: flowTxns }, starts] = await Promise.all([
+      readAccounts(supabase),
+      banksRead,
+      fetchCategoryContext(),
+      householdTimezone().then((tz) => readFlows(supabase, tz, metric)),
+      metric === 'saved' ? historyStart() : undefined,
+    ])
+    accounts = accountList
     items = banks
-
-    // The household's day, not the server's — this month key is also embedded in the outbound
-    // /transactions?...&month= links below, so a wrong month here propagates (#73).
-    // Seven months: this one, plus the six complete months Saved's average draws on (#126). Spent
-    // reads only this month.
-    const months = lastNMonths(todayIn(await householdTimezone()), AVERAGE_SAVED_MONTHS + 1)
-    const thisKey = months[months.length - 1].key
-    const readFrom = metric === 'saved' ? `${months[0].key}-01` : `${thisKey}-01`
-    // Paged so the window cannot silently pass the 1,000-row cap (#69).
-    const { data: flowTxns, error: flowError } = await readAllRows(() =>
-      supabase
-        .from('transactions')
-        .select(`id, amount, date, merchant_name, user_category, pfc_primary, pfc_detailed, reimbursable_amount, ${SUGGESTION_EMBED}`)
-        .eq('removed', false)
-        .gte('date', readFrom)
-    )
-    if (flowError) throw new Error(`could not read transactions: ${flowError.message}`)
+    const currency = currencyOf(accounts)
 
     // The reimbursable map is built straight from this page's own transaction rows — see
     // buildSpendContext.
@@ -217,7 +245,8 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
       // The same window (AVERAGE_SAVED_MONTHS + 1), savedAverage, historyStart, banks and accounts
       // as the dashboard tile, so the two cannot disagree. While a bank isn't syncing, or has no
       // accounts yet, its reason takes the average's place (#135, #170).
-      const avg = savedAverage(flows, thisKey, await historyStart(), items, accounts)
+      // `starts` is read whenever the metric is Saved, which this branch is.
+      const avg = savedAverage(flows, thisKey, starts!, items, accounts)
       average = avg.kind === 'unavailable' ? { reason: avg.reason } : {
         rows: [...avg.months].reverse().map((mo) => ({
           key: mo.key,
