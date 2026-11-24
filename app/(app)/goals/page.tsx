@@ -15,6 +15,8 @@ async function readGoals(supabase: Supabase) {
     .order('created_at')
   // "You have no savings goals" is a claim about the household, not about the database (#46).
   if (goalsError) throw new Error(`could not read savings goals: ${goalsError.message}`)
+  // An empty response body comes back as no data and no error. That's a failed read too, not "none" (#222).
+  if (!goals) throw new Error('could not read savings goals: read returned no data and no error')
   return { goals, readAt }
 }
 
@@ -25,7 +27,7 @@ export default async function GoalsPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="Savings goals" subtitle="Set a target and track how close you are." />
-      <GoalsList initialGoals={goals ?? []} readAt={readAt} />
+      <GoalsList initialGoals={goals} readAt={readAt} />
     </div>
   )
 }

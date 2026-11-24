@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // the recorded query.
 type Row = Record<string, unknown>
 const { db } = vi.hoisted(() => ({
-  db: { rows: [] as Row[], error: null as null | { message: string }, calls: [] as unknown[][] },
+  db: { rows: [] as Row[], error: null as null | { message: string }, emptyBody: false, calls: [] as unknown[][] },
 }))
 
 vi.mock('@/lib/supabase/server', () => ({
@@ -40,7 +40,9 @@ vi.mock('@/lib/supabase/server', () => ({
         },
         then: (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) =>
           Promise.resolve(
-            db.error
+            db.emptyBody
+              ? { data: null, error: null }
+              : db.error
               ? { data: null, error: db.error }
               : { data: rows.map((r) => Object.fromEntries(columns.filter((c) => c in r).map((c) => [c, r[c]]))), error: null }
           ).then(resolve, reject),
@@ -62,6 +64,7 @@ const REPOSTED = { id: 't4', date: '2026-10-03', amount: 900, reimbursable_amoun
 beforeEach(() => {
   db.rows = [OWED, REPAID, UNMARKED, REPOSTED]
   db.error = null
+  db.emptyBody = false
   db.calls = []
 })
 
@@ -90,6 +93,13 @@ describe('fetchReceivable', () => {
     await expect(fetchReceivable()).rejects.toThrow(
       'could not read reimbursable transactions: canceling statement due to statement timeout'
     )
+  })
+
+  // #222: postgrest-js reads an empty response body as no data and no error. That's a failed read
+  // too: answered as 0, "Owed to you" would vanish and net worth come up short.
+  it('rejects when the read returns no data and no error, instead of answering 0', async () => {
+    db.emptyBody = true
+    await expect(fetchReceivable()).rejects.toThrow('could not read reimbursable transactions: read returned no data and no error')
   })
 
   it('answers 0 when nothing is marked', async () => {

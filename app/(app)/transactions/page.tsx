@@ -58,8 +58,10 @@ export default async function TransactionsPage({
     householdId ? listItemsForHousehold(householdId) : [],
   ])
   if (accountRowsError) throw new Error(`could not read account names: ${accountRowsError.message}`)
+  // An empty response body comes back as no data and no error. That's a failed read too, not "none" (#222).
+  if (!accountRows) throw new Error('could not read account names: read returned no data and no error')
   const accountNameById = new Map<string, string>()
-  for (const a of accountRows ?? []) {
+  for (const a of accountRows) {
     if (a.name) accountNameById.set(a.account_id, a.name)
   }
 
@@ -147,7 +149,7 @@ export default async function TransactionsPage({
     <div className="space-y-6">
       <NotSyncingBanner items={items} />
       {/* A bank with no accounts yet has no transactions here either: each needs its account (#170). */}
-      <MissingBalancesNote items={items} accounts={accountRows ?? []} />
+      <MissingBalancesNote items={items} accounts={accountRows} />
       <PageHeader
         title="Transactions"
         subtitle="Search and re-categorize your spending."

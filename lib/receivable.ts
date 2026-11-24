@@ -36,5 +36,7 @@ export async function fetchReceivable(): Promise<number> {
   // "the query failed" and "you are owed nothing" must never render identically.
   if (error) throw new Error(`could not read reimbursable transactions: ${error.message}`)
 
-  return owedToYou((data ?? []) as ReimbursableTxn[])
+  // An empty response body comes back as no data and no error. That's a failed read too, not "none" (#222).
+  if (!data) throw new Error('could not read reimbursable transactions: read returned no data and no error')
+  return owedToYou(data as ReimbursableTxn[])
 }

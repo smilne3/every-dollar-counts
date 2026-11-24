@@ -50,7 +50,9 @@ export default async function BreakdownPage({ params }: { params: Promise<{ metr
   // This page exists to explain a net-worth figure. Explaining it from an empty list would be a
   // confident wrong answer (#46).
   if (accountsError) throw new Error(`could not read accounts: ${accountsError.message}`)
-  const accounts = accountsData ?? []
+  // An empty response body comes back as no data and no error. That's a failed read too, not "none" (#222).
+  if (!accountsData) throw new Error('could not read accounts: read returned no data and no error')
+  const accounts = accountsData
   const currency = accounts[0]?.iso_currency_code ?? 'USD'
 
   const header = TITLES[metric]
