@@ -2,7 +2,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 // vi.hoisted for the same reason as tests/unit/manual-assets-env.test.ts: the static page import
 // below is linked before this file's body runs, firing the mock factory.
-const { results, calls, selects } = vi.hoisted(() => ({
+const { results, calls, selects, gates, started } = vi.hoisted(() => ({
+  // A read waits for its gate, if a test set one, so a test can hold it and see what else starts
+  // meanwhile (#226). `started` is the order the reads were sent in.
+  gates: {} as Record<string, Promise<void> | undefined>,
+  started: [] as string[],
   // Every `.select()` the page sends, per table, so a test can pin the suggestion embed (§7.4).
   selects: {} as Record<string, string[]>,
   results: {} as Record<string, { data: unknown; error: { message: string } | null }>,
@@ -37,11 +41,17 @@ const chainFor = (table: string) => {
   }
   // maybeSingle only. Null data and no error is its answer for no row; .single() makes no row an
   // error (PGRST116), which a stand-in answering null would hide (#172).
-  chain.maybeSingle = async () => results[table] ?? { data: null, error: null }
-  chain.then = (resolve: (v: unknown) => unknown) =>
-    Promise.resolve(
-      afterCursor ? { data: [], error: null } : (results[table] ?? { data: [], error: null })
-    ).then(resolve)
+  chain.maybeSingle = async () => {
+    started.push(table)
+    await gates[table]
+    return results[table] ?? { data: null, error: null }
+  }
+  chain.then = (resolve: (v: unknown) => unknown) => {
+    if (!afterCursor) started.push(table)
+    return Promise.resolve(gates[table])
+      .then(() => (afterCursor ? { data: [], error: null } : (results[table] ?? { data: [], error: null })))
+      .then(resolve)
+  }
   return chain
 }
 
@@ -58,6 +68,7 @@ vi.mock('@/lib/supabase/admin', async () => {
     supabaseAdmin: {
       from: (table: string) => {
         if (table !== 'plaid_items') throw new Error(`trends page read ${table} through the service-role client`)
+        started.push('plaid_items')
         return plaidItemsQuery(results.plaid_items ?? { data: [], error: null })
       },
     },
@@ -75,6 +86,8 @@ vi.mock('@/lib/category-context', async (importOriginal) => {
   return {
     ...actual,
     fetchCategoryContext: async () => {
+      started.push('categories')
+      await gates.categories
       const c = results.categories ?? { data: [], error: null }
       if (c.error) throw new Error(`could not read categories: ${c.error.message}`)
       const r = results.category_rules ?? { data: [], error: null }
@@ -116,6 +129,8 @@ beforeEach(() => {
   calls.gte = []
   calls.lte = []
   for (const k of Object.keys(selects)) delete selects[k]
+  for (const k of Object.keys(gates)) delete gates[k]
+  started.length = 0
   vi.unstubAllEnvs()
 })
 
@@ -125,6 +140,55 @@ afterEach(() => {
 })
 
 // The dashboard's banner, above last month's spending and the month before's (#135).
+// #226: each read starts as soon as what it needs is known. The categories need nothing, the months'
+// transactions only the timezone, the banks only the household.
+describe('Trends reads start together (#226)', () => {
+  function hold() {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    return { gate, release }
+  }
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 10))
+
+  it('starts the categories while the household is still being read', async () => {
+    const timezone = hold()
+    const membership = hold()
+    gates.households = timezone.gate
+    gates.memberships = membership.gate
+    const page = TrendsPage()
+    await settle()
+    expect(started).toEqual(expect.arrayContaining(['households', 'memberships', 'categories']))
+    expect(started).not.toContain('transactions')
+    expect(started).not.toContain('plaid_items')
+    timezone.release()
+    membership.release()
+    await page
+  })
+
+  it("starts the months' transactions once the timezone is known, without waiting for the household", async () => {
+    const membership = hold()
+    gates.memberships = membership.gate
+    const page = TrendsPage()
+    await settle()
+    expect(started).toContain('transactions')
+    expect(started).not.toContain('plaid_items')
+    membership.release()
+    await page
+    expect(started).toContain('plaid_items')
+  })
+
+  it('fails at once when the categories cannot be read, with the household still held', async () => {
+    const timezone = hold()
+    const membership = hold()
+    gates.households = timezone.gate
+    gates.memberships = membership.gate
+    results.categories = { data: null, error: { message: 'boom' } }
+    await expect(TrendsPage()).rejects.toThrow('could not read categories: boom')
+    timezone.release()
+    membership.release()
+  })
+})
+
 describe('Trends banks (#135)', () => {
   it("warns that a bank isn't syncing, first, above the header", async () => {
     results.plaid_items = {
