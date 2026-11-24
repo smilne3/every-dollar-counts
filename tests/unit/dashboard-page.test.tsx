@@ -48,13 +48,9 @@ const chainFor = (table: string) => {
     afterCursor = true
     return chain
   }
-  // maybeSingle only. Null data and no error is its answer for no row; .single() makes no row an
-  // error (PGRST116), which a stand-in answering null would hide (#172).
-  chain.maybeSingle = async () => {
-    started.push(table)
-    await gates[table]
-    return results[table] ?? { data: null, error: null }
-  }
+  // No .maybeSingle() or .single(): this page reads its one-row answers as rows, since maybeSingle
+  // answers an empty body as it answers no row (#222), and .single() makes no row an error (#172).
+  // A read that went back to either fails here, instead of being handed the rows as one row.
   chain.then = (resolve: (v: unknown) => unknown) => {
     // The six recent transactions are told from the seven-month window by their limit, so a test can
     // hold or fail one without the other: the two now run side by side (#199). By default both are
@@ -307,7 +303,7 @@ beforeEach(() => {
   for (const k of Object.keys(results)) delete results[k]
   // One account, so the page renders the money tiles rather than the empty state.
   results.accounts = { data: [A1], error: null }
-  results.memberships = { data: { household_id: 'hh-1' }, error: null }
+  results.memberships = { data: [{ household_id: 'hh-1' }], error: null }
   results.categories = { data: [], error: null }
   results.category_rules = { data: [], error: null }
   results.transactions = { data: [], error: null }
@@ -969,9 +965,11 @@ describe('Dashboard reads', () => {
 
   // #222: postgrest-js reads an empty response body as no data and no error. That's a failed read, not "none".
   // Rendered as none: "Connect your first account" (and a tenth lifetime link spent on it), no budget
-  // note, and "No transactions yet".
+  // note, and "No transactions yet". Read as no household, Net worth leaves out the house, and a bank
+  // that isn't syncing raises no banner.
   it.each([
     ['accounts', 'could not read accounts: read returned no data and no error'],
+    ['memberships', 'could not read your household: read returned no data and no error'],
     ['budgets', 'could not read budgets: read returned no data and no error'],
     ['recent transactions', 'could not read recent transactions: read returned no data and no error'],
   ])('fails loudly when the %s read returns no data and no error', async (read, message) => {
@@ -988,7 +986,7 @@ describe('Dashboard reads', () => {
   // (lib/access.ts), has no household, so no banks and no home value. It renders, and reads neither:
   // both reads are set to fail here, so reading one would throw.
   it('renders for an account with no household, reading no banks and no home value', async () => {
-    results.memberships = { data: null, error: null }
+    results.memberships = { data: [], error: null }
     results.accounts = { data: [], error: null }
     results.plaid_items = { data: null, error: { message: 'read for no household' } }
     results.manual_assets = { data: null, error: { message: 'read for no household' } }
@@ -1406,7 +1404,7 @@ describe('Dashboard waits only for its longest chain (#199)', () => {
 
   it('with no accounts and no household, reads nothing past the first three', async () => {
     results.accounts = { data: [], error: null }
-    results.memberships = { data: null, error: null }
+    results.memberships = { data: [], error: null }
     const tree = await render()
     expectStarted(FIRST)
     expect(textOf(tree)).toContain('Connect your first account')
@@ -1415,7 +1413,7 @@ describe('Dashboard waits only for its longest chain (#199)', () => {
   // #172 again, on the other path: accounts but no membership. Both reads are set to fail, so reading
   // one would throw.
   it('with accounts and no household, reads no banks and no home value', async () => {
-    results.memberships = { data: null, error: null }
+    results.memberships = { data: [], error: null }
     results.plaid_items = { data: null, error: { message: 'read for no household' } }
     results.manual_assets = { data: null, error: { message: 'read for no household' } }
     const tree = await render()

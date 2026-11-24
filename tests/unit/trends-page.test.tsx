@@ -39,13 +39,9 @@ const chainFor = (table: string) => {
     calls.lte.push(v)
     return chain
   }
-  // maybeSingle only. Null data and no error is its answer for no row; .single() makes no row an
-  // error (PGRST116), which a stand-in answering null would hide (#172).
-  chain.maybeSingle = async () => {
-    started.push(table)
-    await gates[table]
-    return results[table] ?? { data: null, error: null }
-  }
+  // No .maybeSingle() or .single(): this page reads its one-row answers as rows, since maybeSingle
+  // answers an empty body as it answers no row (#222), and .single() makes no row an error (#172).
+  // A read that went back to either fails here, instead of being handed the rows as one row.
   chain.then = (resolve: (v: unknown) => unknown) => {
     if (!afterCursor) started.push(table)
     return Promise.resolve(gates[table])
@@ -123,8 +119,8 @@ beforeEach(() => {
   results.categories = ok
   results.category_rules = ok
   results.transactions = ok
-  results.households = { data: { timezone: 'America/New_York' }, error: null }
-  results.memberships = { data: { household_id: 'hh-1' }, error: null }
+  results.households = { data: [{ timezone: 'America/New_York' }], error: null }
+  results.memberships = { data: [{ household_id: 'hh-1' }], error: null }
   results.plaid_items = ok
   calls.gte = []
   calls.lte = []
@@ -228,11 +224,18 @@ describe('Trends banks (#135)', () => {
     await expect(TrendsPage()).rejects.toThrow(/could not read your household: permission denied/)
   })
 
+  // #222: an empty body is no answer, not "no household". Read as no household, the page would read
+  // no banks, and a bank that isn't syncing would raise no banner.
+  it('fails loudly when the household read returns no data and no error, rather than reading no banks', async () => {
+    results.memberships = { data: null, error: null }
+    await expect(TrendsPage()).rejects.toThrow('could not read your household: read returned no data and no error')
+  })
+
   // #172: an account with no membership, which sign-in lets through when it can't read the membership
   // (lib/access.ts), has no household, so no banks. The page renders, as it did before it read
   // banks, and reads none: the read is set to fail here, so reading it would throw.
   it('renders for an account with no household, reading no banks', async () => {
-    results.memberships = { data: null, error: null }
+    results.memberships = { data: [], error: null }
     results.plaid_items = { data: null, error: { message: 'read for no household' } }
     expect(bannerText(await TrendsPage())).toBe('')
   })
@@ -268,13 +271,20 @@ describe('Trends month window', () => {
   it('honours the household\'s stored zone, not the server\'s', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-01T00:10:00Z')) // 8:10pm on 31 August in New York
-    results.households = { data: { timezone: 'America/New_York' }, error: null }
+    results.households = { data: [{ timezone: 'America/New_York' }], error: null }
     await TrendsPage()
     expect(calls.gte).toContain('2026-06-01')
     expect(calls.lte).toContain('2026-07-31')
     // Under 'UTC' these would instead be '2026-07-01' and '2026-08-31' — a whole month later.
     expect(calls.gte).not.toContain('2026-07-01')
     expect(calls.lte).not.toContain('2026-08-31')
+  })
+
+  // #222: an empty body is no answer, not "no zone set". As the default zone it would pick the
+  // months charted, the same confident wrong answer as a failed read.
+  it('fails loudly when the time zone read returns no data and no error', async () => {
+    results.households = { data: null, error: null }
+    await expect(TrendsPage()).rejects.toThrow('could not read the household timezone: read returned no data and no error')
   })
 })
 
