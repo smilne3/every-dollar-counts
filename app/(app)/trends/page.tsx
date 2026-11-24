@@ -20,25 +20,11 @@ import { readAllRows } from '@/lib/read-all'
 // The two pages therefore answer different questions on purpose — "where does my money go"
 // against "am I on track this month" — so every label here names its month outright, and the page
 // deliberately says nothing about the month you are currently in.
-export default async function TrendsPage() {
-  const supabase = await createClient()
-
-  // The household beside its timezone, and its banks beside the categories below: the bank list
-  // the "isn't syncing" banner needs (#135) is two reads, and this way it adds no wait of its own.
-  const [tz, householdId] = await Promise.all([householdTimezone(), currentHouseholdId()])
-  // The household's day, not the server's: at 8pm US Eastern the server is already tomorrow, and
-  // on the last evening of a month that moved this page forward a whole month early (#73).
+// The two complete months the page compares, and their transactions. The household's day, not the
+// server's: at 8pm US Eastern the server is already tomorrow, and on the last evening of a month that
+// moved this page forward a whole month early (#73).
+async function readWindows(supabase: Awaited<ReturnType<typeof createClient>>, tz: string) {
   const windows = lastCompleteMonths(todayIn(tz))
-
-  // Both throw on a failed read: with no categories a paycheck is charted as negative spending
-  // under "Uncategorized", and with no banks every bank would look healthy. A failed read must not
-  // become a plausible number, or a missing warning (#46). An account with no household has no
-  // banks, and none is read.
-  const [data, items] = await Promise.all([
-    fetchCategoryContext(),
-    householdId ? listItemsForHousehold(householdId) : [],
-  ])
-
   // Date-bounded at both ends. `previous.from` is the earliest date either card reads; the upper bound
   // is what stops a row dated beyond the window being fetched at all. `inRange` is what actually
   // enforces the windows — this only keeps the query from carrying rows nothing will use.
@@ -53,6 +39,25 @@ export default async function TrendsPage() {
   )
   // #46's lesson: "the query failed" and "you spent nothing" must never render identically.
   if (txnsError) throw new Error(`could not read transactions: ${txnsError.message}`)
+  return { windows, txns }
+}
+
+export default async function TrendsPage() {
+  const supabase = await createClient()
+
+  // Every read starts as soon as what it needs is known, and none waits for one it doesn't need
+  // (#226, as #225 did for the Dashboard). The categories need nothing; the two months' transactions
+  // need only the timezone; the banks the "isn't syncing" banner reads (#135) need only the
+  // household. One Promise.all over all of them, so the first failure fails the page at once, and
+  // none is left unhandled while another is awaited.
+  //
+  // Each throws on a failed read: with no categories a paycheck is charted as negative spending under
+  // "Uncategorized", with no banks every bank would look healthy, and with no transactions it would
+  // say you spent nothing. A failed read must not become a plausible number, or a missing warning
+  // (#46). An account with no household has no banks, and none is read.
+  const months = householdTimezone().then((tz) => readWindows(supabase, tz))
+  const banks = currentHouseholdId().then((householdId) => (householdId ? listItemsForHousehold(householdId) : []))
+  const [data, items, { windows, txns }] = await Promise.all([fetchCategoryContext(), banks, months])
 
   // The reimbursable map is built straight from this page's own transaction rows — see
   // buildSpendContext.
