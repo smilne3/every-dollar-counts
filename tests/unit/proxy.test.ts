@@ -12,13 +12,19 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 // own error classes. It can write cookies first, through the setAll the proxy passed in, as a check
 // that refreshed the session before it failed does.
 type CookieWrite = { name: string; value: string; options: Record<string, unknown> }
-const { getUser, setAll } = vi.hoisted(() => ({
+const { getUser, setAll, clientFetch } = vi.hoisted(() => ({
   getUser: vi.fn(),
   setAll: { current: (() => {}) as (list: CookieWrite[]) => void },
+  clientFetch: { current: undefined as unknown },
 }))
 vi.mock('@supabase/ssr', () => ({
-  createServerClient: (_url: string, _key: string, options: { cookies: { setAll: (list: CookieWrite[]) => void } }) => {
+  createServerClient: (
+    _url: string,
+    _key: string,
+    options: { cookies: { setAll: (list: CookieWrite[]) => void }; global?: { fetch?: unknown } }
+  ) => {
     setAll.current = options.cookies.setAll
+    clientFetch.current = options.global?.fetch
     return { auth: { getUser } }
   },
 }))
@@ -27,6 +33,7 @@ import { NextRequest, type NextResponse } from 'next/server'
 import { getRedirectUrl } from 'next/experimental/testing/server'
 import { AuthApiError, AuthRetryableFetchError, AuthSessionMissingError, type AuthError } from '@supabase/supabase-js'
 import { proxy } from '@/proxy'
+import { fetchWithReadDeadline } from '@/lib/supabase/read-deadline'
 
 const AUTH_UNCHECKED = "Couldn't check your sign-in, so that didn't go through. Please try again."
 
@@ -185,5 +192,16 @@ describe('proxy: signed in', () => {
     expect(getUser).toHaveBeenCalledTimes(1)
     expect(getUser).toHaveBeenCalledWith()
     expect(logs).toEqual([])
+  })
+})
+
+// #239: the sign-in check here gets the same time limit as the pages'. Without it, an Auth service gone
+// quiet held every request at the proxy until Vercel stopped it, and nothing was logged.
+describe('proxy: the time limit on its sign-in check (#239)', () => {
+  it("gives its Supabase client the limited fetch", async () => {
+    clientFetch.current = undefined
+    answers({ id: 'user-1' }, null)
+    await proxy(request('/dashboard'))
+    expect(clientFetch.current).toBe(fetchWithReadDeadline)
   })
 })

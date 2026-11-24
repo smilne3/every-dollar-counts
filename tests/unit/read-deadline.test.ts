@@ -3,7 +3,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, isAuthRetryableFetchError } from '@supabase/supabase-js'
+import { checkSignIn } from '@/lib/auth-check'
 import { readAllRows, type PageableQuery } from '@/lib/read-all'
 import { fetchWithDeadline, fetchWithReadDeadline, READ_DEADLINE_MS } from '@/lib/supabase/read-deadline'
 
@@ -200,12 +201,66 @@ describe('what the limit leaves alone (#202)', () => {
     expect(requests[0].method).toBe(method)
   })
 
-  // getUser() is a GET, so only the path check keeps Supabase Auth out of the limit.
-  it('waits for a slow answer from Supabase Auth', async () => {
-    answers = [after(PAST_LIMIT, json({ id: 'user-1', aud: 'authenticated' }))]
+  // The session refresh is a POST, which auth-js retries for about 25 seconds on purpose (proxy.ts,
+  // #143). Cut off, a refresh that then landed would be lost.
+  it("waits for a slow answer to Supabase Auth's session refresh", async () => {
+    answers = [after(PAST_LIMIT, json({ access_token: 'made-up', token_type: 'bearer' }))]
+    const res = await fetchWithDeadline(LIMIT)(`${url}/auth/v1/token?grant_type=refresh_token`, { method: 'POST', body: '{}' })
+    expect(res.status).toBe(200)
+    expect(requests).toEqual([{ method: 'POST', path: '/auth/v1/token' }])
+  })
+})
+
+// #239: the sign-in check, getUser()'s GET /auth/v1/user, which the proxy and every page and API route
+// make. With no limit, an Auth service gone quiet held all of them until Vercel stopped the function, and
+// nothing was logged.
+describe("Supabase Auth's sign-in check past its time limit (#239)", () => {
+  it('reads as normal when the check answers in time', async () => {
+    answers = [after(WITHIN_LIMIT, json({ id: 'user-1', aud: 'authenticated' }))]
     const { data, error } = await client().auth.getUser('made-up-token')
     expect(error).toBeNull()
     expect(data.user?.id).toBe('user-1')
+  })
+
+  it('is cut off at the limit, as the retryable error the sign-in check knows', async () => {
+    answers = [never]
+    const started = Date.now()
+    const { data, error } = await client().auth.getUser('made-up-token')
+    const took = Date.now() - started
+    expect(data.user).toBeNull()
+    expect(isAuthRetryableFetchError(error)).toBe(true)
+    expect(error?.message).toContain(`Supabase gave no answer within ${LIMIT / 1000} seconds`)
+    expect(took).toBeGreaterThanOrEqual(LIMIT - 50)
+    expect(took).toBeLessThan(PAST_LIMIT)
+    expect(requests).toEqual([{ method: 'GET', path: '/auth/v1/user' }])
+  })
+
+  // End to end, as a page or the proxy does it: a signed-in client, whose stored session needs no
+  // refresh, asks with no token of its own. checkSignIn then says it couldn't check, and logs it.
+  it('makes checkSignIn answer "unknown" and log it, instead of waiting', async () => {
+    answers = [never]
+    const session = {
+      access_token: 'made-up-access',
+      refresh_token: 'made-up-refresh',
+      token_type: 'bearer',
+      expires_in: 3600,
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+      user: { id: 'user-1', aud: 'authenticated' },
+    }
+    const signedIn = createClient(url, 'made-up-key', {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: true,
+        storageKey: 'test-session',
+        storage: { getItem: (k) => (k === 'test-session' ? JSON.stringify(session) : null), setItem: () => {}, removeItem: () => {} },
+      },
+      global: { fetch: fetchWithDeadline(LIMIT) },
+    })
+    const logs: unknown[][] = []
+    vi.spyOn(console, 'error').mockImplementation((...a) => void logs.push(a))
+    const result = await checkSignIn(signedIn, '[test]')
+    expect(result.state).toBe('unknown')
+    expect(logs).toEqual([['[test] auth check failed', { status: 0, message: expect.stringContaining('Supabase gave no answer') }]])
     expect(requests).toEqual([{ method: 'GET', path: '/auth/v1/user' }])
   })
 })
