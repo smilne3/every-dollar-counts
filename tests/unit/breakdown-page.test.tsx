@@ -39,13 +39,9 @@ const chainFor = (table: string) => {
     calls.gte.push(v)
     return chain
   }
-  // maybeSingle only. Null data and no error is its answer for no row; .single() makes no row an
-  // error (PGRST116), which a stand-in answering null would hide (#172).
-  chain.maybeSingle = async () => {
-    started.push(table)
-    await gates[table]
-    return results[table] ?? { data: null, error: null }
-  }
+  // No .maybeSingle() or .single(): this page reads its one-row answers as rows, since maybeSingle
+  // answers an empty body as it answers no row (#222), and .single() makes no row an error (#172).
+  // A read that went back to either fails here, instead of being handed the rows as one row.
   chain.then = (resolve: (v: unknown) => unknown) => {
     if (!afterCursor) started.push(table)
     return Promise.resolve(gates[table])
@@ -177,7 +173,7 @@ beforeEach(() => {
   calls.gte = []
   tz.value = 'America/New_York'
   results.accounts = { data: [], error: null }
-  results.memberships = { data: { household_id: 'hh-1' }, error: null }
+  results.memberships = { data: [{ household_id: 'hh-1' }], error: null }
   results.categories = { data: [], error: null }
   results.category_rules = { data: [], error: null }
   results.transactions = { data: [], error: null }
@@ -297,6 +293,14 @@ describe('Breakdown reads', () => {
     await expect(render(metric)).rejects.toThrow(/could not read your household: statement timeout/)
   })
 
+  // #222: an empty body is no answer, not "no household". Read as no household, every metric would
+  // read no banks, and net worth no home value.
+  it.each(METRICS)('fails loudly on %s when the household read returns no data and no error', async (metric) => {
+    vi.setSystemTime(new Date('2026-09-15T16:00:00Z'))
+    results.memberships = { data: null, error: null }
+    await expect(render(metric)).rejects.toThrow('could not read your household: read returned no data and no error')
+  })
+
   it.each(METRICS)('fails loudly on %s when the banks read fails, rather than hiding the banner', async (metric) => {
     vi.setSystemTime(new Date('2026-09-15T16:00:00Z'))
     results.plaid_items = { data: null, error: { message: 'statement timeout' } }
@@ -308,7 +312,7 @@ describe('Breakdown reads', () => {
   // renders, and reads neither: both reads are set to fail here, so reading one would throw.
   it.each(METRICS)('renders %s for an account with no household, reading no banks', async (metric) => {
     vi.setSystemTime(new Date('2026-09-15T16:00:00Z'))
-    results.memberships = { data: null, error: null }
+    results.memberships = { data: [], error: null }
     results.plaid_items = { data: null, error: { message: 'read for no household' } }
     results.manual_assets = { data: null, error: { message: 'read for no household' } }
     expect(bannerText(await render(metric))).toBe('')

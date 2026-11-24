@@ -49,13 +49,9 @@ const chainFor = (table: string) => {
     afterCursor = true
     return chain
   }
-  // maybeSingle only. Null data and no error is its answer for no row; .single() makes no row an
-  // error (PGRST116), which a stand-in answering null would hide (#172).
-  chain.maybeSingle = async () => {
-    started.push(table)
-    await gates[table]
-    return results[table] ?? { data: null, error: null }
-  }
+  // No .maybeSingle() or .single(): this page reads its one-row answers as rows, since maybeSingle
+  // answers an empty body as it answers no row (#222), and .single() makes no row an error (#172).
+  // A read that went back to either fails here, instead of being handed the rows as one row.
   chain.then = (resolve: (v: unknown) => unknown) => {
     started.push(table)
     onRead[table]?.()

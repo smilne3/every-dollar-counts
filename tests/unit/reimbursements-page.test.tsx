@@ -12,13 +12,9 @@ const { results, tz, gates, started } = vi.hoisted(() => ({
 const chainFor = (table: string) => {
   const chain: Record<string, unknown> = {}
   for (const m of ['select', 'order', 'eq', 'not', 'gte', 'lte', 'limit']) chain[m] = () => chain
-  // maybeSingle only. Null data and no error is its answer for no row; .single() makes no row an
-  // error (PGRST116), which a stand-in answering null would hide (#172).
-  chain.maybeSingle = async () => {
-    started.push(table)
-    await gates[table]
-    return results[table] ?? { data: null, error: null }
-  }
+  // No .maybeSingle() or .single(): this page reads its one-row answers as rows, since maybeSingle
+  // answers an empty body as it answers no row (#222), and .single() makes no row an error (#172).
+  // A read that went back to either fails here, instead of being handed the rows as one row.
   chain.then = (resolve: (v: unknown) => unknown) => {
     started.push(table)
     return Promise.resolve(gates[table])
@@ -180,7 +176,7 @@ function gatesOf(node: unknown): { tables: string[]; cards: string[] } {
 beforeEach(() => {
   for (const k of Object.keys(gates)) delete gates[k]
   started.length = 0
-  results.memberships = { data: { household_id: 'hh-1' }, error: null }
+  results.memberships = { data: [{ household_id: 'hh-1' }], error: null }
   results.plaid_items = { data: [], error: null }
   results.transactions = {
     data: [
@@ -367,11 +363,18 @@ describe('Reimbursable banks (#171)', () => {
     await expect(render()).rejects.toThrow(/could not read your household: permission denied/)
   })
 
+  // #222: an empty body is no answer, not "no household". Read as no household, the page would read
+  // no banks, and a bank that isn't syncing would raise no banner.
+  it('fails loudly when the household read returns no data and no error, rather than reading no banks', async () => {
+    results.memberships = { data: null, error: null }
+    await expect(render()).rejects.toThrow('could not read your household: read returned no data and no error')
+  })
+
   // An account with no membership, which sign-in lets through when it can't read the membership
   // (lib/access.ts), has no household, so no banks. The page renders, as it did before it read
   // banks, and reads none: the read is set to fail here, so reading it would throw.
   it('renders for an account with no household, reading no banks', async () => {
-    results.memberships = { data: null, error: null }
+    results.memberships = { data: [], error: null }
     results.plaid_items = { data: null, error: { message: 'read for no household' } }
     expect(bannerText(await render())).toBe('')
   })
