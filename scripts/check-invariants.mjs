@@ -465,6 +465,13 @@ export function checkBrandCasts(files) {
 // check cannot follow to a tag fails: a re-export, import(), require(), or the component as a value.
 // So does an entry whose file has no control taking exactly `{className}`, or whose file is gone.
 //
+// An entry with `via` names a component that adds a shared class's floor to the className it is
+// given, as Button does with buttonClass(variant, size, className) (#209). Its control takes
+// `via(…, className)`, and each call site is checked as if its classes were what the call gives
+// plus its own, so what a caller adds can't cancel the floor below md. Those classes must be
+// written out at the call site, as strings, or conditions and templates of strings: a name, a call,
+// or a spread with no className after it could hold any class, and fails.
+//
 // A control under an element hidden below md passes: `hidden`, with only an md: or wider variant to
 // show it again. Only a DOM element's own class string counts, and only one with no expression in
 // it, which nothing can add a class to; and only for the element's children, as JSX handed to it in
@@ -481,9 +488,14 @@ export function checkBrandCasts(files) {
 /** @type {{ file: string, classes: string, reason: string }[]} */
 export const TAP_TARGETS_ALLOWED = []
 
-// Components whose className goes straight to one raw control: the file that defines each, and the
-// name it is exported under. In that file, the control whose classes are exactly `{className}` passes.
-export const PASS_THROUGH = [{ file: 'components/SignOutButton.tsx', name: 'SignOutButton' }]
+// Components whose className goes to one raw control: the file that defines each, and the name it
+// is exported under. In that file, the control whose classes are exactly `{className}` passes, or
+// with `via`, the one whose classes are that shared call with className as its last argument.
+/** @type {{ file: string, name: string, via?: string }[]} */
+export const PASS_THROUGH = [
+  { file: 'components/SignOutButton.tsx', name: 'SignOutButton' },
+  { file: 'components/ui/Button.tsx', name: 'Button', via: 'buttonClass' },
+]
 
 // The shared classes that carry the rule, by the module that exports each, with what each gives its
 // element as far as this check reads it: the floor, its release at md, and for two of them a display.
@@ -573,11 +585,11 @@ function givenBy(e, shared) {
 // An element's className, read four ways: `name`, to match the allowlist by; `fixed`, the classes it
 // has in every state (fixedOf); `any`, every class it may have in some state: those, and each string
 // and template text anywhere in it, buttonClass(…)'s own classes among them; and `plain`, whether it
-// is one string with no expression in it.
+// is one string with no expression in it. `expr` is the expression itself.
 function classesOf(opening, sf, shared) {
   const attr = opening.attributes.properties.find((p) => ts.isJsxAttribute(p) && p.name.getText(sf) === 'className')
   const e = attr?.initializer && ts.isJsxExpression(attr.initializer) ? attr.initializer.expression : attr?.initializer
-  if (!e) return { attr, name: '', fixed: [], any: [], plain: false }
+  if (!e) return { attr, expr: e, name: '', fixed: [], any: [], plain: false }
   const fixed = fixedOf(e, shared)
   const any = [...fixed]
   const texts = [ts.isStringLiteral, ts.isNoSubstitutionTemplateLiteral, ts.isTemplateHead, ts.isTemplateMiddle, ts.isTemplateTail]
@@ -592,7 +604,24 @@ function classesOf(opening, sf, shared) {
     : ts.isTemplateExpression(e)
       ? words([e.head.text, ...e.templateSpans.map((s) => '${…}' + s.literal.text)].join('')).join(' ')
       : `{${words(e.getText(sf)).join(' ')}}`
-  return { attr, name, fixed, any, plain }
+  return { attr, expr: e, name, fixed, any, plain }
+}
+
+// Whether every class an expression can give is written in it, so that `any` (classesOf) holds them
+// all: strings and templates, and conditions and templates made of them. `a && 'x'` gives 'x' or a
+// falsy a, which is no class; `a || 'x'` and `a ?? 'x'` can give a itself. A name or a call can give
+// anything (#209).
+function writtenOut(e) {
+  if (ts.isParenthesizedExpression(e)) return writtenOut(e.expression)
+  if (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) return true
+  if (ts.isTemplateExpression(e)) return e.templateSpans.every((s) => writtenOut(s.expression))
+  if (ts.isConditionalExpression(e)) return writtenOut(e.whenTrue) && writtenOut(e.whenFalse)
+  if (ts.isBinaryExpression(e)) {
+    const op = e.operatorToken.kind
+    if (op === ts.SyntaxKind.AmpersandAmpersandToken) return writtenOut(e.right)
+    if (op === ts.SyntaxKind.BarBarToken || op === ts.SyntaxKind.QuestionQuestionToken) return writtenOut(e.left) && writtenOut(e.right)
+  }
+  return false
 }
 
 // Whether classes hide their element below md in every state: `hidden` (or [display:none]) under no
@@ -689,7 +718,7 @@ export function checkTapTargets(
   const unparsed = new Set()
   const named = new Set()
   const passing = new Set()
-  const passNames = new Set(passThrough.map((p) => p.name))
+  const passNames = new Map(passThrough.map((p) => [p.name, p]))
   const passModules = new Map(passThrough.map((p) => [modulePath(p.file), p]))
   const bare = (entry) => /^\{[A-Za-z_$][\w$]*(\.[A-Za-z_$][\w$]*)*\}$/.test(entry.classes)
   for (const { path, text } of files) {
@@ -735,7 +764,7 @@ export function checkTapTargets(
     // The names this file reaches next/link's Link by, a PASS_THROUGH component, and the shared
     // classes: what it imports them as, and in the module that defines a shared class, its own name.
     const links = new Set()
-    const passLocals = new Set()
+    const passLocals = new Map()
     const shared = new Map(SHARED_CLASSES.filter((c) => c.module === here).map((c) => [c.name, c]))
     for (const s of sf.statements) {
       if (!ts.isImportDeclaration(s) || !s.importClause) continue
@@ -750,8 +779,8 @@ export function checkTapTargets(
         for (const el of specifiers) if (imported(el) === 'default') links.add(el.name.text)
       }
       if (pass) {
-        if (local) passLocals.add(local.text)
-        for (const el of specifiers) if ([pass.name, 'default'].includes(imported(el))) passLocals.add(el.name.text)
+        if (local) passLocals.set(local.text, pass)
+        for (const el of specifiers) if ([pass.name, 'default'].includes(imported(el))) passLocals.set(el.name.text, pass)
       }
       for (const el of specifiers) {
         const c = SHARED_CLASSES.find((sc) => sc.module === source && sc.name === imported(el))
@@ -775,6 +804,19 @@ export function checkTapTargets(
       ts.isIdentifier(tag)
         ? ['a', 'button'].includes(tag.text) || links.has(tag.text) || passLocals.has(tag.text) || passNames.has(tag.text)
         : ts.isPropertyAccessExpression(tag) && passNames.has(tag.name.text)
+    // The PASS_THROUGH entry a tag reaches, if any: by the name it was imported under, or its own.
+    const passOf = (tag) =>
+      ts.isIdentifier(tag) ? (passLocals.get(tag.text) ?? passNames.get(tag.text)) : ts.isPropertyAccessExpression(tag) ? passNames.get(tag.name.text) : undefined
+    // Whether a control in an entry's own file takes the classes the component was given: as exactly
+    // `{className}`, or with `via`, as that shared call's last argument.
+    const takesGiven = (entry, classes) => {
+      if (!entry.via) return classes.name === '{className}'
+      const e = classes.expr
+      if (!e || !ts.isCallExpression(e) || !ts.isIdentifier(e.expression)) return false
+      const call = shared.get(e.expression.text)
+      const last = e.arguments.at(-1)
+      return call?.name === entry.via && Boolean(call.call) && Boolean(last) && ts.isIdentifier(last) && last.text === 'className'
+    }
     const unfollowable = (node, what) =>
       fail(
         node,
@@ -793,9 +835,25 @@ export function checkTapTargets(
         )
         return
       }
-      if (own && classes.name === '{className}') {
+      if (own && takesGiven(own, classes)) {
         passing.add(own)
         return
+      }
+      // A component with `via` adds the call's classes to the ones written here, so those are read on
+      // top of the call's, and must be written out to be read at all (#209).
+      const via = SHARED_CLASSES.find((c) => c.call && c.name === passOf(opening.tagName)?.via)
+      if (via) {
+        if (classes.attr ? !writtenOut(classes.expr) : attributes.some(ts.isJsxSpreadAttribute)) {
+          fail(
+            opening,
+            `<${tag}> takes its classes from ${via.name}(…), with what it is given added, and here what it is ` +
+              'given is not written out: a name, a call, or a spread can hold a class that cancels the 44px ' +
+              'floor below md (#209). Write its className as strings, or conditions and templates of strings.'
+          )
+          return
+        }
+        const gives = words(via.gives)
+        classes = { ...classes, fixed: [...gives, ...classes.fixed], any: [...gives, ...classes.any] }
       }
       const problem = problemOf(tag, classes)
       if (!problem) return
@@ -900,9 +958,10 @@ export function checkTapTargets(
       file: entry.file,
       line: 1,
       message:
-        `PASS_THROUGH names ${entry.name} here, and no control in this file takes its classes as exactly ` +
-        '{className}, which is what lets the check read them where it is rendered instead. Give the ' +
-        'control className={className}, or remove the entry (#122).',
+        `PASS_THROUGH names ${entry.name} here, and no control in this file takes its classes as ` +
+        `${entry.via ? `${entry.via}(…, className)` : 'exactly {className}'}, which is what lets the check ` +
+        'read them where it is rendered instead. Give the control ' +
+        `className={${entry.via ? `${entry.via}(…, className)` : 'className'}}, or remove the entry (#122).`,
     })
   }
   return out
