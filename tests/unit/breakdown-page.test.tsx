@@ -179,6 +179,12 @@ describe('Breakdown reads', () => {
     await expect(render('net-worth')).rejects.toThrow(/could not read manual assets: statement timeout/)
   })
 
+  // #222: postgrest-js reads an empty response body as no data and no error. That's a failed read, not "none".
+  it.each(['net-worth', 'cash', 'spent', 'saved'])('fails loudly on %s when the accounts read returns no data and no error', async (metric) => {
+    results.accounts = { data: null, error: null }
+    await expect(render(metric)).rejects.toThrow('could not read accounts: read returned no data and no error')
+  })
+
   // Only net worth shows the house, so only net worth reads it. Now that a failed read throws (#91),
   // reading it for every metric would take down Cash, Spent and Saved over a value none of them shows.
   it.each(['cash', 'spent', 'saved'])('still renders %s when the manual assets read fails', async (metric) => {

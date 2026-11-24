@@ -177,6 +177,13 @@ describe('Budgets banks (#135)', () => {
     await expect(BudgetsPage()).rejects.toThrow(/could not read linked banks: statement timeout/)
   })
 
+  // #222: postgrest-js reads an empty response body as no data and no error. That's a failed read, not "none".
+  // Rendered as none, every limit would read as unset.
+  it('fails loudly when the budgets read returns no data and no error', async () => {
+    results.budgets = { data: null, error: null }
+    await expect(BudgetsPage()).rejects.toThrow('could not read budgets: read returned no data and no error')
+  })
+
   it('fails loudly when the household read fails, rather than hiding the banner', async () => {
     results.memberships = { data: null, error: { message: 'permission denied' } }
     await expect(BudgetsPage()).rejects.toThrow(/could not read your household: permission denied/)

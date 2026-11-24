@@ -967,6 +967,18 @@ describe('Dashboard reads', () => {
     await expect(render()).rejects.toThrow(/could not read accounts: connection reset/)
   })
 
+  // #222: postgrest-js reads an empty response body as no data and no error. That's a failed read, not "none".
+  // Rendered as none: "Connect your first account" (and a tenth lifetime link spent on it), no budget
+  // note, and "No transactions yet".
+  it.each([
+    ['accounts', 'could not read accounts: read returned no data and no error'],
+    ['budgets', 'could not read budgets: read returned no data and no error'],
+    ['recent transactions', 'could not read recent transactions: read returned no data and no error'],
+  ])('fails loudly when the %s read returns no data and no error', async (read, message) => {
+    results[read] = { data: null, error: null }
+    await expect(render()).rejects.toThrow(message)
+  })
+
   it('fails loudly when the household read fails, rather than dropping the home value from net worth', async () => {
     results.memberships = { data: null, error: { message: 'permission denied' } }
     await expect(render()).rejects.toThrow(/could not read your household: permission denied/)

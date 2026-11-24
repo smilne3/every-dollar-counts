@@ -25,6 +25,8 @@ async function readBudgets(supabase: Supabase) {
     .from('budgets')
     .select('category, monthly_limit')
   if (budgetsError) throw new Error(`could not read budgets: ${budgetsError.message}`)
+  // An empty response body comes back as no data and no error. That's a failed read too, not "none" (#222).
+  if (!budgets) throw new Error('could not read budgets: read returned no data and no error')
   return { budgets, readAt }
 }
 
@@ -74,7 +76,7 @@ export default async function BudgetsPage() {
   const ctx = buildSpendContext({ data, txns: rows })
   const spend = spendByCategory(rows, ctx)
   const initialLimits: Record<string, number> = {}
-  for (const b of budgets ?? []) initialLimits[b.category] = Number(b.monthly_limit)
+  for (const b of budgets) initialLimits[b.category] = Number(b.monthly_limit)
 
   return (
     <div className="space-y-6">

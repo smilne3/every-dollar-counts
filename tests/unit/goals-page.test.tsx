@@ -80,6 +80,12 @@ describe('Goals page', () => {
     await expect(GoalsPage()).rejects.toThrow('could not read savings goals: boom')
   })
 
+  // #222: postgrest-js reads an empty response body as no data and no error. That's a failed read, not "none".
+  it('throws when the goals read returns no data and no error', async () => {
+    reply.value = { data: null, error: null }
+    await expect(GoalsPage()).rejects.toThrow('could not read savings goals: read returned no data and no error')
+  })
+
   // #182: a goal's card refills what it sent only from a read made after its last update was
   // written, so the time it is given is taken before the goals are read. Taken after, a read that
   // began before an update was written and returned after it would pass as newer.

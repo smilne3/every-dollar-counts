@@ -60,7 +60,9 @@ export default async function ReimbursementsPage() {
   // #46's lesson: a failed read must not render as "nothing outstanding".
   if (error) throw new Error(`could not read reimbursable transactions: ${error.message}`)
 
-  const rows = (data ?? []) as Row[]
+  // An empty response body comes back as no data and no error. That's a failed read too, not "none" (#222).
+  if (!data) throw new Error('could not read reimbursable transactions: read returned no data and no error')
+  const rows = data as Row[]
   const byId = new Map(rows.map((r) => [r.id, r]))
 
   // Already oldest-first, which is the order an expense report wants — do not re-sort it.

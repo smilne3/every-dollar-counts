@@ -254,6 +254,12 @@ describe('Reimbursements page', () => {
     await expect(render()).rejects.toThrow(/could not read reimbursable transactions/)
   })
 
+  // #222: postgrest-js reads an empty response body as no data and no error. That's a failed read, not "none".
+  it('fails loudly when the read returns no data and no error, rather than reporting nothing outstanding', async () => {
+    results.transactions = { data: null, error: null }
+    await expect(render()).rejects.toThrow('could not read reimbursable transactions: read returned no data and no error')
+  })
+
   // #159: only a marked deposit covers a marked expense, and nothing said to mark one, so a
   // repayment left unmarked kept its expense owed here for good.
   it('says to mark the deposit when the money comes back, while something is owed', async () => {

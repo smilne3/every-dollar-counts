@@ -422,6 +422,12 @@ describe('Transactions page dual layout', () => {
     await expect(render()).rejects.toThrow(/could not read transactions: statement timeout/)
   })
 
+  // #222: postgrest-js reads an empty response body as no data and no error. That's a failed read, not "none".
+  it('fails loudly when the account names read returns no data and no error', async () => {
+    results.accounts = { data: null, error: null }
+    await expect(render()).rejects.toThrow('could not read account names: read returned no data and no error')
+  })
+
   it('fails loudly when the categories read fails', async () => {
     results.categories = { data: null, error: { message: 'permission denied' } }
     await expect(render()).rejects.toThrow(/could not read categories: permission denied/)

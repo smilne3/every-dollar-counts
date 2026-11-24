@@ -67,7 +67,9 @@ async function readAccounts(supabase: Supabase) {
   // Zero accounts renders "Connect your first account". A household with eleven of them being told
   // it has none is not a smaller failure than an error message, it is a more convincing one (#46).
   if (error) throw new Error(`could not read accounts: ${error.message}`)
-  return data ?? []
+  // An empty response body comes back as no data and no error. That's a failed read too, not "none" (#222).
+  if (!data) throw new Error('could not read accounts: read returned no data and no error')
+  return data
 }
 
 // The window passes PostgREST's 1,000-row cap: six months alone held 908 rows on 2026-10-05, and
@@ -90,7 +92,9 @@ async function readBudgets(supabase: Supabase) {
   // A failed read here reads as "you have not set any budgets", so the tile's budget footnote
   // disappears rather than reporting that it could not be worked out.
   if (error) throw new Error(`could not read budgets: ${error.message}`)
-  return data ?? []
+  // An empty response body comes back as no data and no error. That's a failed read too, not "none" (#222).
+  if (!data) throw new Error('could not read budgets: read returned no data and no error')
+  return data
 }
 
 async function readRecentTxns(supabase: Supabase) {
@@ -103,7 +107,9 @@ async function readRecentTxns(supabase: Supabase) {
     .limit(6)
   // Otherwise a failed read renders "No transactions yet" to a household with 696 of them.
   if (error) throw new Error(`could not read recent transactions: ${error.message}`)
-  return data ?? []
+  // An empty response body comes back as no data and no error. That's a failed read too, not "none" (#222).
+  if (!data) throw new Error('could not read recent transactions: read returned no data and no error')
+  return data
 }
 
 export default async function DashboardPage({
