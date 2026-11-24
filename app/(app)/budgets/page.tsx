@@ -30,14 +30,10 @@ async function readBudgets(supabase: Supabase) {
   return { budgets, readAt }
 }
 
-export default async function BudgetsPage() {
-  const supabase = await createClient()
-
-  // The household beside its timezone, and its banks beside the categories below: the bank list
-  // the "isn't syncing" banner needs (#135) is two reads, and this way it adds no wait of its own.
-  const [tz, householdId] = await Promise.all([householdTimezone(), currentHouseholdId()])
-  // The household's month, not the server's: at 8pm US Eastern the server is already tomorrow, so
-  // on the last evening of a month every bar on this page emptied four hours early (#73).
+// The household's month, not the server's: at 8pm US Eastern the server is already tomorrow, so on
+// the last evening of a month every bar on this page emptied four hours early (#73). Paged, so the
+// month cannot silently pass the 1,000-row cap (#69).
+async function readMonth(supabase: Supabase, tz: string) {
   const today = todayIn(tz)
   const year = Number(today.slice(0, 4))
   const month = Number(today.slice(5, 7))
@@ -46,17 +42,6 @@ export default async function BudgetsPage() {
   // without any local zone involved.
   const next = new Date(Date.UTC(year, month, 1))
   const nextMonthStart = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-01`
-
-  // Both throw on a failed read: with no categories the page would render as though the household
-  // had never set any up, and with no banks every bank would look healthy (#46). An account with no
-  // household has no banks, and none is read.
-  const [data, items] = await Promise.all([
-    fetchCategoryContext(),
-    householdId ? listItemsForHousehold(householdId) : [],
-  ])
-  const categoryNames = spendingCategoryNames(data.categories)
-
-  // Paged, so the month cannot silently pass the 1,000-row cap (#69).
   const { data: txns, error: txnsError } = await readAllRows(() =>
     supabase
       .from('transactions')
@@ -67,8 +52,30 @@ export default async function BudgetsPage() {
   )
   // Every bar would read empty — indistinguishable from a month where nothing was spent (#46).
   if (txnsError) throw new Error(`could not read transactions: ${txnsError.message}`)
+  return txns
+}
 
-  const { budgets, readAt } = await readBudgets(supabase)
+export default async function BudgetsPage() {
+  const supabase = await createClient()
+
+  // Every read starts as soon as what it needs is known, and none waits for one it doesn't need
+  // (#226, as #225 did for the Dashboard). The categories and the limits need nothing; the month's
+  // transactions need only the timezone; the banks the "isn't syncing" banner reads (#135) need only
+  // the household. One Promise.all over all of them, so the first failure fails the page at once,
+  // and none is left unhandled while another is awaited.
+  //
+  // Each throws on a failed read: with no categories the page would render as though the household
+  // had never set any up, with no banks every bank would look healthy, and with no transactions
+  // every bar would read empty (#46). An account with no household has no banks, and none is read.
+  const month = householdTimezone().then((tz) => readMonth(supabase, tz))
+  const banks = currentHouseholdId().then((householdId) => (householdId ? listItemsForHousehold(householdId) : []))
+  const [data, items, { budgets, readAt }, txns] = await Promise.all([
+    fetchCategoryContext(),
+    banks,
+    readBudgets(supabase),
+    month,
+  ])
+  const categoryNames = spendingCategoryNames(data.categories)
 
   // The reimbursable map is built straight from this page's own transaction rows — see
   // buildSpendContext.
