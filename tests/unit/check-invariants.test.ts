@@ -382,6 +382,89 @@ describe('tap-target', () => {
     })
   })
 
+  // #209: Button renders a <button> with buttonClass(variant, size, className), so its floor comes
+  // from buttonClass and each call site adds classes to it. What a call site adds is checked as a
+  // <button>'s would be: nothing below md may cancel the floor.
+  describe('Button call sites (#209)', () => {
+    const IMPORT = `import { Button } from '@/components/ui/Button'\n`
+    const at = (attrs: string) => tap(`${IMPORT}const b = <Button ${attrs}>Save</Button>`)
+
+    it.each([
+      ['no classes', ''],
+      ['a width', 'className="w-full"'],
+      ['margins', 'variant="secondary" className="mr-auto ml-auto"'],
+      ['a min-height from md', 'className="md:min-h-0 lg:min-h-[60px]"'],
+      ['a height from md', 'size="sm" className="md:h-8"'],
+      ['a spread before its classes', '{...rest} className="w-full"'],
+    ])('passes one with %s', (_name, attrs) => {
+      expect(at(attrs)).toEqual([])
+    })
+
+    // The ways the floor can lose below md, in the order a phone reads them.
+    it.each([
+      ['another min-height', 'min-h-0'],
+      ['another min-height under sm:', 'sm:min-h-0'],
+      ['another min-height under max-md:', 'max-md:min-h-0'],
+      ['another min-height on a state', 'active:min-h-[20px]'],
+      ['a display that leaves no box', 'contents'],
+      // A <button> lays `inline` out as inline-block, but buttonClass styles <a> and <Link> too, and
+      // a call site can't show which control is behind it. So the stricter rule, as for any <a>.
+      ['an inline display', 'inline'],
+    ])('fires on %s, naming it', (_name, token) => {
+      const found = tap(`${IMPORT}export function X() {\n  return <Button className="w-full ${token}">Save</Button>\n}`)
+      expect(found.map((f) => [f.check, f.line])).toEqual([['tap-target', 3]])
+      expect(found[0].message).toContain(`\`${token}\``)
+      expect(found[0].message).toContain('<Button>')
+    })
+
+    // #209's brief listed `h-*` too. It can't cancel the floor: min-height wins over height and
+    // max-height (CSS 2.1 §10.7), so a <button> with min-height 44px and height 24px is 44px tall.
+    // Measured in Chrome on 2026-11-24 for height, max-height and display: inline, in a flex column
+    // and in a line of text: 44px each time. Only another min-height (4px) or `contents` (0px) lost it.
+    it.each(['h-6', 'max-md:h-8', 'max-h-6', 'size-6'])('passes `%s`, which leaves the floor in force', (token) => {
+      expect(at(`className="${token}"`)).toEqual([])
+    })
+
+    it('reads every branch of a condition, and the strings in a template', () => {
+      expect(checks(at("className={open ? 'w-full' : 'min-h-0'}"))).toEqual(['tap-target'])
+      expect(checks(at("className={`w-full ${open && 'min-h-0'}`}"))).toEqual(['tap-target'])
+      expect(at("className={`w-full ${wide ? 'px-6' : ''} ${last && 'ml-auto'}`}")).toEqual([])
+    })
+
+    // A name, a call, or a spread with no className after it can hold any class, so a call site the
+    // check can't read fails rather than going unchecked.
+    it.each([
+      ['a name', 'className={classes}'],
+      ['a name in a template', 'className={`w-full ${classes}`}'],
+      ['a call', "className={cn('w-full')}"],
+      ['a name with a fallback', "className={classes || 'w-full'}"],
+      ['a name with a default', "className={classes ?? 'w-full'}"],
+      ['a spread and no className', '{...rest}'],
+    ])('fails one whose classes it cannot read: %s', (_name, attrs) => {
+      const found = at(attrs)
+      expect(checks(found)).toEqual(['tap-target'])
+      expect(found[0].message).toContain('buttonClass')
+    })
+
+    it('follows it under another name, and through a namespace', () => {
+      expect(checks(tap(`import { Button as B } from './ui/Button'\nconst b = <B className="min-h-0">Save</B>`))).toEqual(['tap-target'])
+      // Followed, it gets buttonClass's floor; not followed, it would fail for having none.
+      expect(tap(`import { Button as B } from './ui/Button'\nconst b = <B className="w-full">Save</B>`)).toEqual([])
+      expect(checks(tap(`import * as UI from '@/components/ui/Button'\nconst b = <UI.Button className="min-h-0">Save</UI.Button>`))).toEqual(['tap-target'])
+      expect(tap(`import * as UI from '@/components/ui/Button'\nconst b = <UI.Button className="w-full">Save</UI.Button>`)).toEqual([])
+    })
+
+    it('passes one under an element hidden below md', () => {
+      expect(tap(`${IMPORT}<div className="hidden md:flex"><Button className="min-h-0">Save</Button></div>`)).toEqual([])
+    })
+
+    it('fails the component taken as a value, which it cannot follow to where it is rendered', () => {
+      const found = tap(`${IMPORT}const Save = Button`)
+      expect(checks(found)).toEqual(['tap-target'])
+      expect(found[0].message).toContain('PASS_THROUGH')
+    })
+  })
+
   // A component in PASS_THROUGH is named by its file. There, the control whose classes are exactly
   // the className it was given passes, as its call sites are checked instead; any other control in
   // the file is checked as usual.
@@ -435,11 +518,46 @@ export function Other() {
       expect(found[0].message).toMatch(/^does not parse as TSX/)
     })
 
-    it('names each real component by its file and its export', () => {
+    // #209: with `via`, the control takes the classes through a shared class's call, as its last
+    // argument, and each call site's classes are checked on top of what that call gives.
+    describe('via a shared class', () => {
+      const viaButton = [{ file: WRAP, name: 'Wrap', via: 'buttonClass' }]
+
+      it('passes the control in its file that hands the classes it was given to the call', () => {
+        const src = `${BUTTON}export function Wrap({ className = '' }: { className?: string }) {
+  return <button type="button" className={buttonClass('ghost', 'sm', className)}>x</button>
+}
+`
+        expect(checkTapTargets(file(WRAP, src), [], { passThrough: viaButton })).toEqual([])
+      })
+
+      // The bare `{className}` is also a control with no floor of its own, and fails as one.
+      it.each([
+        ['no className', "buttonClass('ghost', 'sm')", 1],
+        ['the className inside more classes', "buttonClass('ghost', 'sm', `${className} w-full`)", 1],
+        ['no call', 'className', 2],
+      ])('reports an entry whose file hands the call %s', (_name, control, count) => {
+        const src = `${BUTTON}export function Wrap({ className = '' }: { className?: string }) {\n  return <button className={${control}}>x</button>\n}\n`
+        const found = checkTapTargets(file(WRAP, src), [], { passThrough: viaButton })
+        expect(found).toHaveLength(count)
+        const entry = found.filter((f) => f.line === 1)
+        expect(entry.map((f) => [f.check, f.file])).toEqual([['tap-target', WRAP]])
+        expect(entry[0].message).toContain('className={buttonClass(…, className)}')
+      })
+
+      it('checks its call sites on top of what the call gives', () => {
+        const at = (classes: string) => checkTapTargets(file(C, `import { Wrap } from '@/components/Wrap'\nconst w = <Wrap className="${classes}" />`), [], { passThrough: viaButton })
+        expect(at('w-full')).toEqual([])
+        expect(checks(at('w-full min-h-0'))).toEqual(['tap-target'])
+      })
+    })
+
+    it('names each real component by its file and its export, and a shared call as its via', () => {
       expect(PASS_THROUGH.length).toBeGreaterThan(0)
       for (const p of PASS_THROUGH) {
         expect(p.file).toMatch(/^(app|components)\/.+\.tsx$/)
         expect(p.name).toMatch(/^[A-Z][A-Za-z0-9]*$/)
+        if ('via' in p) expect(SHARED_CLASSES.filter((c) => c.call).map((c) => c.name)).toContain(p.via)
       }
     })
   })
@@ -536,7 +654,12 @@ export function Other() {
     const button = (attrs: string) =>
       `export function buttonClass(variant = 'primary', size = 'md', extra = '') {\n  return ''\n}\nexport function Button({ className = '', ...props }) {\n  return <button ${attrs} />\n}\n`
     expect(checkTapTargets(file(B, button('{...props} className={buttonClass(variant, size, className)}')), [])).toEqual([])
-    expect(checks(checkTapTargets(file(B, button('className={buttonClass(variant, size, className)} {...props}')), []))).toEqual(['tap-target'])
+    // The spread, and Button's PASS_THROUGH entry (#209): a control whose classes a spread can replace
+    // doesn't take the ones it was given, so its call sites can't be read in its place.
+    const found = checkTapTargets(file(B, button('className={buttonClass(variant, size, className)} {...props}')), [])
+    expect(found.map((f) => [f.check, f.line])).toEqual([['tap-target', 5], ['tap-target', 1]])
+    expect(found[0].message).toContain('spreads {...props} after its className')
+    expect(found[1].message).toContain('PASS_THROUGH names Button here')
   })
 
   // Controls shown only from md up are not a phone's, and §7's 44px is a phone rule.
